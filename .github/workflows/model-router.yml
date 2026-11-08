@@ -6,7 +6,9 @@ on:
       - "core/model_router.py"
       - "core/gemini.py"
       - "core/_model_router_tests.py"
-      - "core/_capability_tests.py"\n      - "core/_calendar_tests.py"\n      - "plugins/google_calendar.py"
+      - "core/_capability_tests.py"
+      - "core/_calendar_tests.py"
+      - "plugins/google_calendar.py"
       - "core/echo.py"
       - "memory/conversation_history.py"
       - "plugins/conversation_history.py"
@@ -21,7 +23,8 @@ on:
   push:
     branches:
       - "feature/multi-model-task-router"
-      - "feature/jarvis-capability-pack"\n      - "feature/google-calendar-local-oauth"
+      - "feature/jarvis-capability-pack"
+      - "feature/google-calendar-local-oauth"
 
 jobs:
   router:
@@ -40,3 +43,5 @@ jobs:
         run: python -m core._model_router_tests
       - name: Run offline capability tests
         run: python -m core._capability_tests
+      - name: Run offline Google Calendar tests
+        run: python -m core._calendar_tests
