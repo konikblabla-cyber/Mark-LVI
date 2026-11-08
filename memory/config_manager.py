@@ -640,6 +640,9 @@ _MODEL_ROUTER_DEFAULTS = {
     "daily_calls": 40,
     "daily_input_chars": 200000,
     "max_input_chars": 50000,
+    "retry_on_transient": False,
+    "second_opinion": False,
+    "review_min_chars": 2500,
 }
 
 
@@ -652,11 +655,14 @@ def get_model_router_config() -> dict:
     out["enabled"] = bool(out.get("enabled", False))
     out["zero_cost_confirmed"] = bool(out.get("zero_cost_confirmed", False))
     out["gemma_vision"] = bool(out.get("gemma_vision", True))
+    out["retry_on_transient"] = bool(out.get("retry_on_transient", False))
+    out["second_opinion"] = bool(out.get("second_opinion", False))
     out["gemma_model"] = str(out.get("gemma_model") or _MODEL_ROUTER_DEFAULTS["gemma_model"]).strip()
     for key, default, maximum in (
         ("daily_calls", 40, 500),
         ("daily_input_chars", 200000, 5000000),
         ("max_input_chars", 50000, 200000),
+        ("review_min_chars", 2500, 20000),
     ):
         try:
             out[key] = max(0, min(int(out.get(key, default)), maximum))
