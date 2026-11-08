@@ -5878,6 +5878,10 @@ class MainWindow(QMainWindow):
         self._voice_interrupt_btn.clicked.connect(self._toggle_voice_interrupt)
         self._refresh_voice_interrupt_btn()
 
+        self._desktop_awareness_btn = _row(QPushButton())
+        self._desktop_awareness_btn.clicked.connect(self._toggle_desktop_awareness)
+        self._refresh_desktop_awareness_btn()
+
         self._hud_btn = _row(QPushButton())
         self._hud_btn.clicked.connect(self._toggle_hud_style)
         self._refresh_hud_btn()
@@ -6836,6 +6840,36 @@ class MainWindow(QMainWindow):
             save_voice_interrupt_enabled(False)
             self._log.append_log(f"ERR: Voice interrupt setting failed — {exc}")
         self._refresh_voice_interrupt_btn()
+
+    def _refresh_desktop_awareness_btn(self):
+        from memory.config_manager import get_desktop_awareness_enabled
+        enabled = get_desktop_awareness_enabled()
+        style = (f"QPushButton {{ background: #001a08; color: {C.GREEN}; "
+                 f"border: 1px solid {C.GREEN_D}; border-radius: 3px; text-align: left; padding: 0 8px; }}"
+                 if enabled else
+                 f"QPushButton {{ background: transparent; color: {C.TEXT_DIM}; "
+                 f"border: 1px solid {C.BORDER}; border-radius: 3px; text-align: left; padding: 0 8px; }}")
+        self._desktop_awareness_btn.setText(
+            "🖥  DESKTOP CONTEXT: ON" if enabled else "🖥  DESKTOP CONTEXT: OFF")
+        self._desktop_awareness_btn.setStyleSheet(style)
+        self._desktop_awareness_btn.setToolTip(
+            "When ON, the existing proactive check may receive only the foreground "
+            "application's executable name after 15 minutes without speech. No "
+            "window title, screenshot, keystrokes, clipboard or document text is read. "
+            "The local activity guard still avoids interrupting keyboard/mouse use "
+            "and fullscreen apps."
+        )
+
+    def _toggle_desktop_awareness(self):
+        from memory.config_manager import (
+            get_desktop_awareness_enabled, save_desktop_awareness_enabled,
+        )
+        want = not get_desktop_awareness_enabled()
+        try:
+            save_desktop_awareness_enabled(want)
+        except Exception as exc:
+            self._log.append_log(f"ERR: Desktop awareness setting failed — {exc}")
+        self._refresh_desktop_awareness_btn()
 
     def _refresh_hud_btn(self):
         from memory.config_manager import get_hud_style
