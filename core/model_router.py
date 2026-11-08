@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 NOT_ROUTED = object()
-GEMMA_VISION_MODEL = "gemma-4-26b-a4b-it"
+GEMMA_VISION_MODEL = "gemma-4-26b-a4b-it"  # editable in ENGINE & PROVIDERS
 
 class RouterError(RuntimeError):
     """A routed task could not safely be sent to its configured model."""
@@ -131,7 +131,7 @@ def classify_task(contents, tier: str = "smart", task_type: str | None = None) -
     return ""
 
 
-def _provider_for(task: str) -> str:
+def _provider_for(task: str, provider_override: str = "") -> str:
     from memory.config_manager import get_coding_provider, get_sidecar_provider
 
     sidecar = get_sidecar_provider()
@@ -359,7 +359,7 @@ def _provider_call(provider_id: str, contents, config, timeout_ms: int,
 
 
 def dispatch(contents, tier: str = "smart", config=None,
-             timeout_ms: int = 10_000, task_type: str | None = None):
+             timeout_ms: int = 10_000, task_type: str | None = None,\n             provider_override: str = ""):
     """Return NOT_ROUTED when disabled/unmatched; otherwise a routed response.
 
     Once enabled, a classified task never drops back to the legacy Gemini
@@ -381,7 +381,7 @@ def dispatch(contents, tier: str = "smart", config=None,
             target = GEMMA_VISION_MODEL
             response = _gemma_call(contents, config, timeout_ms)
         else:
-            provider_id = _provider_for(task)
+            provider_id = _provider_for(task, provider_override)
             if not provider_id:
                 raise RouterError(f"no provider assigned to the {task} route")
             target = provider_id
