@@ -2740,7 +2740,7 @@ class ProvidersOverlay(_HudOverlay):
         from memory.config_manager import (get_coding_provider, get_pipeline,
                                            get_provider_config,
                                            get_provider_mode, get_sidecar_first,
-                                           get_sidecar_provider)
+                                           get_sidecar_provider, get_model_router_config)
         from providers import registry
 
         self._registry = registry
@@ -2860,6 +2860,7 @@ class ProvidersOverlay(_HudOverlay):
         self._sidecar = self._normalise(get_sidecar_provider(), "llm")
         self._coding = self._normalise(get_coding_provider(), "llm")
         self._sidecar_first = get_sidecar_first()
+        self._router_cfg = get_model_router_config()
         self._rebuild_body()
 
         outer.addWidget(self._footer)
@@ -3244,6 +3245,7 @@ class ProvidersOverlay(_HudOverlay):
                 "through another company's model.", 7, C.TEXT_DIM))
             self._body_lay.addWidget(w)
 
+        self._body_lay.addWidget(self._router_box_widget())
         self._body_lay.addWidget(self._sidecar_box_widget())
         self._body_lay.addWidget(self._coding_box_widget())
         self._body_lay.addStretch(1)
@@ -3455,6 +3457,38 @@ class ProvidersOverlay(_HudOverlay):
         self._more[pid] = not self._more.get(pid)
         self._remember_edits()
         QTimer.singleShot(0, self._rebuild_body)
+
+    def _router_box_widget(self) -> QWidget:
+        """Opt-in task routing and local hard limits for background requests."""
+        from memory.config_manager import get_model_router_config
+        cfg = get_model_router_config()
+        head = self._label("🧭  TASK ROUTER", 9, C.PRI, bold=True)
+        w, lay = self._box([head])
+        lay.addWidget(self._label(
+            "Routes one-shot tasks only. Voice conversation stays on its current engine. "
+            "Vision uses the configured Gemma model; fast tasks use BACKGROUND REQUESTS; "
+            "reasoning and code use CODING. No automatic cross-provider fallback.",
+            7, C.TEXT_DIM))
+        self._router_enabled_combo = self._combo()
+        self._router_enabled_combo.addItem("Off — keep current MARK routing", False)
+        self._router_enabled_combo.addItem("On — route tasks by type", True)
+        self._router_enabled_combo.setCurrentIndex(1 if cfg.get("enabled") else 0)
+        lay.addWidget(self._router_enabled_combo)
+
+        lay.addWidget(self._label("Gemma vision model ID", 7, C.TEXT_DIM))
+        self._gemma_model_edit = self._line(str(cfg.get("gemma_model") or "gemma-4-26b-a4b-it"))
+        lay.addWidget(self._gemma_model_edit)
+
+        lay.addWidget(self._label("Daily request limit (local hard stop)", 7, C.TEXT_DIM))
+        self._router_calls_edit = self._line(str(cfg.get("daily_calls", 40)))
+        lay.addWidget(self._router_calls_edit)
+        lay.addWidget(self._label("Daily input character limit", 7, C.TEXT_DIM))
+        self._router_chars_edit = self._line(str(cfg.get("daily_input_chars", 200000)))
+        lay.addWidget(self._router_chars_edit)
+        lay.addWidget(self._label("Maximum characters per request", 7, C.TEXT_DIM))
+        self._router_call_chars_edit = self._line(str(cfg.get("max_input_chars", 50000)))
+        lay.addWidget(self._router_call_chars_edit)
+        return w
 
     def _sidecar_box_widget(self) -> QWidget:
         head = self._label("⚡  BACKGROUND REQUESTS", 9, C.PRI, bold=True)
@@ -3744,6 +3778,20 @@ class ProvidersOverlay(_HudOverlay):
 
         # ONE write, not five. See save_providers for what the five cost.
         creds = {sid: self._values(sid) for sid in list(self._edits)}
+
+        from memory.config_manager import save_model_router_config
+        try:
+            router_values = {
+                "enabled": bool(self._router_enabled_combo.currentData()),
+                "gemma_model": self._gemma_model_edit.text().strip() or "gemma-4-26b-a4b-it",
+                "daily_calls": int(self._router_calls_edit.text().strip()),
+                "daily_input_chars": int(self._router_chars_edit.text().strip()),
+                "max_input_chars": int(self._router_call_chars_edit.text().strip()),
+            }
+        except (ValueError, AttributeError):
+            self._footer.setText("Router limits must be whole numbers. Nothing was saved.")
+            return
+        save_model_router_config(router_values)
 
         save_providers(
             mode=self._mode,
