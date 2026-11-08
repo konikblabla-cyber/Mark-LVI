@@ -378,9 +378,10 @@ def dispatch(contents, tier: str = "smart", config=None,
     ladder. Missing routes and errors raise RouterError instead.
     """
     settings = _settings()
-    if (not settings.get("enabled") or not settings.get("zero_cost_confirmed")
-            or tier == "search"):
+    if not settings.get("enabled") or tier == "search":
         return NOT_ROUTED
+    if not settings.get("zero_cost_confirmed"):
+        raise RouterError("enable only after verifying every selected API is on a $0 plan with no payment method")
 
     task = classify_task(contents, tier, task_type)
     if not task:
