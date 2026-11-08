@@ -1098,7 +1098,21 @@ Return ONLY JSON: {{"problems": [{{"path": "file that must change", "problem": "
 Return {{"problems": []}} when everything fits.
 
 JSON:"""
-    resp = _get_model(MODEL_PLANNER).generate_content(prompt)
+    # With the task router enabled, use the other configured endpoint as
+    # an independent reviewer. Never ask the same selected coding model to
+    # review its own changes and call that a second opinion.
+    from core import gemini, model_router
+    if model_router.is_enabled():
+        if not model_router.has_independent_reviewer():
+            return {}
+        resp = gemini.call(
+            prompt, tier=gemini.SMART, timeout_ms=90_000,
+            task_type="review",
+        )
+        if resp is None:
+            raise RuntimeError("independent reviewer returned no answer")
+    else:
+        resp = _get_model(MODEL_PLANNER).generate_content(prompt)
     out: dict[str, str] = {}
     for item in (_json_object(resp.text).get("problems") or []):
         if isinstance(item, dict) and item.get("path") in written and item.get("problem"):
