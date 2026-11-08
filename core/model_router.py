@@ -147,7 +147,7 @@ def _provider_for(task: str, provider_override: str = "") -> str:
     from memory.config_manager import get_coding_provider, get_sidecar_provider
 
     sidecar = get_sidecar_provider()
-    coding = get_coding_provider()
+    coding = provider_override or get_coding_provider()
     if task == "fast":
         return sidecar
     if task in ("reasoning", "coding"):
@@ -371,7 +371,8 @@ def _provider_call(provider_id: str, contents, config, timeout_ms: int,
 
 
 def dispatch(contents, tier: str = "smart", config=None,
-             timeout_ms: int = 10_000, task_type: str | None = None,\n             provider_override: str = ""):
+             timeout_ms: int = 10_000, task_type: str | None = None,
+             provider_override: str = ""):
     """Return NOT_ROUTED when disabled/unmatched; otherwise a routed response.
 
     Once enabled, a classified task never drops back to the legacy Gemini
@@ -394,8 +395,8 @@ def dispatch(contents, tier: str = "smart", config=None,
     target = ""
     try:
         if task == "vision" and settings.get("gemma_vision", True):
-            target = GEMMA_VISION_MODEL
-            response = _gemma_call(contents, config, timeout_ms)
+            target = str(settings.get("gemma_model") or GEMMA_VISION_MODEL)
+            response = _gemma_call(contents, config, timeout_ms, target)
         else:
             provider_id = _provider_for(task, provider_override)
             if not provider_id:
