@@ -52,7 +52,7 @@ def _get_model(model_name: str = gemini.SMART):
         def generate_content(self, contents):
             resp = gemini.call(contents, tier=model_name,
                                timeout_ms=180000 if provider else 60000,
-                               provider=provider)
+                               provider=provider, task_type="coding")
             if resp is None:
                 raise RuntimeError("every model on the ladder failed")
             return resp
