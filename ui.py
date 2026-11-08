@@ -3499,6 +3499,28 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._label("Maximum characters per request", 7, C.TEXT_DIM))
         self._router_call_chars_edit = self._line(str(cfg.get("max_input_chars", 50000)))
         lay.addWidget(self._router_call_chars_edit)
+
+        lay.addWidget(self._label(
+            "Retry once on temporary outage (429 / 5xx / network timeout), using the other configured provider.",
+            7, C.TEXT_DIM))
+        self._router_retry_combo = self._combo()
+        self._router_retry_combo.addItem("Off — stop when the chosen provider fails", False)
+        self._router_retry_combo.addItem("On — one bounded retry, never more", True)
+        self._router_retry_combo.setCurrentIndex(1 if cfg.get("retry_on_transient") else 0)
+        lay.addWidget(self._router_retry_combo)
+
+        lay.addWidget(self._label(
+            "Independent second opinion for complex reasoning only. Uses the other provider "
+            "(BACKGROUND REQUESTS vs CODING); same-provider reviews are skipped.",
+            7, C.TEXT_DIM))
+        self._router_review_combo = self._combo()
+        self._router_review_combo.addItem("Off — one model per task", False)
+        self._router_review_combo.addItem("On — critic only for complex/long reasoning", True)
+        self._router_review_combo.setCurrentIndex(1 if cfg.get("second_opinion") else 0)
+        lay.addWidget(self._router_review_combo)
+        self._router_review_chars_edit = self._line(str(cfg.get("review_min_chars", 2500)))
+        self._router_review_chars_edit.setPlaceholderText("Minimum input length for second opinion")
+        lay.addWidget(self._router_review_chars_edit)
         return w
 
     def _sidecar_box_widget(self) -> QWidget:
@@ -3805,6 +3827,9 @@ class ProvidersOverlay(_HudOverlay):
                 "daily_calls": int(self._router_calls_edit.text().strip()),
                 "daily_input_chars": int(self._router_chars_edit.text().strip()),
                 "max_input_chars": int(self._router_call_chars_edit.text().strip()),
+                "retry_on_transient": bool(self._router_retry_combo.currentData()),
+                "second_opinion": bool(self._router_review_combo.currentData()),
+                "review_min_chars": int(self._router_review_chars_edit.text().strip()),
             }
         except (ValueError, AttributeError):
             self._footer.setText("Router limits must be whole numbers. Nothing was saved.")
