@@ -41,6 +41,19 @@ class RouterClassificationTests(unittest.TestCase):
     def test_smart_tier_is_reasoning(self):
         self.assertEqual(router.classify_task("compare these options", "smart"), "reasoning")
 
+    def test_code_review_is_routed_to_review_role(self):
+        self.assertEqual(router.classify_task("Please review this code for security issues"), "review")
+        self.assertEqual(router.classify_task("Sprawdź kod pod kątem bezpieczeństwa"), "review")
+
+    def test_complex_reasoning_is_detected_for_second_opinion(self):
+        settings = {"second_opinion": True, "review_min_chars": 2500}
+        self.assertTrue(router._needs_second_opinion(
+            "reasoning", "Review the architecture and security trade-offs", settings))
+        self.assertFalse(router._needs_second_opinion(
+            "reasoning", "What time is it?", settings))
+        self.assertFalse(router._needs_second_opinion(
+            "fast", "Review the architecture", settings))
+
 
 class RouterSafetyTests(unittest.TestCase):
     def test_budget_is_reserved_and_enforced(self):
@@ -101,6 +114,73 @@ class RouterSafetyTests(unittest.TestCase):
         self.assertIs(result, expected)
         self.assertEqual(call.call_args.args[0], "openai_compat@groq")
         self.assertEqual(call.call_args.args[4], "fast")
+
+    def test_transient_failure_retries_exactly_once_on_other_provider(self):
+        settings = {
+            "enabled": True, "zero_cost_confirmed": True,
+            "retry_on_transient": True, "second_opinion": False,
+            "daily_calls": 5, "daily_input_chars": 500, "max_input_chars": 100,
+        }
+        good = router.RouterReply("recovered")
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_reserve", return_value=5) as reserve, \
+             patch.object(router, "_provider_for", return_value="primary"), \
+             patch.object(router, "_alternate_provider", return_value="backup"), \
+             patch.object(router, "_provider_call",
+                          side_effect=[TimeoutError("request timed out"), good]) as call, \
+             patch.object(router, "_audit"):
+            result = router.dispatch("summarize this", tier="fast")
+        self.assertIs(result, good)
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(reserve.call_count, 2)
+
+    def test_auth_failure_does_not_retry(self):
+        settings = {
+            "enabled": True, "zero_cost_confirmed": True,
+            "retry_on_transient": True, "daily_calls": 5,
+            "daily_input_chars": 500, "max_input_chars": 100,
+        }
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_reserve", return_value=5), \
+             patch.object(router, "_provider_for", return_value="primary"), \
+             patch.object(router, "_alternate_provider", return_value="backup"), \
+             patch.object(router, "_provider_call", side_effect=RuntimeError("401 invalid API key")) as call, \
+             patch.object(router, "_audit"):
+            with self.assertRaises(router.RouterError):
+                router.dispatch("summarize this", tier="fast")
+        self.assertEqual(call.call_count, 1)
+
+    def test_second_opinion_can_improve_complex_reasoning(self):
+        settings = {
+            "enabled": True, "zero_cost_confirmed": True,
+            "second_opinion": True, "review_min_chars": 2500,
+            "daily_calls": 5, "daily_input_chars": 10000, "max_input_chars": 10000,
+        }
+        primary = router.RouterReply("The first draft.")
+        reviewer = router.RouterReply(
+            '{"verdict":"improve","issues":["missing limitation"],"answer":"The corrected answer."}')
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_reserve", return_value=20), \
+             patch.object(router, "_provider_for", return_value="coding-provider"), \
+             patch.object(router, "_alternate_provider", return_value="review-provider"), \
+             patch.object(router, "_provider_call", side_effect=[primary, reviewer]) as call, \
+             patch.object(router, "_audit"):
+            result = router.dispatch(
+                "Explain the security architecture trade-offs in detail.",
+                tier="smart")
+        self.assertEqual(result.text, "The corrected answer.")
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(call.call_args_list[1].args[0], "review-provider")
+
+    def test_json_output_is_verified(self):
+        with self.assertRaises(router.RouterError):
+            router._verify_response("reasoning", router.RouterReply("not JSON"),
+                                    {"response_mime_type": "application/json"})
+        self.assertEqual(
+            router._verify_response("reasoning", router.RouterReply('{"ok":true}'),
+                                     {"response_mime_type": "application/json"}),
+            '{"ok":true}',
+        )
 
     def test_enabled_router_does_not_fallback_on_missing_provider(self):
         with patch.object(router, "_settings", return_value={
