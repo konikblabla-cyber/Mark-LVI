@@ -64,6 +64,7 @@ from memory.memory_manager import (
 # system_status).
 from core import outcome
 from core.action_loader import strip_meta
+from core.desktop_context import get_desktop_context, desktop_is_idle
 from actions.screen_processor  import _capture_camera, _capture_screen
 from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.proactive         import ProactiveEngine
@@ -73,6 +74,7 @@ from actions.background_monitor import (
 from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
+    get_desktop_awareness_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
 )
@@ -2295,6 +2297,16 @@ class JarvisLive:
             if not self._proactive.should_trigger(self._last_user_speech):
                 continue
 
+            # Local activity sensing prevents voice check-ins from cutting across
+            # active keyboard/mouse work, games and fullscreen apps. On Windows
+            # this is a tiny OS query and never captures screen content.
+            desktop_awareness = get_desktop_awareness_enabled()
+            desktop_context = await asyncio.to_thread(
+                get_desktop_context, include_app=desktop_awareness
+            )
+            if desktop_is_idle(desktop_context) is False:
+                continue
+
             self._proactive.mark_triggered()
 
             try:
@@ -2305,6 +2317,7 @@ class JarvisLive:
                     memory       = memory,
                     monitors     = monitors or None,
                     recent_turns = recent_turns or None,
+                    desktop_context = desktop_context if desktop_awareness else None,
                 )
                 await self.session.send_client_content(
                     turns={"role": "user", "parts": [{"text": prompt}]},
