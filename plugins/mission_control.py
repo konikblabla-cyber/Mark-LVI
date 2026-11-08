@@ -200,12 +200,14 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     result = "\n\n".join(_format(m) for m in reversed(visible)) if visible else "No missions saved."
                 elif action == "next":
                     candidates = [selected] if selected else [m for m in missions if m.get("status") == "active"]
-                    item = next(( (m, s) for m in candidates if m for s in m["steps"] if s["status"] == "pending"), None)
+                    item = next(((m, step) for m in candidates if m
+                                 for step in [_next_open_step(m)] if step is not None), None)
                     if not item:
                         result = "There are no pending mission steps."
                     else:
                         m, step = item
-                        result = f"{m['title']} ({m['id']}): {step['id']} — {step['title']}"
+                        state = "RECOVERY REQUIRED" if step.get("status") == "running" else "NEXT"
+                        result = f"{state}: {m['title']} ({m['id']}): {step['id']} — {step['title']}"
                 else:
                     result = _format(selected) if selected else "Give me a mission_id to show its details."
             elif action == "begin_step":
