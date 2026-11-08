@@ -2295,6 +2295,16 @@ class JarvisLive:
             if not self._proactive.should_trigger(self._last_user_speech):
                 continue
 
+           
+            # Local guard: never interrupt active input or a fullscreen app.
+            # The foreground executable is shared only after explicit opt-in.
+            _desktop_opt_in = get_desktop_awareness_enabled()
+            _desktop_ctx = await asyncio.to_thread(
+                get_desktop_context, include_app=_desktop_opt_in
+            )
+            if desktop_is_idle(_desktop_ctx) is False:
+                continue
+
             self._proactive.mark_attempted()
 
             try:
@@ -2305,6 +2315,7 @@ class JarvisLive:
                     memory       = memory,
                     monitors     = monitors or None,
                     recent_turns = recent_turns or None,
+                    desktop_context = _desktop_ctx if _desktop_opt_in else None,
                 )
                 await self.session.send_client_content(
                     turns={"role": "user", "parts": [{"text": prompt}]},
