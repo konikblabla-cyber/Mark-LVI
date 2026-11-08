@@ -3476,9 +3476,9 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._router_enabled_combo)
 
         lay.addWidget(self._label(
-            "Cost safety: only confirm after disabling auto-top-ups and removing payment methods "
-            "at every provider. MARK cannot inspect provider billing settings; local limits do not "
-            "guarantee a $0 invoice.",
+            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash, and private local endpoints. "
+            "Groq GPT-OSS-120B is metered and blocked; other paid/custom cloud models are blocked too. "
+            "Still remove payment methods and auto-top-ups at providers.",
             7, C.ACC))
         self._router_free_combo = self._combo()
         self._router_free_combo.addItem("Not verified — router stays blocked", False)
@@ -3486,8 +3486,9 @@ class ProvidersOverlay(_HudOverlay):
         self._router_free_combo.setCurrentIndex(1 if cfg.get("zero_cost_confirmed") else 0)
         lay.addWidget(self._router_free_combo)
 
-        lay.addWidget(self._label("Gemma vision model ID", 7, C.TEXT_DIM))
+        lay.addWidget(self._label("Gemma 4 vision / critic model (verified $0 model ID)", 7, C.TEXT_DIM))
         self._gemma_model_edit = self._line(str(cfg.get("gemma_model") or "gemma-4-26b-a4b-it"))
+        self._gemma_model_edit.setReadOnly(True)
         lay.addWidget(self._gemma_model_edit)
 
         lay.addWidget(self._label("Daily request limit (local hard stop)", 7, C.TEXT_DIM))
@@ -3510,8 +3511,8 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._router_retry_combo)
 
         lay.addWidget(self._label(
-            "Independent second opinion for complex reasoning only. Uses the other provider "
-            "(BACKGROUND REQUESTS vs CODING); same-provider reviews are skipped.",
+            "Independent second opinion for complex reasoning and project-code reviews. "
+            "Uses Gemma 4 as the critic; ordinary requests still use one text model.",
             7, C.TEXT_DIM))
         self._router_review_combo = self._combo()
         self._router_review_combo.addItem("Off — one model per task", False)
