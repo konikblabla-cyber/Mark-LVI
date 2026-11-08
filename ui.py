@@ -3467,7 +3467,7 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._label(
             "Routes one-shot tasks only. Voice conversation stays on its current engine. "
             "Vision uses the configured Gemma model; fast tasks use BACKGROUND REQUESTS; "
-            "reasoning and code use CODING. No automatic cross-provider fallback.",
+            "reasoning and code use CODING. Optional: one retry on an outage and a critic for complex reasoning.",
             7, C.TEXT_DIM))
         self._router_enabled_combo = self._combo()
         self._router_enabled_combo.addItem("Off — keep current MARK routing", False)
