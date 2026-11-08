@@ -1381,18 +1381,62 @@ class JarvisLive:
                         img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
                         print(f"[Vision] 🖥️  Screen: {len(img_b):,} bytes")
                         _stall = "screen"
-                    self._pending_vision = (img_b, mime_t, user_text, angle)
-                    # The image is attached to this same exchange, so there is
-                    # nothing to stall for and nothing to announce. Asking for an
-                    # acknowledgement here is what produced two spoken answers —
-                    # the model filled that turn by answering the question from
-                    # imagination, then answered it again once it could see.
-                    result = (
-                        f"[VISION_ACTIVE] {_stall.capitalize()} captured and attached to this "
-                        f"same exchange. Do not acknowledge and do not answer yet — the image "
-                        f"is arriving with this result. Reply once, from what you actually see "
-                        f"in it."
-                    )
+                    # With task routing enabled, delegate the frame to Gemma
+                    # and return its grounded description as the tool result.
+                    # The live conversation remains on its current engine; only
+                    # this one-shot vision task is delegated. When routing is
+                    # off, preserve MARK's original same-session image injection.
+                    try:
+                        from core import model_router
+                        _route_vision = model_router.is_enabled()
+                    except Exception as _route_error:
+                        _route_vision = None
+                        result = f"Vision routing could not be checked safely: {type(_route_error).__name__}."
+                    if _route_vision is None:
+                        self._vision_busy = False
+                        if angle == "camera":
+                            self._vision_cam_active = False
+                            self.ui.stop_camera_stream()
+                    elif _route_vision:
+                        try:
+                            from core import gemini
+                            from google.genai import types as gtypes
+                            _image_part = gtypes.Part.from_bytes(
+                                data=img_b, mime_type=mime_t)
+                            _vision_reply = await loop.run_in_executor(
+                                None,
+                                lambda: gemini.call(
+                                    [user_text, _image_part],
+                                    tier=gemini.SMART,
+                                    timeout_ms=60000,
+                                    task_type="vision",
+                                ),
+                            )
+                            _vision_text = (getattr(_vision_reply, "text", None) or "").strip()
+                            result = ("Gemma's image analysis: " + _vision_text
+                                      if _vision_text else
+                                      "Gemma did not return an image analysis. No other model was tried.")
+                        except Exception as _vision_error:
+                            result = (f"Gemma image analysis failed ({type(_vision_error).__name__}). "
+                                      "No fallback model was tried.")
+                        finally:
+                            self._vision_busy = False
+                            if angle == "camera":
+                                self._vision_cam_active = False
+                                self.ui.stop_camera_stream()
+                    else:
+                        self._pending_vision = (img_b, mime_t, user_text, angle)
+                        # The image is attached to this same exchange, so there is
+                        # nothing to stall for and nothing to announce. Asking for an
+                        # acknowledgement here is what produced two spoken answers —
+                        # the model filled that turn by answering the question from
+                        # imagination, then answered it again once it could see.
+                        result = (
+                            f"[VISION_ACTIVE] {_stall.capitalize()} captured and attached to this "
+                            f"same exchange. Do not acknowledge and do not answer yet — the image "
+                            f"is arriving with this result. Reply once, from what you actually see "
+                            f"in it."
+                        )
 
             elif name == "close_camera":
                 self.ui.stop_camera_stream()

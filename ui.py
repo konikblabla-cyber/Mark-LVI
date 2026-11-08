@@ -2740,7 +2740,7 @@ class ProvidersOverlay(_HudOverlay):
         from memory.config_manager import (get_coding_provider, get_pipeline,
                                            get_provider_config,
                                            get_provider_mode, get_sidecar_first,
-                                           get_sidecar_provider)
+                                           get_sidecar_provider, get_model_router_config)
         from providers import registry
 
         self._registry = registry
@@ -2860,6 +2860,7 @@ class ProvidersOverlay(_HudOverlay):
         self._sidecar = self._normalise(get_sidecar_provider(), "llm")
         self._coding = self._normalise(get_coding_provider(), "llm")
         self._sidecar_first = get_sidecar_first()
+        self._router_cfg = get_model_router_config()
         self._rebuild_body()
 
         outer.addWidget(self._footer)
@@ -3244,6 +3245,7 @@ class ProvidersOverlay(_HudOverlay):
                 "through another company's model.", 7, C.TEXT_DIM))
             self._body_lay.addWidget(w)
 
+        self._body_lay.addWidget(self._router_box_widget())
         self._body_lay.addWidget(self._sidecar_box_widget())
         self._body_lay.addWidget(self._coding_box_widget())
         self._body_lay.addStretch(1)
@@ -3455,6 +3457,73 @@ class ProvidersOverlay(_HudOverlay):
         self._more[pid] = not self._more.get(pid)
         self._remember_edits()
         QTimer.singleShot(0, self._rebuild_body)
+
+    def _router_box_widget(self) -> QWidget:
+        """Opt-in task routing and local hard limits for background requests."""
+        from memory.config_manager import get_model_router_config
+        cfg = get_model_router_config()
+        head = self._label("🧭  TASK ROUTER", 9, C.PRI, bold=True)
+        w, lay = self._box([head])
+        lay.addWidget(self._label(
+            "Routes one-shot tasks only. Voice conversation stays on its current engine. "
+            "Vision uses the configured Gemma model; fast tasks use BACKGROUND REQUESTS; "
+            "reasoning and code use CODING. Optional: one retry on an outage and a critic for complex reasoning.",
+            7, C.TEXT_DIM))
+        self._router_enabled_combo = self._combo()
+        self._router_enabled_combo.addItem("Off — keep current MARK routing", False)
+        self._router_enabled_combo.addItem("On — route tasks by type", True)
+        self._router_enabled_combo.setCurrentIndex(1 if cfg.get("enabled") else 0)
+        lay.addWidget(self._router_enabled_combo)
+
+        lay.addWidget(self._label(
+            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash, and verified private local endpoints. "
+            "Groq GPT-OSS-120B is metered and blocked; other paid/custom cloud models are blocked too. "
+            "Gemma screenshots and prompts are sent to Google; its free-tier content may be used to improve products. "
+            "Remove payment methods and auto-top-ups at providers.",
+            7, C.ACC))
+        self._router_free_combo = self._combo()
+        self._router_free_combo.addItem("Not verified — router stays blocked", False)
+        self._router_free_combo.addItem("Verified: $0 plan, no payment method, no auto top-up", True)
+        self._router_free_combo.setCurrentIndex(1 if cfg.get("zero_cost_confirmed") else 0)
+        lay.addWidget(self._router_free_combo)
+
+        lay.addWidget(self._label("Gemma 4 vision / critic model (verified $0 model ID)", 7, C.TEXT_DIM))
+        self._gemma_model_edit = self._line(str(cfg.get("gemma_model") or "gemma-4-26b-a4b-it"))
+        self._gemma_model_edit.setReadOnly(True)
+        lay.addWidget(self._gemma_model_edit)
+
+        lay.addWidget(self._label("Daily request limit (local hard stop)", 7, C.TEXT_DIM))
+        self._router_calls_edit = self._line(str(cfg.get("daily_calls", 40)))
+        lay.addWidget(self._router_calls_edit)
+        lay.addWidget(self._label("Daily input character limit", 7, C.TEXT_DIM))
+        self._router_chars_edit = self._line(str(cfg.get("daily_input_chars", 200000)))
+        lay.addWidget(self._router_chars_edit)
+        lay.addWidget(self._label("Maximum characters per request", 7, C.TEXT_DIM))
+        self._router_call_chars_edit = self._line(str(cfg.get("max_input_chars", 50000)))
+        lay.addWidget(self._router_call_chars_edit)
+
+        lay.addWidget(self._label(
+            "Retry once on temporary outage (429 / 5xx / network timeout), using the other configured provider.",
+            7, C.TEXT_DIM))
+        self._router_retry_combo = self._combo()
+        self._router_retry_combo.addItem("Off — stop when the chosen provider fails", False)
+        self._router_retry_combo.addItem("On — one bounded retry, never more", True)
+        self._router_retry_combo.setCurrentIndex(1 if cfg.get("retry_on_transient") else 0)
+        lay.addWidget(self._router_retry_combo)
+
+        lay.addWidget(self._label(
+            "Independent second opinion for complex reasoning and project-code reviews. "
+            "Uses Gemma 4 as the critic; ordinary requests still use one text model.",
+            7, C.TEXT_DIM))
+        self._router_review_combo = self._combo()
+        self._router_review_combo.addItem("Off — one model per task", False)
+        self._router_review_combo.addItem("On — critic only for complex/long reasoning", True)
+        self._router_review_combo.setCurrentIndex(1 if cfg.get("second_opinion") else 0)
+        lay.addWidget(self._router_review_combo)
+        self._router_review_chars_edit = self._line(str(cfg.get("review_min_chars", 2500)))
+        self._router_review_chars_edit.setPlaceholderText("Minimum input length for second opinion")
+        lay.addWidget(self._router_review_chars_edit)
+        return w
 
     def _sidecar_box_widget(self) -> QWidget:
         head = self._label("⚡  BACKGROUND REQUESTS", 9, C.PRI, bold=True)
@@ -3744,6 +3813,30 @@ class ProvidersOverlay(_HudOverlay):
 
         # ONE write, not five. See save_providers for what the five cost.
         creds = {sid: self._values(sid) for sid in list(self._edits)}
+
+        from memory.config_manager import save_model_router_config
+        try:
+            router_enabled = bool(self._router_enabled_combo.currentData())
+            zero_cost_confirmed = bool(self._router_free_combo.currentData())
+            if router_enabled and not zero_cost_confirmed:
+                self._footer.setText(
+                    "Router blocked: verify $0 provider plans, remove payment methods and disable auto top-ups.")
+                return
+            router_values = {
+                "enabled": router_enabled,
+                "zero_cost_confirmed": zero_cost_confirmed,
+                "gemma_model": self._gemma_model_edit.text().strip() or "gemma-4-26b-a4b-it",
+                "daily_calls": int(self._router_calls_edit.text().strip()),
+                "daily_input_chars": int(self._router_chars_edit.text().strip()),
+                "max_input_chars": int(self._router_call_chars_edit.text().strip()),
+                "retry_on_transient": bool(self._router_retry_combo.currentData()),
+                "second_opinion": bool(self._router_review_combo.currentData()),
+                "review_min_chars": int(self._router_review_chars_edit.text().strip()),
+            }
+        except (ValueError, AttributeError):
+            self._footer.setText("Router limits must be whole numbers. Nothing was saved.")
+            return
+        save_model_router_config(router_values)
 
         save_providers(
             mode=self._mode,

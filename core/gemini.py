@@ -654,7 +654,7 @@ def _provider_call(model: str, contents, config, timeout_ms: int):
 
 def call(contents, tier: str = FAST, config=None,
          timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "",
-         provider: str = ""):
+         provider: str = "", task_type: str | None = None):
     """Run one generation, walking the ladder until one answers.
 
     Returns the SDK's own response object, so callers that need more than the
@@ -668,6 +668,16 @@ def call(contents, tier: str = FAST, config=None,
     # is tried first, with the reasoning ladder behind it. So a user's choice is
     # honoured, and a user's choice that is having an outage still degrades to
     # something that answers instead of to nothing.
+    # The optional task router owns classified jobs once enabled. A failed
+    # configured route must not silently fall back to another vendor.
+    from core import model_router
+    routed = model_router.dispatch(
+        contents, tier=tier, config=config, timeout_ms=timeout_ms,
+        task_type=task_type, provider_override=provider,
+    )
+    if routed is not model_router.NOT_ROUTED:
+        return routed
+
     ladder = _LADDERS.get(tier)
     if ladder is None:
         ladder = (tier,) + tuple(m for m in _LADDERS[SMART] if m != tier)
@@ -747,10 +757,11 @@ def call(contents, tier: str = FAST, config=None,
 
 
 def text(contents, tier: str = FAST, config=None,
-         timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "", default: str = "") -> str:
+         timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "", default: str = "",
+         task_type: str | None = None) -> str:
     """`call`, reduced to the reply text. `default` when nothing answered."""
     resp = call(contents, tier=tier, config=config,
-                timeout_ms=timeout_ms, key=key)
+                timeout_ms=timeout_ms, key=key, task_type=task_type)
     if resp is None:
         return default
     return (getattr(resp, "text", None) or "").strip() or default
@@ -794,11 +805,13 @@ def parse_json(raw: str, default=None):
 
 
 def as_json(contents, tier: str = FAST, config=None,
-            timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "", default=None):
+            timeout_ms: int = DEFAULT_TIMEOUT_MS, key: str = "", default=None,
+            task_type: str | None = None):
     """`text`, parsed as JSON, tolerating the fences, reasoning and prose a
     model wraps it in. `default` when nothing answered or the answer would not
     parse. See parse_json."""
-    raw = text(contents, tier=tier, config=config, timeout_ms=timeout_ms, key=key)
+    raw = text(contents, tier=tier, config=config, timeout_ms=timeout_ms,
+               key=key, task_type=task_type)
     if not raw:
         return default
     value = parse_json(raw, default=_MISSING)

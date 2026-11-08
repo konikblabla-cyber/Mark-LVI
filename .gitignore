@@ -48,3 +48,8 @@ desktop.ini
 logs/
 downloads/
 screenshots/
+
+# ── Model router local usage and audit records ────────────────────────────────
+config/model_router_usage.json
+config/model_router_audit.jsonl
+config/model_router_usage.json.tmp

@@ -627,3 +627,53 @@ def save_providers(mode: str = None, pipeline: dict = None, creds: dict = None,
 
     data["providers"] = block
     CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+
+
+# ── Task-aware multi-model router ────────────────────────────────────────────
+# Disabled by default: existing installations retain their exact routing until
+# the owner explicitly enables the new router in ENGINE & PROVIDERS.
+_MODEL_ROUTER_DEFAULTS = {
+    "enabled": False,
+    "zero_cost_confirmed": False,
+    "gemma_vision": True,
+    "gemma_model": "gemma-4-26b-a4b-it",
+    "daily_calls": 40,
+    "daily_input_chars": 200000,
+    "max_input_chars": 50000,
+    "retry_on_transient": False,
+    "second_opinion": False,
+    "review_min_chars": 2500,
+}
+
+
+def get_model_router_config() -> dict:
+    """Validated, bounded local safeguards for one-shot model routing."""
+    raw = load_api_keys().get("model_router")
+    raw = raw if isinstance(raw, dict) else {}
+    out = dict(_MODEL_ROUTER_DEFAULTS)
+    out.update(raw)
+    out["enabled"] = bool(out.get("enabled", False))
+    out["zero_cost_confirmed"] = bool(out.get("zero_cost_confirmed", False))
+    out["gemma_vision"] = bool(out.get("gemma_vision", True))
+    out["retry_on_transient"] = bool(out.get("retry_on_transient", False))
+    out["second_opinion"] = bool(out.get("second_opinion", False))
+    out["gemma_model"] = str(out.get("gemma_model") or _MODEL_ROUTER_DEFAULTS["gemma_model"]).strip()
+    for key, default, maximum in (
+        ("daily_calls", 40, 500),
+        ("daily_input_chars", 200000, 5000000),
+        ("max_input_chars", 50000, 200000),
+        ("review_min_chars", 2500, 20000),
+    ):
+        try:
+            out[key] = max(0, min(int(out.get(key, default)), maximum))
+        except (TypeError, ValueError):
+            out[key] = default
+    return out
+
+
+def save_model_router_config(values: dict) -> None:
+    """Merge router preferences without touching API keys or other settings."""
+    current = get_model_router_config()
+    current.update(values or {})
+    # Reuse the getter's validation before persisting.
+    _patch_config(model_router=current)

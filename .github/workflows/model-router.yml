@@ -1,0 +1,31 @@
+name: Model router checks
+
+on:
+  pull_request:
+    paths:
+      - "core/model_router.py"
+      - "core/gemini.py"
+      - "core/_model_router_tests.py"
+      - "memory/config_manager.py"
+      - "providers/llm_openai.py"
+      - "ui.py"
+      - "main.py"
+      - "actions/dev_agent.py"
+      - ".github/workflows/model-router.yml"
+  push:
+    branches:
+      - "feature/multi-model-task-router"
+
+jobs:
+  router:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py memory/config_manager.py providers/llm_openai.py ui.py main.py actions/dev_agent.py
+      - name: Run offline router tests
+        run: python -m core._model_router_tests
