@@ -115,7 +115,7 @@ class ConversationHistoryPluginTests(unittest.TestCase):
         from core import confirm
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "history.jsonl"
-            path.write_text('{"role":"user","text":"private"}\\n', encoding="utf-8")
+            path.write_text('{"role":"user","text":"private"}\n', encoding="utf-8")
             captured = {}
 
             def fake_request(key, title, detail, run):
@@ -173,7 +173,7 @@ class MissionControlTests(unittest.TestCase):
                 planned = mission.run({
                     "action": "plan", "title": "Create a project",
                     "goal": "Create and verify two project files",
-                    "steps": "Create the first file\\nCreate the second file",
+                    "steps": "Create the first file\nCreate the second file",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 self.assertNotIn("[MISSION_CONTINUE]", planned)
@@ -210,7 +210,7 @@ class MissionControlTests(unittest.TestCase):
                 planned = mission.run({
                     "action": "plan", "title": "Ordered job",
                     "goal": "Perform steps in order",
-                    "steps": "First step\\nSecond step",
+                    "steps": "First step\nSecond step",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 mission.run({"action": "start", "mission_id": mission_id})
