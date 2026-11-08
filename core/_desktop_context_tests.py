@@ -9,6 +9,7 @@ from core.desktop_context import (
     _clean_process_name,
     _idle_seconds_from_ticks,
     desktop_is_idle,
+    _is_fullscreen_rect,
 )
 
 
@@ -36,6 +37,15 @@ class DesktopContextTests(unittest.TestCase):
         self.assertTrue(desktop_is_idle({
             "available": True, "idle_seconds": 120.0,
         }))
+
+    def test_fullscreen_window_suppresses_proactive_check(self):
+        self.assertFalse(desktop_is_idle({
+            "available": True, "idle_seconds": 600.0, "fullscreen": True,
+        }))
+
+    def test_fullscreen_geometry_detects_borderless_fullscreen(self):
+        self.assertTrue(_is_fullscreen_rect(0, 0, 1920, 1080, 1920, 1080))
+        self.assertFalse(_is_fullscreen_rect(100, 100, 1200, 800, 1920, 1080))
 
     def test_missing_windows_sensor_preserves_other_platform_behaviour(self):
         self.assertIsNone(desktop_is_idle({"available": False}))
