@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import re
 import threading
+import tempfile
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -37,9 +39,20 @@ def _read() -> dict:
 
 def _write(data: dict) -> None:
     _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _DATA_PATH.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(_DATA_PATH)
+    fd, temp_name = tempfile.mkstemp(prefix=".missions-", suffix=".tmp",
+                                     dir=str(_DATA_PATH.parent))
+    tmp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            handle.write("\\n")
+        tmp.replace(_DATA_PATH)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _normalise_steps(raw) -> list[str]:
