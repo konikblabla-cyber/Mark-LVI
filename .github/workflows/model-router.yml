@@ -9,6 +9,8 @@ on:
       - "memory/config_manager.py"
       - "providers/llm_openai.py"
       - "ui.py"
+      - "main.py"
+      - "actions/dev_agent.py"
       - ".github/workflows/model-router.yml"
   push:
     branches:
@@ -24,6 +26,6 @@ jobs:
           python-version: "3.11"
       - name: Compile changed Python modules
         run: |
-          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py memory/config_manager.py providers/llm_openai.py ui.py
+          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py memory/config_manager.py providers/llm_openai.py ui.py main.py actions/dev_agent.py
       - name: Run offline router tests
         run: python -m core._model_router_tests
