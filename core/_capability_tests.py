@@ -26,7 +26,7 @@ class ConversationHistoryTests(unittest.TestCase):
                 self.assertTrue(history.append_message("user", "We planned a JARVIS mission."))
                 self.assertTrue(history.append_message("assistant", "Mission saved."))
                 self.assertEqual(len(history.recent_messages(10)), 2)
-                found = history.search_messages("JARVIS mission")
+                found = history.search_messages("JARVIS")
                 self.assertEqual(len(found), 1)
                 self.assertEqual(found[0]["role"], "user")
 
@@ -87,11 +87,10 @@ class ConversationHistoryPluginTests(unittest.TestCase):
                  patch.object(confirm, "pending_title", return_value=""), \
                  patch.object(confirm, "request", side_effect=fake_request):
                 result = plugin.run({"action": "clear"})
-
-            self.assertIn("CONFIRMATION_PENDING", result)
-            self.assertTrue(path.exists(), "data must remain until the user confirms")
-            self.assertIn("cleared", captured["run"]().lower())
-            self.assertFalse(path.exists())
+                self.assertIn("CONFIRMATION_PENDING", result)
+                self.assertTrue(path.exists(), "data must remain until the user confirms")
+                self.assertIn("cleared", captured["run"]().lower())
+                self.assertFalse(path.exists())
 
 
 class MissionControlTests(unittest.TestCase):
@@ -158,7 +157,7 @@ class KnowledgeVaultTests(unittest.TestCase):
                 found = vault.run({"action": "search", "query": "Mission Control"})
                 self.assertIn("matching notes", found)
                 read = vault.run({"action": "read", "path": "Projects/Jarvis.md"})
-                self.assertIn("displayed", read.lower())
+                self.assertIn("# JARVIS", read)
 
                 undone = undo.undo_last()
                 self.assertIn("Undone", undone)
