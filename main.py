@@ -2295,7 +2295,7 @@ class JarvisLive:
             if not self._proactive.should_trigger(self._last_user_speech):
                 continue
 
-            self._proactive.mark_triggered()
+            self._proactive.mark_attempted()
 
             try:
                 memory       = await asyncio.to_thread(load_memory)
@@ -2310,6 +2310,7 @@ class JarvisLive:
                     turns={"role": "user", "parts": [{"text": prompt}]},
                     turn_complete=True,
                 )
+                self._proactive.mark_triggered()
                 print("[JARVIS] Proactive check-in.")
             except Exception as e:
                 print(f"[Proactive] ⚠️ {e}")
