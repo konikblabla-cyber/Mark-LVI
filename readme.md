@@ -62,6 +62,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧩 Self-Describing Skills | Every bundled skill declares its own `TOOL` dict + handler and is auto-discovered at launch — adding one is a single file |
 | 🧠 Recallable Memory | No size limit and nothing silently forgotten — the prompt carries what fits, the rest is looked up on demand from a local search |
 | 🗣️ Voice Interruption | Optional local barge-in — EchoGuard learns the room's speaker echo and stops JARVIS only after sustained human speech is detected; off by default |
+| 🖥️ Desktop Awareness | Local idle/fullscreen sensing keeps proactive check-ins out of active work; optional foreground process name only — never window titles or screenshots |
 | 🧾 Conversation History | Optional local text transcript archive with retention controls, secret-pattern redaction, search and HUD-confirmed deletion; audio and screenshots are never saved |
 | 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
 | 📚 Knowledge Vault | Local Markdown notes in an Obsidian-compatible folder, with safe search/read/create/append paths and undo for note changes |
