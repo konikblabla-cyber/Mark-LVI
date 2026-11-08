@@ -689,3 +689,14 @@ def get_voice_interrupt_enabled() -> bool:
 
 def save_voice_interrupt_enabled(enabled: bool) -> None:
     _patch_config(voice_interrupt_enabled=bool(enabled))
+
+ 
+# Desktop awareness sends only the foreground executable name to the existing
+# model, and only during an already-scheduled proactive check. No title, screen,
+# keystrokes, clipboard or document content is collected.
+def get_desktop_awareness_enabled() -> bool:
+    return bool(load_api_keys().get("desktop_awareness_enabled", True))
+
+
+def save_desktop_awareness_enabled(enabled: bool) -> None:
+    _patch_config(desktop_awareness_enabled=bool(enabled))
