@@ -273,7 +273,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
                 if step is None or not reason:
                     return "Give me a valid step_id and a concise blocker reason."
-                expected = _next_pending(mission)
+                expected = _next_open_step(mission)
                 if expected is not None and expected.get("id") != sid:
                     return f"Only the next pending step ({expected['id']}) can be blocked."
                 step["status"] = "blocked"
@@ -361,7 +361,7 @@ PLUGIN = {
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "plan, start, list, show, next, complete_step, block_step, add_step, pause, resume, complete or archive"},
+            "action": {"type": "STRING", "description": "plan, start, list, show, next, begin_step, complete_step, block_step, add_step, pause, resume, complete or archive"},
             "title": {"type": "STRING", "description": "Mission title"},
             "goal": {"type": "STRING", "description": "What must be achieved"},
             "steps": {"type": "STRING", "description": "Optional ordered step list, one step per line"},
