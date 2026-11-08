@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 NOT_ROUTED = object()
-GEMMA_VISION_MODEL = "gemma-4-26b-a4b-it"  # editable in ENGINE & PROVIDERS
+GEMMA_VISION_MODEL = "gemma-4-26b-a4b-it"
 
 class RouterError(RuntimeError):
     """A routed task could not safely be sent to its configured model."""
@@ -235,14 +235,14 @@ def _audit(task: str, target: str, status: str, chars: int,
         pass
 
 
-def _gemma_call(contents, config, timeout_ms: int):
+def _gemma_call(contents, config, timeout_ms: int, model: str):
     from core import gemini
 
     key = gemini.api_key()
     if not key:
         raise RouterError("Gemma route needs the existing Gemini API key")
     client = gemini.client(timeout_ms=timeout_ms, key=key)
-    kwargs = {"model": GEMMA_VISION_MODEL, "contents": contents}
+    kwargs = {"model": model, "contents": contents}
     if config is not None:
         kwargs["config"] = config
     response = client.models.generate_content(**kwargs)
