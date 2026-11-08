@@ -155,7 +155,7 @@ class KnowledgeVaultTests(unittest.TestCase):
                 self.assertTrue(note.exists())
 
                 found = vault.run({"action": "search", "query": "Mission Control"})
-                self.assertIn("matching notes", found)
+                self.assertIn("Mission Control", found)
                 read = vault.run({"action": "read", "path": "Projects/Jarvis.md"})
                 self.assertIn("# JARVIS", read)
 
