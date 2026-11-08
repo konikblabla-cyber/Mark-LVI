@@ -29,8 +29,10 @@ class ProactiveEngine:
     ):
         self.min_silence_secs = min_silence_secs
         self.check_cooldown   = check_cooldown
-        self._last_triggered  = 0.0
-        self._rotation        = 0          # cycles through context focus areas
+        self._last_triggered = 0.0
+        self._last_attempt = 0.0
+        self.retry_cooldown = 120  # failed sends retry after 2 min, not 20
+        self._rotation = 0  # cycles through context focus areas
 
     # ── Trigger gate ───────────────────────────────────────────────────────────
 
@@ -39,11 +41,19 @@ class ProactiveEngine:
         return (
             (now - last_user_speech) >= self.min_silence_secs
             and (now - self._last_triggered) >= self.check_cooldown
+            and (now - self._last_attempt) >= self.retry_cooldown
         )
 
+    def mark_attempted(self) -> None:
+        """Rate-limit failed network attempts without consuming success cooldown."""
+        self._last_attempt = time.monotonic()
+
     def mark_triggered(self) -> None:
-        self._last_triggered = time.monotonic()
-        self._rotation      += 1
+        """Call only after the proactive prompt was accepted by the live session."""
+        now = time.monotonic()
+        self._last_triggered = now
+        self._last_attempt = now
+        self._rotation += 1
 
     # ── Prompt builder ─────────────────────────────────────────────────────────
 
