@@ -71,6 +71,20 @@ class RouterSafetyTests(unittest.TestCase):
         self.assertEqual(messages[1], {"role": "user", "content": "hello"})
         self.assertEqual(temperature, 0.2)
 
+    def test_enabled_router_requires_zero_cost_acknowledgement(self):
+        with patch.object(router, "_settings", return_value={
+            "enabled": True, "zero_cost_confirmed": False,
+        }):
+            with self.assertRaises(router.RouterError):
+                router.dispatch("summarize this", tier="smart")
+
+    def test_enabled_router_blocks_grounded_search(self):
+        with patch.object(router, "_settings", return_value={
+            "enabled": True, "zero_cost_confirmed": True,
+        }):
+            with self.assertRaises(router.RouterError):
+                router.dispatch("search the web", tier="search")
+
     def test_enabled_router_does_not_fallback_on_missing_provider(self):
         with patch.object(router, "_settings", return_value={
             "enabled": True, "gemma_vision": False,
