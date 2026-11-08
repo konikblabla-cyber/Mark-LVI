@@ -677,3 +677,15 @@ def save_model_router_config(values: dict) -> None:
     current.update(values or {})
     # Reuse the getter's validation before persisting.
     _patch_config(model_router=current)
+
+
+# ── Voice interruption ──────────────────────────────────────────────────────
+# Off by default: barge-in compares microphone speech against the assistant's
+# actual output and requires several consecutive positive blocks. The option
+# is exposed in the everyday Controls drawer so it can be tested per room.
+def get_voice_interrupt_enabled() -> bool:
+    return bool(load_api_keys().get("voice_interrupt_enabled", False))
+
+
+def save_voice_interrupt_enabled(enabled: bool) -> None:
+    _patch_config(voice_interrupt_enabled=bool(enabled))
