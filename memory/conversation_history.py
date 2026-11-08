@@ -7,7 +7,9 @@ it in Plugin Settings.
 from __future__ import annotations
 
 import json
+import os
 import re
+import tempfile
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -45,6 +47,23 @@ def _clean_text(value: str) -> str:
     if len(text) > _MAX_TEXT_CHARS:
         text = text[:_MAX_TEXT_CHARS].rstrip() + " …[truncated]"
     return text
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=".history-", suffix=".tmp",
+                                     dir=str(path.parent))
+    tmp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+        tmp.replace(path)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _rotate_if_needed() -> None:
@@ -152,9 +171,7 @@ def clear_history() -> bool:
         try:
             if _HISTORY_PATH.exists():
                 _HISTORY_PATH.unlink()
-            tmp = _HISTORY_PATH.with_suffix(".jsonl.tmp")
-            if tmp.exists():
-                tmp.unlink()
+            # Stale exclusive temp files are harmless; the archive itself is gone.
             return True
         except OSError as exc:
             print(f"[History] clear failed: {exc}")
