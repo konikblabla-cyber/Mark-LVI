@@ -93,27 +93,29 @@ def _generate_steps(goal: str) -> list[str]:
     return []
 
 
-def _next_pending(mission: dict):
+def _next_open_step(mission: dict):
+    """Return the first step not yet verified complete, including an interrupted one."""
     return next((step for step in mission.get("steps", [])
-                 if step.get("status") == "pending"), None)
+                 if step.get("status") in {"pending", "running"}), None)
 
 
 def _continue_instruction(mission: dict) -> str:
-    """A durable hand-off to the already-running Live model's next tool cycle."""
-    step = _next_pending(mission)
+    """Durable hand-off with crash-safe handling of a possibly interrupted action."""
+    step = _next_open_step(mission)
     if mission.get("status") == "completed" or step is None:
-        return (
-            "\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
-            "Report the completed result to the user; do not invent extra work."
-        )
-    return (
-        "\n[MISSION_CONTINUE] Continue this autonomous mission now. "
-        f"MISSION_ID={mission['id']} STEP_ID={step['id']}. "
-        f"Execute this step using the existing available tools: {step['title']}. "
-        "When the tool result verifies success, record it with complete_step and "
-        "continue to the next pending step. On a blocker, use block_step and stop. "
-        "Never mark a step done without a real tool result."
-    )
+        return ("\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
+                "Report the completed result to the user; do not invent extra work.")
+    if step.get("status") == "running":
+        return ("\n[MISSION_RECOVERY] This step was started before the last session ended. "
+                "Its action may already have happened. Do NOT repeat side effects. First use "
+                "read-only tools to inspect the real state. If success is verified, call "
+                "complete_step; if uncertain, call block_step and explain why.")
+    return ("\n[MISSION_CONTINUE] Continue this autonomous mission now. "
+            f"MISSION_ID={mission['id']} STEP_ID={step['id']}. "
+            "First call begin_step and wait for its result. Only then execute this step once "
+            f"using existing tools: {step['title']}. "
+            "After a real tool result verifies success, call complete_step. On a blocker, "
+            "call block_step and stop. Never invent tool results.")
 
 
 def _format(mission: dict) -> str:
@@ -124,11 +126,11 @@ def _format(mission: dict) -> str:
         f"Goal: {mission['goal']}",
     ]
     for step in mission.get("steps", []):
-        mark = "✓" if step["status"] == "done" else ("!" if step["status"] == "blocked" else "·")
+        mark = "✓" if step["status"] == "done" else ("!" if step["status"] == "blocked" else ("→" if step["status"] == "running" else "·"))
         lines.append(f"{mark} {step['id']} — {step['title']} [{step['status']}]")
         if step.get("verification"):
             lines.append(f"    Verified outcome: {step['verification']}")
-    pending = next((s for s in mission.get("steps", []) if s["status"] == "pending"), None)
+    pending = _next_open_step(mission)
     if pending:
         lines.extend(["", f"NEXT: {pending['id']} — {pending['title']}"])
     return "\n".join(lines)
@@ -198,14 +200,37 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     result = "\n\n".join(_format(m) for m in reversed(visible)) if visible else "No missions saved."
                 elif action == "next":
                     candidates = [selected] if selected else [m for m in missions if m.get("status") == "active"]
-                    item = next(( (m, s) for m in candidates if m for s in m["steps"] if s["status"] == "pending"), None)
+                    item = next(((m, step) for m in candidates if m
+                                 for step in [_next_open_step(m)] if step is not None), None)
                     if not item:
                         result = "There are no pending mission steps."
                     else:
                         m, step = item
-                        result = f"{m['title']} ({m['id']}): {step['id']} — {step['title']}"
+                        state = "RECOVERY REQUIRED" if step.get("status") == "running" else "NEXT"
+                        result = f"{state}: {m['title']} ({m['id']}): {step['id']} — {step['title']}"
                 else:
                     result = _format(selected) if selected else "Give me a mission_id to show its details."
+            elif action == "begin_step":
+                sid = str(parameters.get("step_id") or "").strip()
+                mission = next((m for m in missions if m.get("id") == mission_id), None)
+                if mission is None:
+                    return "Give me a valid mission_id."
+                if mission.get("status") != "active" or mission.get("execution_mode") != "autonomous":
+                    return "Start or resume this mission in autonomous mode before beginning a step."
+                step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
+                if step is None:
+                    return "Give me a valid step_id for that mission."
+                if step.get("status") == "running":
+                    return "[MISSION_RECOVERY] This step was already started. Do not repeat side effects; inspect with read-only tools, then complete_step if verified or block_step if uncertain."
+                expected = _next_open_step(mission)
+                if expected is None or expected.get("id") != sid or step.get("status") != "pending":
+                    return "Only the next pending step can be started."
+                step["status"] = "running"
+                step["started_at"] = _now()
+                step["updated_at"] = _now()
+                mission["updated_at"] = _now()
+                _write(data)
+                result = _format(mission) + "\n[MISSION_STEP_STARTED] Step is durably marked running. Execute it once, verify the real outcome, then call complete_step."
             elif action == "complete_step":
                 sid = str(parameters.get("step_id") or "").strip()
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
@@ -218,10 +243,12 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     return "Give me a valid step_id for that mission."
                 if step.get("status") == "done":
                     return "That step is already marked done; do not execute it again."
-                expected = _next_pending(mission)
+                expected = _next_open_step(mission)
                 if expected is not None and expected.get("id") != sid:
                     return (f"Out-of-order completion refused. The next pending step is "
                             f"{expected['id']}: {expected['title']}.")
+                if step.get("status") != "running":
+                    return "Call begin_step before executing this step; completion is not accepted yet."
                 verification = str(parameters.get("verification") or "").strip()
                 if not verification:
                     return ("Give me the verified result from the tool that completed this step. "
@@ -248,7 +275,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
                 if step is None or not reason:
                     return "Give me a valid step_id and a concise blocker reason."
-                expected = _next_pending(mission)
+                expected = _next_open_step(mission)
                 if expected is not None and expected.get("id") != sid:
                     return f"Only the next pending step ({expected['id']}) can be blocked."
                 step["status"] = "blocked"
@@ -296,7 +323,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if action == "resume" and mission.get("execution_mode") == "autonomous":
                     result += _continue_instruction(mission)
             else:
-                return ("Choose plan, start, list, show, next, complete_step, block_step, "
+                return ("Choose plan, start, list, show, next, begin_step, complete_step, block_step, "
                         "add_step, pause, resume, complete or archive.")
 
         if player:
@@ -336,7 +363,7 @@ PLUGIN = {
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "plan, start, list, show, next, complete_step, block_step, add_step, pause, resume, complete or archive"},
+            "action": {"type": "STRING", "description": "plan, start, list, show, next, begin_step, complete_step, block_step, add_step, pause, resume, complete or archive"},
             "title": {"type": "STRING", "description": "Mission title"},
             "goal": {"type": "STRING", "description": "What must be achieved"},
             "steps": {"type": "STRING", "description": "Optional ordered step list, one step per line"},
