@@ -5,8 +5,10 @@ used by core.gemini.call() for background work such as image analysis,
 classification, reasoning and coding.  Provider selection reuses MARK's
 existing ENGINE & PROVIDERS settings.
 
-No automatic cross-provider fallback is performed here.  A missing route,
-missing key, exhausted local budget, provider error or rate limit fails closed.
+Provider retry is optional and bounded to one alternate configured endpoint on
+temporary outages.  A complex-task critic is also opt-in and never fans out on
+ordinary requests. Missing routes, missing keys or exhausted local budgets
+fail closed.
 """
 from __future__ import annotations
 
@@ -263,8 +265,8 @@ def _second_opinion(contents, draft: str, reviewer_id: str, settings: dict,
         "unsupported claims. Do not invent sources. If the draft is sound, accept it. "
         "If it has a material problem, provide a corrected complete answer. "
         "Return ONLY JSON with this schema: "
-        "{\"verdict\":\"accept\" or \"improve\",\"issues\":[\"...\"],"
-        "\"answer\":\"final answer, or empty when accepted\"}.\n\n"
+        "{\"verdict\":\"accept\",\"issues\":[],\"answer\":\"\"}. "
+        "The verdict must be either accept or improve.\n\n"
         "ORIGINAL TASK:\n" + original[:12000] +
         "\n\nDRAFT ANSWER:\n" + draft[:16000]
     )
@@ -345,8 +347,13 @@ def _reserve(contents, settings: dict) -> int:
         if state.get("date") != today:
             state = {"date": today, "calls": 0, "input_chars": 0}
 
-        calls = int(state.get("calls", 0))
-        used = int(state.get("input_chars", 0))
+        try:
+            calls = int(state.get("calls", 0))
+            used = int(state.get("input_chars", 0))
+            if calls < 0 or used < 0:
+                raise ValueError("negative usage counters")
+        except (TypeError, ValueError) as exc:
+            raise RouterError("usage ledger counters are invalid; routing stopped for safety") from exc
         if calls >= max_daily_calls:
             raise RouterError(f"daily call limit reached ({max_daily_calls})")
         if used + chars > max_daily_chars:
