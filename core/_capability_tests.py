@@ -111,7 +111,8 @@ class MissionControlTests(unittest.TestCase):
                 next_step = mission.run({"action": "next"})
                 self.assertIn("S01", next_step)
                 done = mission.run({
-                    "action": "complete_step", "mission_id": mission_id, "step_id": "S01"
+                    "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
+                    "verification": "Created the notes file and verified it exists."
                 })
                 self.assertIn("[done]", done)
                 paused = mission.run({"action": "pause", "mission_id": mission_id})
@@ -121,6 +122,7 @@ class MissionControlTests(unittest.TestCase):
 
                 stored = json.loads(path.read_text(encoding="utf-8"))
                 self.assertEqual(stored["missions"][0]["steps"][0]["status"], "done")
+                self.assertIn("verified", stored["missions"][0]["steps"][0]["verification"].lower())
                 self.assertEqual(stored["missions"][0]["status"], "active")
 
     def test_corrupt_mission_store_is_not_overwritten(self):
