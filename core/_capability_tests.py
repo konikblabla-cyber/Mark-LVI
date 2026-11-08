@@ -301,9 +301,9 @@ class MissionControlTests(unittest.TestCase):
                 self.assertNotIn("[MISSION_CONTINUE]", resumed)
                 refused = mission.run({
                     "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
-                    "verification": "Must not complete without recovery verification",
+                    "verification": "",
                 })
-                self.assertIn("Call begin_step", refused)
+                self.assertIn("Give me the verified result", refused)
 
     def test_step_must_be_started_before_completion(self):
         from plugins import mission_control as mission
