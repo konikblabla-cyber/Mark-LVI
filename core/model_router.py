@@ -171,25 +171,28 @@ def _provider_for(task: str, provider_override: str = "") -> str:
     return ""
 
 
+def _is_zero_cost_provider(provider_id: str) -> bool:
+    try:
+        _assert_zero_cost_provider(provider_id)
+        return True
+    except RouterError:
+        return False
+
+
 def has_independent_reviewer() -> bool:
-    """True when a configured free/local text provider can be reviewed by Gemma."""
+    """True when at least one configured free/local text provider can be reviewed by Gemma."""
     from memory.config_manager import get_coding_provider, get_sidecar_provider
-    for provider_id in (get_coding_provider(), get_sidecar_provider()):
-        if provider_id:
-            try:
-                _assert_zero_cost_provider(provider_id)
-                return True
-            except RouterError:
-                continue
-    return False
+    return any(_is_zero_cost_provider(pid) for pid in
+               (get_coding_provider(), get_sidecar_provider()) if pid)
 
 
 def _alternate_provider(primary: str, provider_override: str = "") -> str:
-    """The one other configured endpoint, if it is genuinely a different service."""
+    """The one other configured $0 endpoint, if it is genuinely different."""
     from memory.config_manager import get_coding_provider, get_sidecar_provider
 
     candidates = (get_sidecar_provider(), provider_override or get_coding_provider())
-    return next((candidate for candidate in candidates if candidate and candidate != primary), "")
+    return next((candidate for candidate in candidates
+                 if candidate and candidate != primary and _is_zero_cost_provider(candidate)), "")
 
 
 def _is_transient_error(exc: Exception) -> bool:
@@ -594,16 +597,25 @@ def dispatch(contents, tier: str = "smart", config=None,
             except Exception as primary_error:
                 alternate_id = _alternate_provider(primary_id, provider_override)
                 can_retry = bool(settings.get("retry_on_transient", False))
-                if not (can_retry and alternate_id and _is_transient_error(primary_error)):
+                if not (can_retry and _is_transient_error(primary_error)):
                     raise
                 retry_chars = _reserve(contents, settings)
                 try:
-                    response = _provider_call(alternate_id, contents, config, timeout_ms, task)
-                    target = f"{primary_id} -> {alternate_id}"
+                    if alternate_id:
+                        response = _provider_call(alternate_id, contents, config, timeout_ms, task)
+                        retry_target = alternate_id
+                    else:
+                        # If there is no second configured $0 provider, Gemma is
+                        # the single permitted independent retry for text tasks.
+                        if task in ("vision", "review"):
+                            raise RouterError("no independent free retry route is available")
+                        retry_target = str(settings.get("gemma_model") or GEMMA_VISION_MODEL)
+                        response = _gemma_call(contents, config, timeout_ms, retry_target)
+                    target = f"{primary_id} -> {retry_target}"
                     _audit(task, target, "retry_success", retry_chars,
                            int((time.monotonic() - started) * 1000))
                 except Exception as retry_error:
-                    _audit(task, f"{primary_id} -> {alternate_id}", "retry_failed",
+                    _audit(task, f"{primary_id} -> {alternate_id or 'gemma'}", "retry_failed",
                            retry_chars, int((time.monotonic() - started) * 1000),
                            type(retry_error).__name__)
                     raise RouterError(
@@ -612,11 +624,10 @@ def dispatch(contents, tier: str = "smart", config=None,
 
             answer = _verify_response(task, response, config)
             if _needs_second_opinion(task, contents, settings):
-                reviewer_id = _alternate_provider(primary_id, provider_override)
-                if reviewer_id:
-                    improved = _second_opinion(
-                        contents, answer, reviewer_id, settings, timeout_ms)
-                    if improved:
+                reviewer_id = str(settings.get("gemma_model") or GEMMA_VISION_MODEL)
+                improved = _second_opinion(
+                    contents, answer, reviewer_id, settings, timeout_ms)
+                if improved:
                         answer = improved
                         response = RouterReply(answer)
             if isinstance(response, RouterReply):
