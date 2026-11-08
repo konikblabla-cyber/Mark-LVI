@@ -42,7 +42,7 @@ class ConversationHistoryTests(unittest.TestCase):
                 + json.dumps({"ts": fresh, "role": "assistant", "text": "new"}) + "\n",
                 encoding="utf-8",
             )
-            with patch.object(history, "_HISTORY_PATH", path), \\
+            with patch.object(history, "_HISTORY_PATH", path), \
                  patch.object(history, "get_plugin_config",
                               return_value={"enabled": True, "retention_days": "30"}):
                 rows = history.recent_messages()
@@ -82,9 +82,9 @@ class ConversationHistoryPluginTests(unittest.TestCase):
                 captured["run"] = run
                 return "[CONFIRMATION_PENDING]"
 
-            with patch.object(store, "_HISTORY_PATH", path), \\
-                 patch.object(store, "settings", return_value={"enabled": False, "retention_days": 30}), \\
-                 patch.object(confirm, "pending_title", return_value=""), \\
+            with patch.object(store, "_HISTORY_PATH", path), \
+                 patch.object(store, "settings", return_value={"enabled": False, "retention_days": 30}), \
+                 patch.object(confirm, "pending_title", return_value=""), \
                  patch.object(confirm, "request", side_effect=fake_request):
                 result = plugin.run({"action": "clear"})
 
