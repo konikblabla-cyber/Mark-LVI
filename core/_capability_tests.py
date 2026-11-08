@@ -50,6 +50,42 @@ class ConversationHistoryTests(unittest.TestCase):
             self.assertEqual([row["text"] for row in rows], ["new"])
             self.assertNotIn('"text": "old"', stored)
 
+    def test_history_purge_never_follows_predictable_temp_symlink(self):
+        from memory import conversation_history as history
+        from datetime import datetime, timedelta
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "history.jsonl"
+            sentinel = Path(tmp) / "outside.txt"
+            sentinel.write_text("leave this file untouched", encoding="utf-8")
+            path.with_suffix(".jsonl.tmp").symlink_to(sentinel)
+            old = (datetime.now().astimezone() - timedelta(days=100)).isoformat()
+            path.write_text(
+                json.dumps({"ts": old, "role": "user", "text": "expired"}) + "\\n",
+                encoding="utf-8",
+            )
+            with patch.object(history, "_HISTORY_PATH", path), \\
+                 patch.object(history, "get_plugin_config",
+                              return_value={"enabled": True, "retention_days": "30"}):
+                self.assertEqual(history.recent_messages(), [])
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "leave this file untouched")
+            self.assertTrue(path.with_suffix(".jsonl.tmp").is_symlink())
+
+    def test_history_rotation_never_follows_predictable_temp_symlink(self):
+        from memory import conversation_history as history
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "history.jsonl"
+            sentinel = Path(tmp) / "outside.txt"
+            sentinel.write_text("leave this file untouched", encoding="utf-8")
+            path.with_suffix(".jsonl.tmp").symlink_to(sentinel)
+            path.write_text("one\\ntwo\\nthree\\n", encoding="utf-8")
+            with patch.object(history, "_HISTORY_PATH", path), \\
+                 patch.object(history, "_MAX_FILE_BYTES", 1), \\
+                 patch.object(history, "_MAX_KEEP_LINES", 1):
+                history._rotate_if_needed()
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "leave this file untouched")
+            self.assertEqual(path.read_text(encoding="utf-8"), "three\\n")
+            self.assertTrue(path.with_suffix(".jsonl.tmp").is_symlink())
+
     def test_history_clear_removes_local_archive(self):
         from memory import conversation_history as history
         with tempfile.TemporaryDirectory() as tmp:
