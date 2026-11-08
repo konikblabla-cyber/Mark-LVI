@@ -35,9 +35,9 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     from memory import conversation_history as history
 
     cfg = history.settings()
-    if not cfg["enabled"]:
-        return "Conversation history is off. Enable local history in Settings → Plugin Settings."
     action = str(parameters.get("action") or "recent").strip().lower()
+    if not cfg["enabled"] and action != "clear":
+        return "Conversation history is off. Enable local history in Settings → Plugin Settings."
     try:
         if action == "stats":
             stats = history.history_stats()
