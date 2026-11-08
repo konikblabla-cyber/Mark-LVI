@@ -4535,6 +4535,7 @@ class MainWindow(QMainWindow):
         self.on_text_command   = None
         self.on_remote_clicked = None   # callable: () -> (url, key) | None
         self.on_interrupt      = None   # callable: () -> None — stop JARVIS mid-speech
+        self.on_voice_interrupt_change = None  # callable: (enabled: bool) -> None
         self.on_voice_change   = None   # callable: () -> None — rebuild session with new voice
         self.on_audio_device_change = None  # callable: () -> None — reopen audio streams
         self._confirm_overlay  = None   # live ConfirmBanner, if one is on screen
@@ -5873,6 +5874,10 @@ class MainWindow(QMainWindow):
         self._ptt_btn.clicked.connect(self._toggle_ptt)
         self._refresh_talk_btns()
 
+        self._voice_interrupt_btn = _row(QPushButton())
+        self._voice_interrupt_btn.clicked.connect(self._toggle_voice_interrupt)
+        self._refresh_voice_interrupt_btn()
+
         self._hud_btn = _row(QPushButton())
         self._hud_btn.clicked.connect(self._toggle_hud_style)
         self._refresh_hud_btn()
@@ -6803,6 +6808,35 @@ class MainWindow(QMainWindow):
             else "Hold a key to talk instead of streaming the mic continuously.")
 
 
+    def _refresh_voice_interrupt_btn(self):
+        from memory.config_manager import get_voice_interrupt_enabled
+        enabled = get_voice_interrupt_enabled()
+        style = (f"QPushButton {{ background: #001a08; color: {C.GREEN}; "
+                 f"border: 1px solid {C.GREEN_D}; border-radius: 3px; text-align: left; padding: 0 8px; }}"
+                 if enabled else
+                 f"QPushButton {{ background: transparent; color: {C.TEXT_DIM}; "
+                 f"border: 1px solid {C.BORDER}; border-radius: 3px; text-align: left; padding: 0 8px; }}")
+        self._voice_interrupt_btn.setText(
+            "🗣  VOICE INTERRUPT: ON" if enabled else "🗣  VOICE INTERRUPT: OFF")
+        self._voice_interrupt_btn.setStyleSheet(style)
+        self._voice_interrupt_btn.setToolTip(
+            "When enabled, speak naturally while JARVIS is talking to interrupt it. "
+            "A local echo filter must hear sustained human speech; your audio is not "
+            "streamed to the model until JARVIS stops."
+        )
+
+    def _toggle_voice_interrupt(self):
+        from memory.config_manager import get_voice_interrupt_enabled, save_voice_interrupt_enabled
+        want = not get_voice_interrupt_enabled()
+        try:
+            save_voice_interrupt_enabled(want)
+            if self.on_voice_interrupt_change:
+                self.on_voice_interrupt_change(want)
+        except Exception as exc:
+            save_voice_interrupt_enabled(False)
+            self._log.append_log(f"ERR: Voice interrupt setting failed — {exc}")
+        self._refresh_voice_interrupt_btn()
+
     def _refresh_hud_btn(self):
         from memory.config_manager import get_hud_style
         face = get_hud_style() == "face"
@@ -7475,6 +7509,14 @@ class JarvisUI:
     @ptt_hold.setter
     def ptt_hold(self, cb):
         self._win.ptt_hold = cb
+
+    @property
+    def on_voice_interrupt_change(self):
+        return self._win.on_voice_interrupt_change
+
+    @on_voice_interrupt_change.setter
+    def on_voice_interrupt_change(self, cb):
+        self._win.on_voice_interrupt_change = cb
 
     @property
     def on_push_to_talk(self):
