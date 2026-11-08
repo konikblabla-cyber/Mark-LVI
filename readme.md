@@ -61,6 +61,10 @@ It's not just an assistant — it's an extension of your digital life.
 | 🚀 Faster Live Engine | Runs on **Gemini 3.1 Flash Live** — roughly 2× faster time-to-first-word than the previous model |
 | 🧩 Self-Describing Skills | Every bundled skill declares its own `TOOL` dict + handler and is auto-discovered at launch — adding one is a single file |
 | 🧠 Recallable Memory | No size limit and nothing silently forgotten — the prompt carries what fits, the rest is looked up on demand from a local search |
+| 🗣️ Voice Interruption | Optional local barge-in — EchoGuard learns the room's speaker echo and stops JARVIS only after sustained human speech is detected; off by default |
+| 🧾 Conversation History | Optional local text transcript archive with retention controls, secret-pattern redaction, search and HUD-confirmed deletion; audio and screenshots are never saved |
+| 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
+| 📚 Knowledge Vault | Local Markdown notes in an Obsidian-compatible folder, with safe search/read/create/append paths and undo for note changes |
 | 👁️ Memory Panel | See every fact JARVIS has stored about you, when it learned it, and delete any of it in one click |
 | ↩️ Undo | Take back what the assistant did — files it moved, renamed, created or wrote, and settings it changed |
 | ⚠️ Real Confirmation | Shutdown, restart and WiFi wait for a button **you** press — the model cannot confirm its own irreversible actions |
@@ -525,6 +529,7 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 | **LIV** | Holographic avatar · viseme lip-sync · facial acting · face-as-status · push-to-talk · self-echo guard · runtime self-knowledge & limits |
 | **LV** | Video on the HUD · model ladder with measured fallback · split settings drawers · trimmed bundled skill list |
 | **LVI** | Choose your engine · local & third-party models · Whisper + Piper in ~50 languages · language-following voice · ElevenLabs · tool budget for small models · verified outcomes instead of claimed ones · close an app by name · untrusted-content boundary · platform honesty on Wayland and macOS · hardened phone dashboard |
+| **LVII capability pack** | Voice interruption · opt-in local conversation history · persistent Mission Control · Obsidian-compatible local knowledge vault |
 | *shared* | The last five above also shipped to LIII, LIV and LV at the same time — moving up a Mark never loses them |
 | **LVII+** | Interrupt by voice · conversation history · full file access · security camera · Obsidian |
 

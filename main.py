@@ -590,6 +590,10 @@ class JarvisLive:
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
+        from memory.config_manager import get_voice_interrupt_enabled
+        self._voice_interrupt_enabled = get_voice_interrupt_enabled()
+        self._voice_interrupt_pending = False
+        self._voice_interrupt_lock = threading.Lock()
         # Which engine is holding the conversation, and what it can do.
         # None means Gemini Live — the default and, unless somebody has gone to
         # the providers settings and chosen otherwise, always the case. Every
@@ -630,6 +634,7 @@ class JarvisLive:
         self.ui.on_text_command   = self._on_text_command
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
+        self.ui.on_voice_interrupt_change = self.set_voice_interrupt_enabled
         self.ui.on_voice_change   = self._on_voice_change     # voice picker → rebuild session
         self.ui.on_audio_device_change = self._on_audio_device_change
         self._reconnect_event: asyncio.Event | None = None
@@ -1071,9 +1076,35 @@ class JarvisLive:
         except Exception:
             pass
 
+    def set_voice_interrupt_enabled(self, enabled: bool) -> None:
+        """Apply the room-tested voice barge-in switch without restarting audio."""
+        self._voice_interrupt_enabled = bool(enabled)
+        with self._voice_interrupt_lock:
+            self._voice_interrupt_pending = False
+        self._echo.reset()
+        self.ui.write_log(
+            "SYS: Voice interruption " + ("enabled." if enabled else "disabled.")
+        )
+
+    def _interrupt_from_voice(self) -> None:
+        """Called on the asyncio loop after the mic thread finds sustained speech."""
+        with self._voice_interrupt_lock:
+            pending = self._voice_interrupt_pending
+            self._voice_interrupt_pending = False
+        if not pending:
+            return
+        with self._speaking_lock:
+            speaking = self._is_speaking
+        if speaking and self._voice_interrupt_enabled:
+            self.ui.write_log("SYS: Voice interruption detected.")
+            self.interrupt()
+
     def interrupt(self) -> None:
         """Stop JARVIS mid-speech: drain queued audio and open mic immediately."""
         self._interrupted = True
+        with self._voice_interrupt_lock:
+            self._voice_interrupt_pending = False
+        self._echo.reset()
         q = self.audio_in_queue
         if q:
             drained = 0
@@ -1595,14 +1626,26 @@ class JarvisLive:
             # the echo of what we are playing right now", sustained long enough
             # that a cough or a keystroke cannot trigger it.
             if jarvis_speaking:
-                # Nothing is streamed while JARVIS talks.
-                #
-                # Interrupting by voice used to live here: `EchoGuard` can pick a
-                # user out from under our own echo, and `core/echo.py` still does
-                # that for the tail below. Re-enabling is small — classify each
-                # block here and call interrupt() after `required_blocks` of
-                # agreement — but it depends on the listener's room, so it stays
-                # out until it can be tried on real hardware.
+                # Optional, local-only barge-in. The EchoGuard subtracts the
+                # assistant's recent output fingerprint from the microphone and
+                # requires a calibrated run of positive voice blocks (longer in
+                # acoustically difficult rooms). Nothing is streamed to Gemini
+                # while the assistant is speaking. Push-to-talk remains respected.
+                if (self._voice_interrupt_enabled and not self.ui.muted
+                        and not self._phone_active
+                        and (not self._ptt_enabled or self._ptt_held)):
+                    try:
+                        level = _pcm_level(indata)
+                        speech = self._echo.is_user_speech(
+                            indata, SEND_SAMPLE_RATE, level
+                        )
+                        if speech and self._echo.interrupt_ready:
+                            with self._voice_interrupt_lock:
+                                if not self._voice_interrupt_pending:
+                                    self._voice_interrupt_pending = True
+                                    loop.call_soon_threadsafe(self._interrupt_from_voice)
+                    except Exception:
+                        pass  # any doubt: keep speaking; never interrupt by guess
                 return
 
             # ── Echo tail ────────────────────────────────────────────────────
@@ -1811,6 +1854,11 @@ class JarvisLive:
                                 self._last_out_logged = ""   # new exchange
                                 self.ui.write_log(f"You: {full_in}")
                                 self._session_log.append(f"User: {full_in}")
+                                try:
+                                    from memory.conversation_history import append_message
+                                    await asyncio.to_thread(append_message, "user", full_in)
+                                except Exception as _history_error:
+                                    print(f"[History] user transcript not saved: {_history_error}")
                                 if self._dashboard:
                                     asyncio.create_task(self._dashboard.broadcast({
                                         "type": "log", "speaker": "user",
@@ -1830,6 +1878,13 @@ class JarvisLive:
                                 self._last_out_logged = full_out
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
+                                try:
+                                    from memory.conversation_history import append_message
+                                    await asyncio.to_thread(
+                                        append_message, "assistant", full_out
+                                    )
+                                except Exception as _history_error:
+                                    print(f"[History] assistant transcript not saved: {_history_error}")
                                 if self._dashboard:
                                     asyncio.create_task(self._dashboard.broadcast({
                                         "type": "log", "speaker": "jarvis",
@@ -2533,6 +2588,8 @@ class JarvisLive:
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
+                    with self._voice_interrupt_lock:
+                        self._voice_interrupt_pending = False
 
                     print("[JARVIS] Connected.")
                     if _resumed_with:
