@@ -171,7 +171,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 missions.append(mission)
                 _write(data)
                 result = _format(mission) + (
-                    "\n\\nPlan saved only. Start execution with action='start' "
+                    "\n\nPlan saved only. Start execution with action='start' "
                     "when the user has asked you to carry out the goal."
                 )
             elif action == "start":
