@@ -62,6 +62,7 @@ class ProactiveEngine:
         memory:       dict,
         monitors:     list[str] | None = None,
         recent_turns: list[str] | None = None,
+        desktop_context: dict | None = None,
     ) -> str:
         """
         Build a context snapshot for Gemini.
@@ -106,6 +107,17 @@ class ProactiveEngine:
                 f"\nThe user tracks these topics: {', '.join(monitors[:4])}. "
                 "You may mention one if it seems relevant."
             )
+
+        # Optional, privacy-limited desktop context: executable basename only.
+        desktop_ctx = ""
+        if isinstance(desktop_context, dict):
+            app = str(desktop_context.get("foreground_app") or "").strip()[:80]
+            if app:
+                desktop_ctx = (
+                    f"\nForeground application (executable name only): {app}. "
+                    "No window title or screen contents were captured. Use this "
+                    "only to tailor a relevant, non-intrusive suggestion."
+                )
 
         # Optional: recent conversation context
         recent_ctx = ""
