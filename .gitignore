@@ -53,3 +53,9 @@ screenshots/
 config/model_router_usage.json
 config/model_router_audit.jsonl
 config/model_router_usage.json.tmp
+
+# ── Local JARVIS capability data ────────────────────────────────────────────
+memory/conversation_history.jsonl
+memory/conversation_history.jsonl.tmp
+memory/missions.json
+memory/missions.json.tmp
