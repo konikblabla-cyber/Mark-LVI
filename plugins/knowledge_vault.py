@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from pathlib import Path
 
 from memory.config_manager import get_plugin_config
@@ -98,6 +99,24 @@ def _notes(root: Path):
     return sorted(out)
 
 
+def _atomic_write(root: Path, target: Path, content: str) -> None:
+    """Write inside the vault using an exclusive temporary file and atomic replace."""
+    target.parent.resolve().relative_to(root)
+    fd, temp_name = tempfile.mkstemp(prefix=".jarvis-", suffix=".tmp",
+                                     dir=str(target.parent))
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+        temp.replace(target)
+    except Exception:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 def _untrusted(title: str, body: str) -> str:
     return f"<<<UNTRUSTED source=local-note:{title}>>>\n{body}\n<<<END UNTRUSTED>>>"
 
@@ -173,15 +192,14 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
             updated = (previous.rstrip() + "\n\n" + content.strip() + "\n") if previous else content.strip() + "\n"
             if len(updated.encode("utf-8")) > _MAX_NOTE_BYTES:
                 return "The resulting note would exceed 256 KB."
-            tmp = target.with_suffix(target.suffix + ".tmp")
-            tmp.write_text(updated, encoding="utf-8")
-            tmp.replace(target)
+            _atomic_write(root, target, updated)
             def restore():
+                target.parent.resolve().relative_to(root)
                 if previous is None:
-                    if target.exists():
+                    if target.exists() or target.is_symlink():
                         target.unlink()
                 else:
-                    target.write_text(previous, encoding="utf-8")
+                    _atomic_write(root, target, previous)
                 return f"Restored {target.name} to its previous contents."
             push_undo(f"{'created' if previous is None else 'appended to'} note {target.relative_to(root).as_posix()}", restore)
             rel = target.relative_to(root).as_posix()
