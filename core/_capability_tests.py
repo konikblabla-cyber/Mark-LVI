@@ -231,6 +231,35 @@ class MissionControlTests(unittest.TestCase):
                 self.assertIn("[MISSION_CONTINUE]", resumed)
                 self.assertIn("STEP_ID=S01", resumed)
 
+    def test_paused_mission_rejects_completion_until_resume(self):
+        from plugins import mission_control as mission
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missions.json"
+            with patch.object(mission, "_DATA_PATH", path):
+                planned = mission.run({
+                    "action": "plan", "title": "Paused job",
+                    "goal": "Do one task safely", "steps": "Do the task",
+                })
+                mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
+                mission.run({"action": "start", "mission_id": mission_id})
+                mission.run({
+                    "action": "block_step", "mission_id": mission_id,
+                    "step_id": "S01", "reason": "Waiting for user approval.",
+                })
+                refused = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "This must not be accepted.",
+                })
+                self.assertIn("paused or inactive", refused.lower())
+
+                resumed = mission.run({"action": "resume", "mission_id": mission_id})
+                self.assertIn("[MISSION_CONTINUE]", resumed)
+                completed = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "User approved and the task succeeded.",
+                })
+                self.assertIn("[MISSION_COMPLETE]", completed)
+
     def test_corrupt_mission_store_is_not_overwritten(self):
         from plugins import mission_control as mission
         with tempfile.TemporaryDirectory() as tmp:
