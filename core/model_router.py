@@ -628,8 +628,8 @@ def dispatch(contents, tier: str = "smart", config=None,
                 improved = _second_opinion(
                     contents, answer, reviewer_id, settings, timeout_ms)
                 if improved:
-                        answer = improved
-                        response = RouterReply(answer)
+                    answer = improved
+                    response = RouterReply(answer)
             if isinstance(response, RouterReply):
                 response.text = answer
             else:
