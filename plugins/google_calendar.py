@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import secrets
+import tempfile
 import threading
 import time
 import urllib.error
