@@ -8,6 +8,8 @@ on:
       - "core/_model_router_tests.py"
       - "core/_capability_tests.py"
       - "core/echo.py"
+      - "core/desktop_context.py"
+      - "core/_desktop_context_tests.py"
       - "memory/conversation_history.py"
       - "plugins/conversation_history.py"
       - "plugins/mission_control.py"
@@ -25,6 +27,7 @@ on:
     branches:
       - "feature/multi-model-task-router"
       - "feature/jarvis-capability-pack"
+      - "feature/focus-aware-desktop-context"
 
 jobs:
   router:
@@ -38,10 +41,12 @@ jobs:
         run: python -m pip install numpy
       - name: Compile changed Python modules
         run: |
-          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
+          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
       - name: Run offline router tests
         run: python -m core._model_router_tests
       - name: Run offline capability tests
         run: python -m core._capability_tests
       - name: Run offline proactive tests
         run: python -m core._proactive_tests
+      - name: Run offline desktop context tests
+        run: python -m core._desktop_context_tests
