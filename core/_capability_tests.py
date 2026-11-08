@@ -68,6 +68,32 @@ class ConversationHistoryTests(unittest.TestCase):
         self.assertIn("[REDACTED]", clean)
 
 
+class ConversationHistoryPluginTests(unittest.TestCase):
+    def test_clear_requires_hud_confirmation_and_works_when_history_off(self):
+        from memory import conversation_history as store
+        from plugins import conversation_history as plugin
+        from core import confirm
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "history.jsonl"
+            path.write_text('{"role":"user","text":"private"}\\n', encoding="utf-8")
+            captured = {}
+
+            def fake_request(key, title, detail, run):
+                captured["run"] = run
+                return "[CONFIRMATION_PENDING]"
+
+            with patch.object(store, "_HISTORY_PATH", path), \\
+                 patch.object(store, "settings", return_value={"enabled": False, "retention_days": 30}), \\
+                 patch.object(confirm, "pending_title", return_value=""), \\
+                 patch.object(confirm, "request", side_effect=fake_request):
+                result = plugin.run({"action": "clear"})
+
+            self.assertIn("CONFIRMATION_PENDING", result)
+            self.assertTrue(path.exists(), "data must remain until the user confirms")
+            self.assertIn("cleared", captured["run"]().lower())
+            self.assertFalse(path.exists())
+
+
 class MissionControlTests(unittest.TestCase):
     def test_plan_progress_pause_and_resume_persist(self):
         from plugins import mission_control as mission
