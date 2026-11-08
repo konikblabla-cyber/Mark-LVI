@@ -378,14 +378,16 @@ def dispatch(contents, tier: str = "smart", config=None,
     ladder. Missing routes and errors raise RouterError instead.
     """
     settings = _settings()
-    if not settings.get("enabled") or tier == "search":
+    if not settings.get("enabled"):
         return NOT_ROUTED
     if not settings.get("zero_cost_confirmed"):
         raise RouterError("enable only after verifying every selected API is on a $0 plan with no payment method")
+    if tier == "search":
+        raise RouterError("grounded web-search requests are not enabled in the task router")
 
     task = classify_task(contents, tier, task_type)
     if not task:
-        return NOT_ROUTED
+        raise RouterError("this request has no safe route; specify a supported task type")
 
     chars = _reserve(contents, settings)
     started = time.monotonic()
