@@ -44,10 +44,22 @@ _IMAGE_MIMES = ("image/",)
 _NON_IMAGE_MIMES = ("audio/", "video/")
 
 
+_settings_cache: tuple[int, dict] = (-1, {})
+_settings_lock = threading.Lock()
+
+
 def _settings() -> dict:
+    """Cache settings by config mtime; the disabled path stays nearly free."""
+    global _settings_cache
     try:
-        from memory.config_manager import get_model_router_config
-        return get_model_router_config()
+        from memory.config_manager import CONFIG_FILE, get_model_router_config
+        mtime = CONFIG_FILE.stat().st_mtime_ns if CONFIG_FILE.exists() else 0
+        with _settings_lock:
+            if _settings_cache[0] == mtime:
+                return dict(_settings_cache[1])
+            values = get_model_router_config()
+            _settings_cache = (mtime, dict(values))
+            return values
     except Exception as exc:
         raise RouterError("model-router settings could not be read") from exc
 
@@ -366,7 +378,8 @@ def dispatch(contents, tier: str = "smart", config=None,
     ladder. Missing routes and errors raise RouterError instead.
     """
     settings = _settings()
-    if not settings.get("enabled") or tier == "search":
+    if (not settings.get("enabled") or not settings.get("zero_cost_confirmed")
+            or tier == "search"):
         return NOT_ROUTED
 
     task = classify_task(contents, tier, task_type)
