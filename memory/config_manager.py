@@ -634,6 +634,7 @@ def save_providers(mode: str = None, pipeline: dict = None, creds: dict = None,
 # the owner explicitly enables the new router in ENGINE & PROVIDERS.
 _MODEL_ROUTER_DEFAULTS = {
     "enabled": False,
+    "zero_cost_confirmed": False,
     "gemma_vision": True,
     "gemma_model": "gemma-4-26b-a4b-it",
     "daily_calls": 40,
@@ -649,6 +650,7 @@ def get_model_router_config() -> dict:
     out = dict(_MODEL_ROUTER_DEFAULTS)
     out.update(raw)
     out["enabled"] = bool(out.get("enabled", False))
+    out["zero_cost_confirmed"] = bool(out.get("zero_cost_confirmed", False))
     out["gemma_vision"] = bool(out.get("gemma_vision", True))
     out["gemma_model"] = str(out.get("gemma_model") or _MODEL_ROUTER_DEFAULTS["gemma_model"]).strip()
     for key, default, maximum in (
