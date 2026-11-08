@@ -243,12 +243,12 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     return "Give me a valid step_id for that mission."
                 if step.get("status") == "done":
                     return "That step is already marked done; do not execute it again."
-                if step.get("status") != "running":
-                    return "Call begin_step before executing this step; completion is not accepted yet."
                 expected = _next_open_step(mission)
                 if expected is not None and expected.get("id") != sid:
                     return (f"Out-of-order completion refused. The next pending step is "
                             f"{expected['id']}: {expected['title']}.")
+                if step.get("status") != "running":
+                    return "Call begin_step before executing this step; completion is not accepted yet."
                 verification = str(parameters.get("verification") or "").strip()
                 if not verification:
                     return ("Give me the verified result from the tool that completed this step. "
