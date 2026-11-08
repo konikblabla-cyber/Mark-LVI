@@ -129,7 +129,7 @@ def search_messages(query: str, limit: int = 12) -> list[dict]:
         score = sum(1 for term in terms if term in text)
         if score:
             matches.append((score, item))
-    matches.sort(key=lambda pair: (-pair[0], pair[1]["ts"]), reverse=False)
+    matches.sort(key=lambda pair: (pair[0], pair[1]["ts"]), reverse=True)
     return [item for _score, item in matches[:max(1, min(int(limit), 30))]]
 
 
