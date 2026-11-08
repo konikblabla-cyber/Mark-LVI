@@ -85,9 +85,26 @@ class RouterSafetyTests(unittest.TestCase):
             with self.assertRaises(router.RouterError):
                 router.dispatch("search the web", tier="search")
 
+    def test_enabled_router_uses_configured_fast_provider(self):
+        settings = {
+            "enabled": True, "zero_cost_confirmed": True,
+            "gemma_vision": True, "daily_calls": 3,
+            "daily_input_chars": 100, "max_input_chars": 100,
+        }
+        expected = router.RouterReply("routed")
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_reserve", return_value=5), \
+             patch.object(router, "_provider_for", return_value="openai_compat@groq"), \
+             patch.object(router, "_provider_call", return_value=expected) as call, \
+             patch.object(router, "_audit"):
+            result = router.dispatch("summarize this", tier="fast")
+        self.assertIs(result, expected)
+        self.assertEqual(call.call_args.args[0], "openai_compat@groq")
+        self.assertEqual(call.call_args.args[4], "fast")
+
     def test_enabled_router_does_not_fallback_on_missing_provider(self):
         with patch.object(router, "_settings", return_value={
-            "enabled": True, "gemma_vision": False,
+            "enabled": True, "zero_cost_confirmed": True, "gemma_vision": False,
             "daily_calls": 3, "daily_input_chars": 100, "max_input_chars": 100,
         }), patch.object(router, "_reserve", return_value=5), \
              patch.object(router, "_provider_for", return_value=""):
