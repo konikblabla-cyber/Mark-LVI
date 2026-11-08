@@ -45,7 +45,7 @@ def _config() -> dict:
 
 def _write_json_atomic(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = __import__("tempfile").mkstemp(
+    fd, temp_name = tempfile.mkstemp(
         prefix=".google-calendar-", suffix=".tmp", dir=str(path.parent)
     )
     temp = Path(temp_name)
