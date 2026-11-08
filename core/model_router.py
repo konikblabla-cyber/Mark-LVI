@@ -172,10 +172,16 @@ def _provider_for(task: str, provider_override: str = "") -> str:
 
 
 def has_independent_reviewer() -> bool:
-    """True only when BACKGROUND and CODING are both set to different providers."""
+    """True when a configured free/local text provider can be reviewed by Gemma."""
     from memory.config_manager import get_coding_provider, get_sidecar_provider
-    sidecar, coding = get_sidecar_provider(), get_coding_provider()
-    return bool(sidecar and coding and sidecar != coding)
+    for provider_id in (get_coding_provider(), get_sidecar_provider()):
+        if provider_id:
+            try:
+                _assert_zero_cost_provider(provider_id)
+                return True
+            except RouterError:
+                continue
+    return False
 
 
 def _alternate_provider(primary: str, provider_override: str = "") -> str:
@@ -274,11 +280,11 @@ def _second_opinion(contents, draft: str, reviewer_id: str, settings: dict,
     started = time.monotonic()
     try:
         _reserve(prompt, settings)
-        reply = _provider_call(
-            reviewer_id, [prompt], {"temperature": 0.1},
-            timeout_ms, "review",
+        review_response = _gemma_call(
+            [prompt], {"temperature": 0.1}, timeout_ms,
+            str(settings.get("gemma_model") or GEMMA_VISION_MODEL),
         )
-        review_text = _verify_response("review", reply)
+        review_text = _verify_response("review", review_response)
         obj = _json_object(review_text)
         if not obj:
             _audit("review", reviewer_id, "invalid_review", chars,
@@ -398,6 +404,8 @@ def _audit(task: str, target: str, status: str, chars: int,
 def _gemma_call(contents, config, timeout_ms: int, model: str):
     from core import gemini
 
+    if model != GEMMA_VISION_MODEL:
+        raise RouterError("only the verified free Gemma 4 26B A4B model is allowed")
     key = gemini.api_key()
     if not key:
         raise RouterError("Gemma route needs the existing Gemini API key")
@@ -490,12 +498,40 @@ def _provider_messages(contents, config) -> tuple[list[dict], float | None]:
     return messages, float(temperature) if temperature is not None else None
 
 
+def _assert_zero_cost_provider(provider_id: str) -> None:
+    """Allow only documented $0 hosted model IDs or verified local endpoints.
+
+    Groq GPT-OSS, OpenAI, paid Z.AI models and arbitrary custom URLs are
+    deliberately rejected even after the UI acknowledgement. The model ID,
+    not the vendor's marketing label, determines the allowlist entry.
+    """
+    from memory.config_manager import get_provider_config
+    from providers import registry
+    from providers.llm_openai import _is_own_hardware
+
+    cfg = get_provider_config(provider_id)
+    entry = registry.catalog_entry(provider_id) or {}
+    model = str(cfg.get("model") or "").strip()
+    base_url = str(cfg.get("base_url") or "").strip().rstrip("/").lower()
+
+    if entry.get("local") is True and _is_own_hardware(base_url):
+        return
+    if (entry.get("id") == "zai" and model == "glm-4.7-flash"
+            and base_url == "https://api.z.ai/api/paas/v4"):
+        return
+    raise RouterError(
+        f"{provider_id} / {model or 'no model'} is not on MARK's verified $0 allowlist; "
+        "use Z.AI glm-4.7-flash or a private local endpoint"
+    )
+
+
 def _provider_call(provider_id: str, contents, config, timeout_ms: int,
                    task: str):
     from memory.config_manager import get_provider_config
     from providers import registry
 
     cfg = get_provider_config(provider_id)
+    _assert_zero_cost_provider(provider_id)
     missing = registry.missing_fields(provider_id, cfg)
     if missing:
         raise RouterError("provider is not configured: " + ", ".join(missing))
@@ -543,6 +579,9 @@ def dispatch(contents, tier: str = "smart", config=None,
     target = ""
     try:
         if task == "vision" and settings.get("gemma_vision", True):
+            target = str(settings.get("gemma_model") or GEMMA_VISION_MODEL)
+            response = _gemma_call(contents, config, timeout_ms, target)
+        elif task == "review":
             target = str(settings.get("gemma_model") or GEMMA_VISION_MODEL)
             response = _gemma_call(contents, config, timeout_ms, target)
         else:
