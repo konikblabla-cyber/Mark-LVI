@@ -3476,9 +3476,10 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._router_enabled_combo)
 
         lay.addWidget(self._label(
-            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash, and private local endpoints. "
+            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash, and verified private local endpoints. "
             "Groq GPT-OSS-120B is metered and blocked; other paid/custom cloud models are blocked too. "
-            "Still remove payment methods and auto-top-ups at providers.",
+            "Gemma screenshots and prompts are sent to Google; its free-tier content may be used to improve products. "
+            "Remove payment methods and auto-top-ups at providers.",
             7, C.ACC))
         self._router_free_combo = self._combo()
         self._router_free_combo.addItem("Not verified — router stays blocked", False)
