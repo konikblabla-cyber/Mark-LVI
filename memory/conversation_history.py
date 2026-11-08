@@ -87,28 +87,41 @@ def append_message(role: str, text: str, at: datetime | None = None) -> bool:
 
 
 def _read_entries(limit_scan: int = 12000) -> list[dict]:
+    """Read retained transcripts and physically purge expired/corrupt rows."""
     cfg = settings()
     if not cfg["enabled"] or not _HISTORY_PATH.exists():
         return []
     cutoff = datetime.now().astimezone() - timedelta(days=cfg["retention_days"])
     rows = []
+    retained_lines: list[str] = []
+    needs_rewrite = False
     try:
         with _LOCK:
             lines = _HISTORY_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
-        for line in lines[-limit_scan:]:
-            try:
-                item = json.loads(line)
-                ts = datetime.fromisoformat(item.get("ts", ""))
-                if ts.tzinfo is None:
-                    ts = ts.astimezone()
-                if ts < cutoff:
-                    continue
-                role = item.get("role")
-                text = item.get("text")
-                if role in {"user", "assistant"} and isinstance(text, str):
-                    rows.append({"ts": item["ts"], "role": role, "text": text})
-            except (ValueError, TypeError, json.JSONDecodeError):
-                continue
+            scan_lines = lines[-limit_scan:]
+            if len(scan_lines) != len(lines):
+                needs_rewrite = True
+            for line in scan_lines:
+                try:
+                    item = json.loads(line)
+                    ts = datetime.fromisoformat(item.get("ts", ""))
+                    if ts.tzinfo is None:
+                        ts = ts.astimezone()
+                    role = item.get("role")
+                    text = item.get("text")
+                    if ts < cutoff or role not in {"user", "assistant"} or not isinstance(text, str):
+                        needs_rewrite = True
+                        continue
+                    row = {"ts": item["ts"], "role": role, "text": text}
+                    rows.append(row)
+                    retained_lines.append(json.dumps(row, ensure_ascii=False))
+                except (ValueError, TypeError, json.JSONDecodeError, AttributeError):
+                    needs_rewrite = True
+            if needs_rewrite:
+                tmp = _HISTORY_PATH.with_suffix(".jsonl.tmp")
+                tmp.write_text("\n".join(retained_lines) + ("\n" if retained_lines else ""),
+                               encoding="utf-8")
+                tmp.replace(_HISTORY_PATH)
     except OSError:
         return []
     return rows
@@ -131,6 +144,21 @@ def search_messages(query: str, limit: int = 12) -> list[dict]:
             matches.append((score, item))
     matches.sort(key=lambda pair: (pair[0], pair[1]["ts"]), reverse=True)
     return [item for _score, item in matches[:max(1, min(int(limit), 30))]]
+
+
+def clear_history() -> bool:
+    """Delete the local transcript archive after the caller has confirmed."""
+    with _LOCK:
+        try:
+            if _HISTORY_PATH.exists():
+                _HISTORY_PATH.unlink()
+            tmp = _HISTORY_PATH.with_suffix(".jsonl.tmp")
+            if tmp.exists():
+                tmp.unlink()
+            return True
+        except OSError as exc:
+            print(f"[History] clear failed: {exc}")
+            return False
 
 
 def history_stats() -> dict:
