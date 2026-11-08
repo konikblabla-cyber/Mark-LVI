@@ -102,6 +102,8 @@ def _format(mission: dict) -> str:
     for step in mission.get("steps", []):
         mark = "✓" if step["status"] == "done" else ("!" if step["status"] == "blocked" else "·")
         lines.append(f"{mark} {step['id']} — {step['title']} [{step['status']}]")
+        if step.get("verification"):
+            lines.append(f"    Verified outcome: {step['verification']}")
     pending = next((s for s in mission.get("steps", []) if s["status"] == "pending"), None)
     if pending:
         lines.extend(["", f"NEXT: {pending['id']} — {pending['title']}"])
@@ -138,7 +140,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     "id": mid, "title": title, "goal": goal, "status": "active",
                     "created_at": _now(), "updated_at": _now(),
                     "steps": [{"id": f"S{i+1:02d}", "title": step, "status": "pending",
-                               "updated_at": ""} for i, step in enumerate(steps)],
+                               "verification": "", "updated_at": ""} for i, step in enumerate(steps)],
                 }
                 missions.append(mission)
                 _write(data)
@@ -170,7 +172,12 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 step = next((s for s in mission["steps"] if s["id"] == sid), None)
                 if step is None:
                     return "Give me a valid step_id for that mission."
+                verification = str(parameters.get("verification") or "").strip()
+                if not verification:
+                    return ("Give me the verified result from the tool that completed this step. "
+                            "I will not mark a step done without evidence.")
                 step["status"] = "done"
+                step["verification"] = verification[:500]
                 step["updated_at"] = _now()
                 mission["updated_at"] = _now()
                 if all(s["status"] == "done" for s in mission["steps"]):
@@ -185,7 +192,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if len(mission["steps"]) >= _MAX_STEPS:
                     return "This mission already has the maximum number of steps."
                 sid = f"S{len(mission['steps'])+1:02d}"
-                mission["steps"].append({"id": sid, "title": title, "status": "pending", "updated_at": ""})
+                mission["steps"].append({"id": sid, "title": title, "status": "pending",
+                                         "verification": "", "updated_at": ""})
                 mission["updated_at"] = _now()
                 _write(data)
                 result = _format(mission)
@@ -221,7 +229,7 @@ PLUGIN = {
         "requires several ordered steps, spans more than one turn, or the user asks to plan, "
         "track, resume or review ongoing work. Create a mission first, then execute its steps "
         "with the existing computer/browser/file tools; mark a step complete only after the "
-        "tool outcome is verified. This plugin stores plans and progress but does NOT itself "
+        "tool outcome is verified, and include a short verification summary when marking it done. This plugin stores plans and progress but does NOT itself "
         "execute commands or modify files."
     ),
     "tier": "core",
@@ -235,6 +243,7 @@ PLUGIN = {
             "steps": {"type": "STRING", "description": "Optional ordered step list, one step per line"},
             "mission_id": {"type": "STRING", "description": "ID of an existing mission"},
             "step_id": {"type": "STRING", "description": "Step ID such as S01"},
+            "verification": {"type": "STRING", "description": "Short result or evidence from the tool that completed the step"},
         },
         "required": ["action"],
     },
