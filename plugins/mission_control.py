@@ -211,6 +211,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
                 if mission is None:
                     return "Give me a valid mission_id."
+                if mission.get("status") != "active":
+                    return "This mission is paused or inactive. Resume it before completing any step."
                 step = next((s for s in mission["steps"] if s["id"] == sid), None)
                 if step is None:
                     return "Give me a valid step_id for that mission."
@@ -241,6 +243,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
                 if mission is None:
                     return "Give me a valid mission_id."
+                if mission.get("status") != "active":
+                    return "This mission is paused or inactive. Resume it before blocking a step."
                 step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
                 if step is None or not reason:
                     return "Give me a valid step_id and a concise blocker reason."
@@ -339,6 +343,7 @@ PLUGIN = {
             "mission_id": {"type": "STRING", "description": "ID of an existing mission"},
             "step_id": {"type": "STRING", "description": "Step ID such as S01"},
             "verification": {"type": "STRING", "description": "Short result or evidence from the tool that completed the step"},
+            "reason": {"type": "STRING", "description": "Why the current step cannot proceed, for block_step"},
         },
         "required": ["action"],
     },
