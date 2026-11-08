@@ -11,6 +11,7 @@ on:
       - "memory/conversation_history.py"
       - "plugins/conversation_history.py"
       - "plugins/mission_control.py"
+      - "core/prompt.txt"
       - "plugins/knowledge_vault.py"
       - "memory/config_manager.py"
       - "providers/llm_openai.py"

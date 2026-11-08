@@ -1,8 +1,8 @@
 """Persistent Mission Control — plans and tracks multi-step work locally.
 
-This plugin stores plans only. It does not run shell commands, code or external
-actions by itself. JARVIS executes a step using its existing tools, verifies the
-outcome, then marks that step complete here.
+This plugin stores mission state. The live JARVIS model executes each active
+step with its existing tools, verifies the outcome, then records completion.
+The plugin never executes arbitrary commands or invents tool results.
 """
 from __future__ import annotations
 
@@ -93,10 +93,34 @@ def _generate_steps(goal: str) -> list[str]:
     return []
 
 
+def _next_pending(mission: dict):
+    return next((step for step in mission.get("steps", [])
+                 if step.get("status") == "pending"), None)
+
+
+def _continue_instruction(mission: dict) -> str:
+    """A durable hand-off to the already-running Live model's next tool cycle."""
+    step = _next_pending(mission)
+    if mission.get("status") == "completed" or step is None:
+        return (
+            "\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
+            "Report the completed result to the user; do not invent extra work."
+        )
+    return (
+        "\n[MISSION_CONTINUE] Continue this autonomous mission now. "
+        f"MISSION_ID={mission['id']} STEP_ID={step['id']}. "
+        f"Execute this step using the existing available tools: {step['title']}. "
+        "When the tool result verifies success, record it with complete_step and "
+        "continue to the next pending step. On a blocker, use block_step and stop. "
+        "Never mark a step done without a real tool result."
+    )
+
+
 def _format(mission: dict) -> str:
     lines = [
         f"MISSION {mission['id']}: {mission['title']}",
         f"Status: {mission['status']}",
+        f"Mode: {mission.get('execution_mode', 'plan')}",
         f"Goal: {mission['goal']}",
     ]
     for step in mission.get("steps", []):
@@ -138,13 +162,31 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 mid = "M-" + datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
                 mission = {
                     "id": mid, "title": title, "goal": goal, "status": "active",
+                    "execution_mode": "plan",
                     "created_at": _now(), "updated_at": _now(),
                     "steps": [{"id": f"S{i+1:02d}", "title": step, "status": "pending",
-                               "verification": "", "updated_at": ""} for i, step in enumerate(steps)],
+                               "verification": "", "blocked_reason": "", "updated_at": ""}
+                              for i, step in enumerate(steps)],
                 }
                 missions.append(mission)
                 _write(data)
-                result = _format(mission)
+                result = _format(mission) + (
+                    "\n\nPlan saved only. Start execution with action='start' "
+                    "when the user has asked you to carry out the goal."
+                )
+            elif action == "start":
+                mission = next((m for m in missions if m.get("id") == mission_id), None)
+                if mission is None:
+                    return "Give me a valid mission_id."
+                if mission.get("status") in {"completed", "archived"}:
+                    return "This mission is completed or archived and cannot be started."
+                if any(step.get("status") == "blocked" for step in mission.get("steps", [])):
+                    return "This mission has a blocked step. Resolve the blocker, then use resume."
+                mission["execution_mode"] = "autonomous"
+                mission["status"] = "active"
+                mission["updated_at"] = _now()
+                _write(data)
+                result = _format(mission) + _continue_instruction(mission)
             elif action in {"list", "show", "next"}:
                 selected = None
                 if mission_id:
@@ -169,21 +211,56 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
                 if mission is None:
                     return "Give me a valid mission_id."
+                if mission.get("status") != "active":
+                    return "This mission is paused or inactive. Resume it before completing any step."
                 step = next((s for s in mission["steps"] if s["id"] == sid), None)
                 if step is None:
                     return "Give me a valid step_id for that mission."
+                if step.get("status") == "done":
+                    return "That step is already marked done; do not execute it again."
+                expected = _next_pending(mission)
+                if expected is not None and expected.get("id") != sid:
+                    return (f"Out-of-order completion refused. The next pending step is "
+                            f"{expected['id']}: {expected['title']}.")
                 verification = str(parameters.get("verification") or "").strip()
                 if not verification:
                     return ("Give me the verified result from the tool that completed this step. "
                             "I will not mark a step done without evidence.")
                 step["status"] = "done"
                 step["verification"] = verification[:500]
+                step["blocked_reason"] = ""
                 step["updated_at"] = _now()
                 mission["updated_at"] = _now()
                 if all(s["status"] == "done" for s in mission["steps"]):
                     mission["status"] = "completed"
                 _write(data)
                 result = _format(mission)
+                if mission.get("execution_mode") == "autonomous":
+                    result += _continue_instruction(mission)
+            elif action == "block_step":
+                sid = str(parameters.get("step_id") or "").strip()
+                reason = str(parameters.get("reason") or "").strip()
+                mission = next((m for m in missions if m.get("id") == mission_id), None)
+                if mission is None:
+                    return "Give me a valid mission_id."
+                if mission.get("status") != "active":
+                    return "This mission is paused or inactive. Resume it before blocking a step."
+                step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
+                if step is None or not reason:
+                    return "Give me a valid step_id and a concise blocker reason."
+                expected = _next_pending(mission)
+                if expected is not None and expected.get("id") != sid:
+                    return f"Only the next pending step ({expected['id']}) can be blocked."
+                step["status"] = "blocked"
+                step["blocked_reason"] = reason[:500]
+                step["updated_at"] = _now()
+                mission["status"] = "paused"
+                mission["updated_at"] = _now()
+                _write(data)
+                result = _format(mission) + (
+                    "\n[MISSION_BLOCKED] Stop this mission here. Explain the exact "
+                    "blocker to the user and do not attempt later steps."
+                )
             elif action == "add_step":
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
                 title = str(parameters.get("title") or "").strip()[:220]
@@ -205,19 +282,37 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                           "complete": "completed"}[action]
                 if action == "complete" and any(s["status"] != "done" for s in mission["steps"]):
                     return "This mission still has unfinished steps. Complete or explicitly archive those first."
+                if action == "resume":
+                    # A resume means the user has cleared the recorded blocker.
+                    for step in mission.get("steps", []):
+                        if step.get("status") == "blocked":
+                            step["status"] = "pending"
+                            step["blocked_reason"] = ""
+                            step["updated_at"] = _now()
                 mission["status"] = status
                 mission["updated_at"] = _now()
                 _write(data)
                 result = _format(mission)
+                if action == "resume" and mission.get("execution_mode") == "autonomous":
+                    result += _continue_instruction(mission)
             else:
-                return "Choose plan, list, show, next, complete_step, add_step, pause, resume, complete or archive."
+                return ("Choose plan, start, list, show, next, complete_step, block_step, "
+                        "add_step, pause, resume, complete or archive.")
 
         if player:
             try:
                 player.show_content("MISSION CONTROL", result)
             except Exception:
                 pass
-        return result if len(result) < 900 else "Mission updated. The full plan is displayed on screen."
+        if len(result) < 900:
+            return result
+        # Never drop the machine-readable continuation/block/completion hand-off
+        # when a long mission plan is shown in the HUD instead of spoken.
+        marker = next((tag for tag in (
+            "[MISSION_CONTINUE]", "[MISSION_BLOCKED]", "[MISSION_COMPLETE]"
+        ) if tag in result), "")
+        tail = result[result.index(marker):] if marker else ""
+        return "Mission updated. The full plan is displayed on screen. " + tail
     except Exception as exc:
         return f"Mission Control failed: {type(exc).__name__}: {str(exc)[:160]}"
 
@@ -227,23 +322,28 @@ PLUGIN = {
     "description": (
         "Persistent Mission Control for multi-step goals and projects. Use it when a request "
         "requires several ordered steps, spans more than one turn, or the user asks to plan, "
-        "track, resume or review ongoing work. Create a mission first, then execute its steps "
-        "with the existing computer/browser/file tools; mark a step complete only after the "
-        "tool outcome is verified, and include a short verification summary when marking it done. This plugin stores plans and progress but does NOT itself "
-        "execute commands or modify files."
+        "track, resume or review ongoing work. If the user only asks for a plan, save it with "
+        "action='plan' and stop. If the user asks you to DO the goal, call action='plan' then "
+        "action='start' with its mission_id. The [MISSION_CONTINUE] result is an instruction "
+        "to execute the next step immediately using the existing tools, record verified "
+        "success with complete_step, and continue until [MISSION_COMPLETE] or [MISSION_BLOCKED]. "
+        "Never mark a step done without tool evidence. Stop at [CONFIRMATION_PENDING] and ask "
+        "for the real HUD confirmation. This plugin stores mission state; the live assistant "
+        "executes steps through its existing tools."
     ),
     "tier": "core",
     "brief": "Create and track durable multi-step missions, see next steps and resume paused work.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "plan, list, show, next, complete_step, add_step, pause, resume, complete or archive"},
+            "action": {"type": "STRING", "description": "plan, start, list, show, next, complete_step, block_step, add_step, pause, resume, complete or archive"},
             "title": {"type": "STRING", "description": "Mission title"},
             "goal": {"type": "STRING", "description": "What must be achieved"},
             "steps": {"type": "STRING", "description": "Optional ordered step list, one step per line"},
             "mission_id": {"type": "STRING", "description": "ID of an existing mission"},
             "step_id": {"type": "STRING", "description": "Step ID such as S01"},
             "verification": {"type": "STRING", "description": "Short result or evidence from the tool that completed the step"},
+            "reason": {"type": "STRING", "description": "Why the current step cannot proceed, for block_step"},
         },
         "required": ["action"],
     },

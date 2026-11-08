@@ -115,7 +115,7 @@ class ConversationHistoryPluginTests(unittest.TestCase):
         from core import confirm
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "history.jsonl"
-            path.write_text('{"role":"user","text":"private"}\\n', encoding="utf-8")
+            path.write_text('{"role":"user","text":"private"}\n', encoding="utf-8")
             captured = {}
 
             def fake_request(key, title, detail, run):
@@ -164,6 +164,101 @@ class MissionControlTests(unittest.TestCase):
                 self.assertEqual(stored["missions"][0]["steps"][0]["status"], "done")
                 self.assertIn("verified", stored["missions"][0]["steps"][0]["verification"].lower())
                 self.assertEqual(stored["missions"][0]["status"], "active")
+
+    def test_autonomous_mission_continues_until_verified_completion(self):
+        from plugins import mission_control as mission
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missions.json"
+            with patch.object(mission, "_DATA_PATH", path):
+                planned = mission.run({
+                    "action": "plan", "title": "Create a project",
+                    "goal": "Create and verify two project files",
+                    "steps": "Create the first file\nCreate the second file",
+                })
+                mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
+                self.assertNotIn("[MISSION_CONTINUE]", planned)
+
+                started = mission.run({"action": "start", "mission_id": mission_id})
+                self.assertIn("[MISSION_CONTINUE]", started)
+                self.assertIn("STEP_ID=S01", started)
+
+                first = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "First file exists and was read back.",
+                })
+                self.assertIn("[MISSION_CONTINUE]", first)
+                self.assertIn("STEP_ID=S02", first)
+
+                final = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S02", "verification": "Second file exists and was read back.",
+                })
+                self.assertIn("[MISSION_COMPLETE]", final)
+                self.assertIn("Status: completed", final)
+                stored = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual(stored["missions"][0]["execution_mode"], "autonomous")
+                self.assertEqual(
+                    [step["status"] for step in stored["missions"][0]["steps"]],
+                    ["done", "done"],
+                )
+
+    def test_autonomous_mission_rejects_out_of_order_and_blocks(self):
+        from plugins import mission_control as mission
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missions.json"
+            with patch.object(mission, "_DATA_PATH", path):
+                planned = mission.run({
+                    "action": "plan", "title": "Ordered job",
+                    "goal": "Perform steps in order",
+                    "steps": "First step\nSecond step",
+                })
+                mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
+                mission.run({"action": "start", "mission_id": mission_id})
+                out_of_order = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S02", "verification": "Attempted second step",
+                })
+                self.assertIn("Out-of-order", out_of_order)
+
+                blocked = mission.run({
+                    "action": "block_step", "mission_id": mission_id,
+                    "step_id": "S01", "reason": "A required permission is missing.",
+                })
+                self.assertIn("[MISSION_BLOCKED]", blocked)
+                self.assertIn("Status: paused", blocked)
+
+                resumed = mission.run({"action": "resume", "mission_id": mission_id})
+                self.assertIn("[MISSION_CONTINUE]", resumed)
+                self.assertIn("STEP_ID=S01", resumed)
+
+    def test_paused_mission_rejects_completion_until_resume(self):
+        from plugins import mission_control as mission
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missions.json"
+            with patch.object(mission, "_DATA_PATH", path):
+                planned = mission.run({
+                    "action": "plan", "title": "Paused job",
+                    "goal": "Do one task safely", "steps": "Do the task",
+                })
+                mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
+                mission.run({"action": "start", "mission_id": mission_id})
+                mission.run({
+                    "action": "block_step", "mission_id": mission_id,
+                    "step_id": "S01", "reason": "Waiting for user approval.",
+                })
+                refused = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "This must not be accepted.",
+                })
+                self.assertIn("paused or inactive", refused.lower())
+
+                resumed = mission.run({"action": "resume", "mission_id": mission_id})
+                self.assertIn("[MISSION_CONTINUE]", resumed)
+                completed = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "User approved and the task succeeded.",
+                })
+                self.assertIn("[MISSION_COMPLETE]", completed)
 
     def test_corrupt_mission_store_is_not_overwritten(self):
         from plugins import mission_control as mission
