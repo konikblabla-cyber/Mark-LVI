@@ -150,6 +150,8 @@ class MissionControlTests(unittest.TestCase):
 
                 next_step = mission.run({"action": "next"})
                 self.assertIn("S01", next_step)
+                mission.run({"action": "start", "mission_id": mission_id})
+                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
                 done = mission.run({
                     "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
                     "verification": "Created the notes file and verified it exists."
@@ -182,6 +184,7 @@ class MissionControlTests(unittest.TestCase):
                 self.assertIn("[MISSION_CONTINUE]", started)
                 self.assertIn("STEP_ID=S01", started)
 
+                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
                 first = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
                     "step_id": "S01", "verification": "First file exists and was read back.",
@@ -189,6 +192,7 @@ class MissionControlTests(unittest.TestCase):
                 self.assertIn("[MISSION_CONTINUE]", first)
                 self.assertIn("STEP_ID=S02", first)
 
+                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S02"})
                 final = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
                     "step_id": "S02", "verification": "Second file exists and was read back.",
@@ -214,6 +218,7 @@ class MissionControlTests(unittest.TestCase):
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 mission.run({"action": "start", "mission_id": mission_id})
+                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
                 out_of_order = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
                     "step_id": "S02", "verification": "Attempted second step",
@@ -242,6 +247,7 @@ class MissionControlTests(unittest.TestCase):
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 mission.run({"action": "start", "mission_id": mission_id})
+                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
                 mission.run({
                     "action": "block_step", "mission_id": mission_id,
                     "step_id": "S01", "reason": "Waiting for user approval.",
@@ -254,6 +260,7 @@ class MissionControlTests(unittest.TestCase):
 
                 resumed = mission.run({"action": "resume", "mission_id": mission_id})
                 self.assertIn("[MISSION_CONTINUE]", resumed)
+                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
                 completed = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
                     "step_id": "S01", "verification": "User approved and the task succeeded.",
@@ -270,6 +277,50 @@ class MissionControlTests(unittest.TestCase):
             self.assertIn("unreadable", result.lower())
             self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
 
+
+
+    def test_interrupted_running_step_is_not_replayed_after_resume(self):
+        from plugins import mission_control as mission
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missions.json"
+            with patch.object(mission, "_DATA_PATH", path):
+                planned = mission.run({
+                    "action": "plan", "title": "Safe interrupted task",
+                    "goal": "Perform one side effect exactly once", "steps": "Create a marker file",
+                })
+                mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
+                mission.run({"action": "start", "mission_id": mission_id})
+                started = mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
+                self.assertIn("[MISSION_STEP_STARTED]", started)
+                duplicate = mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
+                self.assertIn("[MISSION_RECOVERY]", duplicate)
+                self.assertIn("Do not repeat side effects", duplicate)
+                mission.run({"action": "pause", "mission_id": mission_id})
+                resumed = mission.run({"action": "resume", "mission_id": mission_id})
+                self.assertIn("[MISSION_RECOVERY]", resumed)
+                self.assertNotIn("[MISSION_CONTINUE]", resumed)
+                refused = mission.run({
+                    "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
+                    "verification": "Must not complete without recovery verification",
+                })
+                self.assertIn("Call begin_step", refused)
+
+    def test_step_must_be_started_before_completion(self):
+        from plugins import mission_control as mission
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "missions.json"
+            with patch.object(mission, "_DATA_PATH", path):
+                planned = mission.run({
+                    "action": "plan", "title": "Guard test",
+                    "goal": "Require explicit step start", "steps": "Do one thing",
+                })
+                mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
+                mission.run({"action": "start", "mission_id": mission_id})
+                refused = mission.run({
+                    "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
+                    "verification": "Forged success",
+                })
+                self.assertIn("Call begin_step", refused)
 
 class KnowledgeVaultTests(unittest.TestCase):
     def setUp(self):
