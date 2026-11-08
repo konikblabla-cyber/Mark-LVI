@@ -163,14 +163,32 @@ class RouterSafetyTests(unittest.TestCase):
              patch.object(router, "_reserve", return_value=20), \
              patch.object(router, "_provider_for", return_value="coding-provider"), \
              patch.object(router, "_alternate_provider", return_value="review-provider"), \
-             patch.object(router, "_provider_call", side_effect=[primary, reviewer]) as call, \
+             patch.object(router, "_provider_call", return_value=primary) as call, \
+             patch.object(router, "_gemma_call", return_value=reviewer) as critic, \
              patch.object(router, "_audit"):
             result = router.dispatch(
                 "Explain the security architecture trade-offs in detail.",
                 tier="smart")
         self.assertEqual(result.text, "The corrected answer.")
-        self.assertEqual(call.call_count, 2)
-        self.assertEqual(call.call_args_list[1].args[0], "review-provider")
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(critic.call_count, 1)
+        self.assertEqual(critic.call_args.args[0][0].startswith("You are the independent reviewer"), True)
+
+    def test_verified_free_zai_model_is_allowed(self):
+        config = {"model": "glm-4.7-flash", "base_url": "https://api.z.ai/api/paas/v4"}
+        with patch("memory.config_manager.get_provider_config", return_value=config), \
+             patch("providers.registry.catalog_entry", return_value={"id": "zai", "local": False}):
+            router._assert_zero_cost_provider("openai_compat@zai")
+
+    def test_metered_groq_model_is_blocked(self):
+        config = {"model": "openai/gpt-oss-120b", "base_url": "https://api.groq.com/openai/v1"}
+        with patch("memory.config_manager.get_provider_config", return_value=config), \
+             patch("providers.registry.catalog_entry", return_value={"id": "groq", "local": False}):
+            with self.assertRaises(router.RouterError):
+                router._assert_zero_cost_provider("openai_compat@groq")
+
+    def test_only_allowlisted_gemma_is_accepted(self):
+        self.assertEqual(router.GEMMA_VISION_MODEL, "gemma-4-26b-a4b-it")
 
     def test_json_output_is_verified(self):
         with self.assertRaises(router.RouterError):
