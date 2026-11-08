@@ -34,10 +34,22 @@ class RouterReply:
         self.text = text
 
 _lock = threading.RLock()
+_REVIEW_RE = re.compile(
+    r"\b(review|code review|security audit|audit|audyt|przegląd|przeglad|"
+    r"sprawdź kod|sprawdz kod|bezpieczeństwo kodu|bezpieczenstwo kodu)\b",
+    re.IGNORECASE,
+)
 _CODING_RE = re.compile(
     r"\b(code|coding|program|programming|python|javascript|typescript|script|"
     r"repository|repo|debug|bug|refactor|implement|compile|kod|programowanie|"
     r"skrypt|repozytorium|błąd|blad|napraw kod|napisz kod)\b",
+    re.IGNORECASE,
+)
+_COMPLEX_RE = re.compile(
+    r"\b(architecture|architectural|security|threat|risk|trade.?off|"
+    r"root cause|scalability|migration|performance|strategy|deep analysis|"
+    r"architektura|bezpieczeństwo|bezpieczenstwo|zagrożenia|zagrozenia|"
+    r"ryzyko|porównaj|porownaj|strategia|przyczyna|skalowanie|migracja|audyt)\b",
     re.IGNORECASE,
 )
 _IMAGE_MIMES = ("image/",)
@@ -120,7 +132,7 @@ def _text_of(contents) -> str:
 
 def classify_task(contents, tier: str = "smart", task_type: str | None = None) -> str:
     """Deterministic, inexpensive routing.  Explicit task_type always wins."""
-    allowed = {"vision", "fast", "reasoning", "coding"}
+    allowed = {"vision", "fast", "reasoning", "coding", "review"}
     explicit = str(task_type or "").strip().lower()
     if explicit:
         if explicit not in allowed:
@@ -133,7 +145,9 @@ def classify_task(contents, tier: str = "smart", task_type: str | None = None) -
         return "vision"
 
     text = _text_of(contents)
-    if _CODING_RE.search(text) or "```" in text:
+    if _REVIEW_RE.search(text):
+        return "review"
+    if _CODING_RE.search(text) or (chr(96) * 3) in text:
         return "coding"
     if tier == "fast":
         return "fast"
@@ -148,13 +162,133 @@ def _provider_for(task: str, provider_override: str = "") -> str:
 
     sidecar = get_sidecar_provider()
     coding = provider_override or get_coding_provider()
-    if task == "fast":
+    if task in ("fast", "review", "vision"):
         return sidecar
     if task in ("reasoning", "coding"):
         return coding or sidecar
-    if task == "vision":
-        return sidecar
     return ""
+
+
+def _alternate_provider(primary: str, provider_override: str = "") -> str:
+    """The one other configured endpoint, if it is genuinely a different service."""
+    from memory.config_manager import get_coding_provider, get_sidecar_provider
+
+    candidates = (get_sidecar_provider(), provider_override or get_coding_provider())
+    return next((candidate for candidate in candidates if candidate and candidate != primary), "")
+
+
+def _is_transient_error(exc: Exception) -> bool:
+    """Retry only transport/outage/quota failures, never auth or bad requests."""
+    message = str(exc).lower()
+    if any(code in message for code in ("401", "403", "404", "400", "invalid api key",
+                                        "permission denied", "model not found")):
+        return False
+    return any(token in message for token in (
+        "429", "500", "502", "503", "504", "timeout", "timed out",
+        "connecterror", "connection error", "connection refused",
+        "service unavailable", "temporarily unavailable", "overloaded",
+        "network is unreachable",
+    ))
+
+
+def _json_object(text: str) -> dict | None:
+    """Parse the first JSON object from a model reply without trusting its prose."""
+    body = re.sub(r"(?is)<think(?:ing)?>.*?</think(?:ing)?>", "", text or "")
+    fence = chr(96) * 3
+    candidates = re.findall(r"(?is)" + re.escape(fence) + r"(?:json)?\s*(.*?)" + re.escape(fence), body) + [body]
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        for index, char in enumerate(candidate):
+            if char != "{":
+                continue
+            try:
+                value, _end = decoder.raw_decode(candidate, index)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                return value
+    return None
+
+
+def _verify_response(task: str, response, config=None) -> str:
+    """Small deterministic checks before a result is accepted."""
+    answer = (getattr(response, "text", None) or "").strip()
+    if not answer:
+        raise RouterError("model returned an empty response")
+
+    mime = ""
+    if isinstance(config, dict):
+        mime = str(config.get("response_mime_type") or "")
+    elif config is not None:
+        mime = str(getattr(config, "response_mime_type", "") or "")
+    if mime.lower() == "application/json":
+        fence = chr(96) * 3
+        candidate = re.sub(r"^" + re.escape(fence) + r"(?:json)?\s*|\s*" + re.escape(fence) + r"$", "", answer, flags=re.I)
+        try:
+            json.loads(candidate)
+        except ValueError as exc:
+            raise RouterError("response failed JSON validation") from exc
+    if task in ("coding", "review") and answer.count(chr(96) * 3) % 2:
+        raise RouterError("response contains an unclosed code fence")
+    return answer
+
+
+def _needs_second_opinion(task: str, contents, settings: dict) -> bool:
+    """Only complex reasoning gets a critic; ordinary prompts stay single-model."""
+    if task != "reasoning" or not settings.get("second_opinion", False):
+        return False
+    text = _text_of(contents)
+    try:
+        threshold = max(500, min(int(settings.get("review_min_chars", 2500)), 20000))
+    except (TypeError, ValueError):
+        threshold = 2500
+    return len(text) >= threshold or bool(_COMPLEX_RE.search(text))
+
+
+def _second_opinion(contents, draft: str, reviewer_id: str, settings: dict,
+                    timeout_ms: int) -> str | None:
+    """Ask one independent model to challenge a complex answer and return a fix."""
+    original = _text_of(contents)
+    prompt = (
+        "You are the independent reviewer for a personal AI assistant. "
+        "Review the proposed answer against the original task. Look for factual "
+        "errors, missing constraints, contradictions, unsafe assumptions and "
+        "unsupported claims. Do not invent sources. If the draft is sound, accept it. "
+        "If it has a material problem, provide a corrected complete answer. "
+        "Return ONLY JSON with this schema: "
+        "{\"verdict\":\"accept\" or \"improve\",\"issues\":[\"...\"],"
+        "\"answer\":\"final answer, or empty when accepted\"}.\n\n"
+        "ORIGINAL TASK:\n" + original[:12000] +
+        "\n\nDRAFT ANSWER:\n" + draft[:16000]
+    )
+    chars = len(prompt)
+    started = time.monotonic()
+    try:
+        _reserve(prompt, settings)
+        reply = _provider_call(
+            reviewer_id, [prompt], {"temperature": 0.1},
+            timeout_ms, "review",
+        )
+        review_text = _verify_response("review", reply)
+        obj = _json_object(review_text)
+        if not obj:
+            _audit("review", reviewer_id, "invalid_review", chars,
+                   int((time.monotonic() - started) * 1000), "InvalidJSON")
+            return None
+        verdict = str(obj.get("verdict") or "accept").strip().lower()
+        if verdict == "improve":
+            improved = str(obj.get("answer") or "").strip()
+            if improved:
+                _audit("review", reviewer_id, "improved", chars,
+                       int((time.monotonic() - started) * 1000))
+                return improved
+        _audit("review", reviewer_id, "accepted", chars,
+               int((time.monotonic() - started) * 1000))
+        return None
+    except Exception as exc:
+        _audit("review", reviewer_id, "skipped", chars,
+               int((time.monotonic() - started) * 1000), type(exc).__name__)
+        return None
 
 
 def _input_chars(contents) -> int:
@@ -373,10 +507,10 @@ def _provider_call(provider_id: str, contents, config, timeout_ms: int,
 def dispatch(contents, tier: str = "smart", config=None,
              timeout_ms: int = 10_000, task_type: str | None = None,
              provider_override: str = ""):
-    """Return NOT_ROUTED when disabled/unmatched; otherwise a routed response.
+    """Route one task, optionally retry once or obtain a bounded second opinion.
 
-    Once enabled, a classified task never drops back to the legacy Gemini
-    ladder. Missing routes and errors raise RouterError instead.
+    The live voice session is not routed here. No model fan-out occurs for
+    ordinary requests: critics run only for enabled, complex reasoning tasks.
     """
     settings = _settings()
     if not settings.get("enabled"):
@@ -398,12 +532,53 @@ def dispatch(contents, tier: str = "smart", config=None,
             target = str(settings.get("gemma_model") or GEMMA_VISION_MODEL)
             response = _gemma_call(contents, config, timeout_ms, target)
         else:
-            provider_id = _provider_for(task, provider_override)
-            if not provider_id:
+            primary_id = _provider_for(task, provider_override)
+            if not primary_id:
                 raise RouterError(f"no provider assigned to the {task} route")
-            target = provider_id
-            response = _provider_call(provider_id, contents, config, timeout_ms, task)
-        _audit(task, target, "ok", chars, int((time.monotonic() - started) * 1000))
+            target = primary_id
+            try:
+                response = _provider_call(primary_id, contents, config, timeout_ms, task)
+            except Exception as primary_error:
+                alternate_id = _alternate_provider(primary_id, provider_override)
+                can_retry = bool(settings.get("retry_on_transient", False))
+                if not (can_retry and alternate_id and _is_transient_error(primary_error)):
+                    raise
+                retry_chars = _reserve(contents, settings)
+                try:
+                    response = _provider_call(alternate_id, contents, config, timeout_ms, task)
+                    target = f"{primary_id} -> {alternate_id}"
+                    _audit(task, target, "retry_success", retry_chars,
+                           int((time.monotonic() - started) * 1000))
+                except Exception as retry_error:
+                    _audit(task, f"{primary_id} -> {alternate_id}", "retry_failed",
+                           retry_chars, int((time.monotonic() - started) * 1000),
+                           type(retry_error).__name__)
+                    raise RouterError(
+                        "primary model was temporarily unavailable and the one permitted retry failed"
+                    ) from retry_error
+
+            answer = _verify_response(task, response, config)
+            if _needs_second_opinion(task, contents, settings):
+                reviewer_id = _alternate_provider(primary_id, provider_override)
+                if reviewer_id:
+                    improved = _second_opinion(
+                        contents, answer, reviewer_id, settings, timeout_ms)
+                    if improved:
+                        answer = improved
+                        response = RouterReply(answer)
+            if isinstance(response, RouterReply):
+                response.text = answer
+            else:
+                try:
+                    response.text = answer
+                except Exception:
+                    response = RouterReply(answer)
+
+        answer = _verify_response(task, response, config)
+        if isinstance(response, RouterReply):
+            response.text = answer
+        _audit(task, target or "unassigned", "ok",
+               chars, int((time.monotonic() - started) * 1000))
         return response
     except RouterError as exc:
         _audit(task, target or "unassigned", "blocked", chars,
@@ -412,5 +587,4 @@ def dispatch(contents, tier: str = "smart", config=None,
     except Exception as exc:
         _audit(task, target or "unassigned", "error", chars,
                int((time.monotonic() - started) * 1000), type(exc).__name__)
-        # Do not print provider response bodies; they can contain sensitive data.
-        raise RouterError(f"{task} route failed ({type(exc).__name__}); no fallback was attempted") from exc
+        raise RouterError(f"{task} route failed ({type(exc).__name__}); no further provider was tried") from exc
