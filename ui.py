@@ -3475,6 +3475,17 @@ class ProvidersOverlay(_HudOverlay):
         self._router_enabled_combo.setCurrentIndex(1 if cfg.get("enabled") else 0)
         lay.addWidget(self._router_enabled_combo)
 
+        lay.addWidget(self._label(
+            "Cost safety: only confirm after disabling auto-top-ups and removing payment methods "
+            "at every provider. MARK cannot inspect provider billing settings; local limits do not "
+            "guarantee a $0 invoice.",
+            7, C.ACC))
+        self._router_free_combo = self._combo()
+        self._router_free_combo.addItem("Not verified — router stays blocked", False)
+        self._router_free_combo.addItem("Verified: $0 plan, no payment method, no auto top-up", True)
+        self._router_free_combo.setCurrentIndex(1 if cfg.get("zero_cost_confirmed") else 0)
+        lay.addWidget(self._router_free_combo)
+
         lay.addWidget(self._label("Gemma vision model ID", 7, C.TEXT_DIM))
         self._gemma_model_edit = self._line(str(cfg.get("gemma_model") or "gemma-4-26b-a4b-it"))
         lay.addWidget(self._gemma_model_edit)
@@ -3781,8 +3792,15 @@ class ProvidersOverlay(_HudOverlay):
 
         from memory.config_manager import save_model_router_config
         try:
+            router_enabled = bool(self._router_enabled_combo.currentData())
+            zero_cost_confirmed = bool(self._router_free_combo.currentData())
+            if router_enabled and not zero_cost_confirmed:
+                self._footer.setText(
+                    "Router blocked: verify $0 provider plans, remove payment methods and disable auto top-ups.")
+                return
             router_values = {
-                "enabled": bool(self._router_enabled_combo.currentData()),
+                "enabled": router_enabled,
+                "zero_cost_confirmed": zero_cost_confirmed,
                 "gemma_model": self._gemma_model_edit.text().strip() or "gemma-4-26b-a4b-it",
                 "daily_calls": int(self._router_calls_edit.text().strip()),
                 "daily_input_chars": int(self._router_chars_edit.text().strip()),
