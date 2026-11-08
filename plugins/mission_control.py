@@ -103,11 +103,11 @@ def _continue_instruction(mission: dict) -> str:
     step = _next_pending(mission)
     if mission.get("status") == "completed" or step is None:
         return (
-            "\\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
+            "\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
             "Report the completed result to the user; do not invent extra work."
         )
     return (
-        "\\n[MISSION_CONTINUE] Continue this autonomous mission now. "
+        "\n[MISSION_CONTINUE] Continue this autonomous mission now. "
         f"MISSION_ID={mission['id']} STEP_ID={step['id']}. "
         f"Execute this step using the existing available tools: {step['title']}. "
         "When the tool result verifies success, record it with complete_step and "
@@ -171,7 +171,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 missions.append(mission)
                 _write(data)
                 result = _format(mission) + (
-                    "\\n\\nPlan saved only. Start execution with action='start' "
+                    "\n\\nPlan saved only. Start execution with action='start' "
                     "when the user has asked you to carry out the goal."
                 )
             elif action == "start":
@@ -254,7 +254,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 mission["updated_at"] = _now()
                 _write(data)
                 result = _format(mission) + (
-                    "\\n[MISSION_BLOCKED] Stop this mission here. Explain the exact "
+                    "\n[MISSION_BLOCKED] Stop this mission here. Explain the exact "
                     "blocker to the user and do not attempt later steps."
                 )
             elif action == "add_step":
