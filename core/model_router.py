@@ -169,6 +169,13 @@ def _provider_for(task: str, provider_override: str = "") -> str:
     return ""
 
 
+def has_independent_reviewer() -> bool:
+    """True only when BACKGROUND and CODING are both set to different providers."""
+    from memory.config_manager import get_coding_provider, get_sidecar_provider
+    sidecar, coding = get_sidecar_provider(), get_coding_provider()
+    return bool(sidecar and coding and sidecar != coding)
+
+
 def _alternate_provider(primary: str, provider_override: str = "") -> str:
     """The one other configured endpoint, if it is genuinely a different service."""
     from memory.config_manager import get_coding_provider, get_sidecar_provider
