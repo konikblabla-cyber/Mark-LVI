@@ -121,12 +121,14 @@ def _untrusted(title: str, body: str) -> str:
     return f"<<<UNTRUSTED source=local-note:{title}>>>\n{body}\n<<<END UNTRUSTED>>>"
 
 
-def _show(player, title: str, body: str) -> None:
-    if player:
-        try:
-            player.show_content(title, body)
-        except Exception:
-            pass
+def _show(player, title: str, body: str) -> bool:
+    if player is None:
+        return False
+    try:
+        player.show_content(title, body)
+        return True
+    except Exception:
+        return False
 
 
 def run(parameters: dict, player=None, session_memory=None) -> str:
@@ -136,8 +138,9 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         if action == "list":
             notes = _notes(root)
             body = "\n".join(p.relative_to(root).as_posix() for p in notes) or "The vault has no Markdown notes yet."
-            _show(player, "KNOWLEDGE VAULT", body)
-            return f"Found {len(notes)} notes in the local vault."
+            displayed = _show(player, "KNOWLEDGE VAULT", body)
+            return (f"Found {len(notes)} notes in the local vault; the list is on screen."
+                    if displayed else body[:3000])
         if action == "search":
             query = str(parameters.get("query") or "").strip().lower()
             terms = [x for x in re.split(r"[^\w]+", query) if len(x) > 1]
@@ -166,8 +169,9 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
             body = "\n\n".join(_untrusted(title, excerpt) for _score, title, excerpt in found[:15])
             if not body:
                 return f"No notes matched '{query}'."
-            _show(player, f"VAULT SEARCH: {query}", body)
-            return f"Found {len(found)} matching notes. I displayed the best matches."
+            displayed = _show(player, f"VAULT SEARCH: {query}", body)
+            return (f"Found {len(found)} matching notes. I displayed the best matches."
+                    if displayed else body[:3500])
         if action == "read":
             target = _target(root, parameters.get("path", ""))
             if not target.is_file():
@@ -176,8 +180,9 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 return "That note is too large to read safely."
             text = target.read_text(encoding="utf-8", errors="replace")
             rel = target.relative_to(root).as_posix()
-            _show(player, rel, _untrusted(rel, text[:20_000]))
-            return f"Opened {rel} in the knowledge panel."
+            displayed = _show(player, rel, _untrusted(rel, text[:20_000]))
+            return (f"Opened {rel} in the knowledge panel."
+                    if displayed else text[:3500])
         if action in {"create", "append"}:
             content = str(parameters.get("content") or "")
             if not content.strip():
@@ -203,8 +208,9 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 return f"Restored {target.name} to its previous contents."
             push_undo(f"{'created' if previous is None else 'appended to'} note {target.relative_to(root).as_posix()}", restore)
             rel = target.relative_to(root).as_posix()
-            _show(player, rel, _untrusted(rel, updated[:20_000]))
-            return f"Saved {rel}. You can say undo to reverse this change."
+            displayed = _show(player, rel, _untrusted(rel, updated[:20_000]))
+            result = f"Saved {rel}. You can say undo to reverse this change."
+            return result if displayed else result + "\\n\\n" + updated[:2500]
         return "Choose list, search, read, create or append."
     except Exception as exc:
         return f"Knowledge Vault failed: {type(exc).__name__}: {str(exc)[:160]}"
