@@ -38,8 +38,8 @@ class ConversationHistoryTests(unittest.TestCase):
             old = (datetime.now().astimezone() - timedelta(days=100)).isoformat()
             fresh = datetime.now().astimezone().isoformat()
             path.write_text(
-                json.dumps({"ts": old, "role": "user", "text": "old"}) + "\\n"
-                + json.dumps({"ts": fresh, "role": "assistant", "text": "new"}) + "\\n",
+                json.dumps({"ts": old, "role": "user", "text": "old"}) + "\n"
+                + json.dumps({"ts": fresh, "role": "assistant", "text": "new"}) + "\n",
                 encoding="utf-8",
             )
             with patch.object(history, "_HISTORY_PATH", path), \\
@@ -54,7 +54,7 @@ class ConversationHistoryTests(unittest.TestCase):
         from memory import conversation_history as history
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "history.jsonl"
-            path.write_text('{"role":"user","text":"test"}\\n', encoding="utf-8")
+            path.write_text('{"role":"user","text":"test"}\n', encoding="utf-8")
             with patch.object(history, "_HISTORY_PATH", path):
                 self.assertTrue(history.clear_history())
                 self.assertFalse(path.exists())
