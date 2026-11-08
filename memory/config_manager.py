@@ -689,3 +689,14 @@ def get_voice_interrupt_enabled() -> bool:
 
 def save_voice_interrupt_enabled(enabled: bool) -> None:
     _patch_config(voice_interrupt_enabled=bool(enabled))
+
+
+# Desktop context is local by default. The idle/fullscreen guard never sends
+# anything to a model; the foreground executable is shared only when explicitly
+# enabled in the local config.
+def get_desktop_awareness_enabled() -> bool:
+    return bool(load_api_keys().get("desktop_awareness_enabled", False))
+
+
+def save_desktop_awareness_enabled(enabled: bool) -> None:
+    _patch_config(desktop_awareness_enabled=bool(enabled))
