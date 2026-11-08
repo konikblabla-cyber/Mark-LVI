@@ -72,9 +72,7 @@ def _rotate_if_needed() -> None:
             return
         lines = _HISTORY_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
         kept = lines[-_MAX_KEEP_LINES:]
-        tmp = _HISTORY_PATH.with_suffix(".jsonl.tmp")
-        tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
-        tmp.replace(_HISTORY_PATH)
+        _atomic_write(_HISTORY_PATH, "\n".join(kept) + ("\n" if kept else ""))
     except OSError:
         # Keep the existing file; never destroy history because rotation failed.
         return
@@ -137,10 +135,7 @@ def _read_entries(limit_scan: int = 12000) -> list[dict]:
                 except (ValueError, TypeError, json.JSONDecodeError, AttributeError):
                     needs_rewrite = True
             if needs_rewrite:
-                tmp = _HISTORY_PATH.with_suffix(".jsonl.tmp")
-                tmp.write_text("\n".join(retained_lines) + ("\n" if retained_lines else ""),
-                               encoding="utf-8")
-                tmp.replace(_HISTORY_PATH)
+                _atomic_write(_HISTORY_PATH, "\n".join(retained_lines) + ("\n" if retained_lines else ""))
     except OSError:
         return []
     return rows
