@@ -207,7 +207,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
             rel = target.relative_to(root).as_posix()
             displayed = _show(player, rel, _untrusted(rel, updated[:20_000]))
             result = f"Saved {rel}. You can say undo to reverse this change."
-            return result if displayed else result + "\\n\\n" + updated[:2500]
+            return result if displayed else result + "\n\n" + updated[:2500]
         return "Choose list, search, read, create or append."
     except Exception as exc:
         return f"Knowledge Vault failed: {type(exc).__name__}: {str(exc)[:160]}"
