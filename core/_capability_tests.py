@@ -30,6 +30,35 @@ class ConversationHistoryTests(unittest.TestCase):
                 self.assertEqual(len(found), 1)
                 self.assertEqual(found[0]["role"], "user")
 
+    def test_history_physically_purges_expired_rows(self):
+        from memory import conversation_history as history
+        from datetime import datetime, timedelta
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "history.jsonl"
+            old = (datetime.now().astimezone() - timedelta(days=100)).isoformat()
+            fresh = datetime.now().astimezone().isoformat()
+            path.write_text(
+                json.dumps({"ts": old, "role": "user", "text": "old"}) + "\\n"
+                + json.dumps({"ts": fresh, "role": "assistant", "text": "new"}) + "\\n",
+                encoding="utf-8",
+            )
+            with patch.object(history, "_HISTORY_PATH", path), \\
+                 patch.object(history, "get_plugin_config",
+                              return_value={"enabled": True, "retention_days": "30"}):
+                rows = history.recent_messages()
+                stored = path.read_text(encoding="utf-8")
+            self.assertEqual([row["text"] for row in rows], ["new"])
+            self.assertNotIn('"text": "old"', stored)
+
+    def test_history_clear_removes_local_archive(self):
+        from memory import conversation_history as history
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "history.jsonl"
+            path.write_text('{"role":"user","text":"test"}\\n', encoding="utf-8")
+            with patch.object(history, "_HISTORY_PATH", path):
+                self.assertTrue(history.clear_history())
+                self.assertFalse(path.exists())
+
     def test_history_redacts_common_api_secrets(self):
         from memory import conversation_history as history
         text = "token=sk-1234567890abcdef API_KEY=AIza12345678901234567890"
