@@ -45,7 +45,7 @@ def _write(data: dict) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             json.dump(data, handle, ensure_ascii=False, indent=2)
-            handle.write("\\n")
+            handle.write("\n")
         tmp.replace(_DATA_PATH)
     except Exception:
         try:
