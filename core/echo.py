@@ -169,6 +169,11 @@ class EchoGuard:
         return _BLOCKS_NORMAL if self.reliable else _BLOCKS_NOISY
 
     @property
+    def interrupt_ready(self) -> bool:
+        """True only after the room is calibrated and enough voice blocks agree."""
+        return len(self._residuals) >= _WARMUP and self._run >= self.required_blocks
+
+    @property
     def last_similarity(self) -> float:
         """1.0 = fully explained by our own output, 0.0 = nothing to do with it."""
         return self._last_sim
