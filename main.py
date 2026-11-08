@@ -2588,6 +2588,8 @@ class JarvisLive:
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
+                    with self._voice_interrupt_lock:
+                        self._voice_interrupt_pending = False
 
                     print("[JARVIS] Connected.")
                     if _resumed_with:
