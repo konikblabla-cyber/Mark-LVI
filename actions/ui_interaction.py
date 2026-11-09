@@ -197,8 +197,17 @@ def _run_uia(callback, timeout: float, exclusive_lock=None):
             if cancelled.is_set():
                 return ("cancelled", "the operation expired before COM setup")
             with _COMTYPES_IMPORT_LOCK:
+                # pywinauto chooses the process COM threading mode (MTA by
+                # default) before importing comtypes. comtypes initializes
+                # the importing thread automatically, using sys.coinit_flags.
+                # Importing it first would silently initialize this worker as
+                # STA and can conflict with pywinauto's subsequent MTA setup.
                 already_loaded = "comtypes" in sys.modules
+                import pywinauto  # noqa: F401
                 import comtypes
+                # If comtypes was loaded before this worker, its import-time
+                # initialization happened on a different thread. Initialize
+                # this worker explicitly and balance it below.
                 if already_loaded:
                     comtypes.CoInitialize()
             try:
