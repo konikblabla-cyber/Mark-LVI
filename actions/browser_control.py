@@ -1276,7 +1276,9 @@ def browser_control(
     params = parameters or {}
     action = str(params.get("action") or "").strip().lower()
     target = params.get("text") or params.get("description") or params.get("selector") or ""
-    if requires_browser_confirmation(action, target):
+    from core.autonomy_policy import requires_ui_confirmation, scope_request
+    if (requires_browser_confirmation(action, target)
+            and requires_ui_confirmation(target, user_request=scope_request(session_memory))):
         title = f"Confirm browser action: {str(target)[:80]}"
         detail = (
             f"Browser action: {action}\n"

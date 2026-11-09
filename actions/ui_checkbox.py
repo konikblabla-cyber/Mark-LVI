@@ -7,23 +7,9 @@ from core import outcome
 from actions import ui_interaction as ui
 
 
-def _needs_confirmation(label):
-    words = set(ui._normalise(label).replace("-", " ").split())
-    consent_terms = {
-        "agree", "consent", "permission", "allow", "authorize",
-        "authorization", "subscribe", "subscription", "marketing",
-        "privacy", "terms", "policy", "location", "notifications",
-        "tracking", "personalization", "share", "accept", "acceptance",
-        "reject", "decline", "cookie", "cookies", "analytics", "telemetry",
-        "pliki", "ciasteczka", "analityka", "telemetria",
-        "zgoda", "zgadzam",
-        "akceptuję", "akceptuje", "zaakceptuj", "regulamin",
-        "prywatność", "prywatnosc", "powiadomienia", "lokalizacja",
-        "udostępnianie", "udostepnianie", "udostępnij", "udostepnij",
-        "pozwól", "pozwol", "zezwól", "zezwol", "subskrypcja",
-        "subskrybuj", "śledzenie", "sledzenie", "dane", "danych", "danymi", "przetwarzanie", "przetwarzania", "trenowanie",
-    }
-    return ui._requires_confirmation(label) or bool(words.intersection(consent_terms))
+def _needs_confirmation(label, desired=True, session_memory=None):
+    from core.autonomy_policy import requires_checkbox_confirmation
+    return requires_checkbox_confirmation(label, desired, session_memory)
 
 
 def _set_toggle_state(pattern, desired, cancelled):
@@ -156,7 +142,7 @@ def set_checkbox_state(parameters: dict, player=None, session_memory=None) -> st
             return outcome.ask("set_checkbox_state", reason, checkbox=label)
         return outcome.failed("set_checkbox_state", reason or status, checkbox=label)
 
-    if _needs_confirmation(label):
+    if _needs_confirmation(label, desired, session_memory):
         from core import confirm
         if confirm.pending_title():
             return outcome.ask("set_checkbox_state", "another confirmation is already waiting on the HUD", checkbox=label)
@@ -180,8 +166,10 @@ TOOL = {
         "enabled non-sensitive CheckBox, revalidates the original window handle and process, and uses "
         "TogglePattern only when the current state is a known Off or On value. It does not toggle an "
         "already-correct checkbox or change Indeterminate states. It verifies the final state locally. "
-        "It never submits or saves the form. Consent, privacy, permission, subscription and other "
-        "high-impact labels require HUD confirmation. A timeout or provider exception after Toggle is "
+        "It never submits or saves the form. Routine checkbox changes run without prompts; opting out "
+        "of tracking or permissions is always allowed, and a directly requested setting change needs "
+        "no second approval. Enabling unrequested data sharing or consent still requires one HUD "
+        "confirmation. A timeout or provider exception after Toggle is "
         "uncertain; inspect before retrying. No screenshot, clipboard, keystroke or extra API call is used."
     ),
     "parameters": {

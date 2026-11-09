@@ -226,7 +226,7 @@ class UIInteractionTests(unittest.TestCase):
 
     def test_high_impact_button_and_polish_labels_require_confirmation(self):
         for label in (
-            "Delete account", "Send message", "Usuń plik", "Potwierdź",
+            "Delete account", "Send message", "Usuń plik",
             "Czy na pewno chcesz usunąć konto?",
             "Płatność zakończona", "Wysłać wiadomość",
         ):
@@ -457,6 +457,18 @@ class UIInteractionTests(unittest.TestCase):
         # The timed-out operation may finish, but is never invoked a second time.
         time.sleep(0.02)
         self.assertEqual(calls, ["called"])
+
+    def test_routine_labels_do_not_trigger_confirmation(self):
+        for label in ("Save", "Created", "Confirm", "Closed", "Remove filter", "Potwierdź"):
+            with self.subTest(label=label):
+                self.assertFalse(_requires_confirmation(label))
+
+    def test_only_critical_or_unrequested_external_targets_are_gated(self):
+        from core.autonomy_policy import requires_ui_confirmation
+        self.assertFalse(requires_ui_confirmation("Wyślij", "Wyślij wiadomość do Alex"))
+        self.assertTrue(requires_ui_confirmation("Send"))
+        self.assertTrue(requires_ui_confirmation("Pay now", "Pay now"))
+        self.assertFalse(requires_ui_confirmation("Save", "Save the settings"))
 
 
 if __name__ == "__main__":

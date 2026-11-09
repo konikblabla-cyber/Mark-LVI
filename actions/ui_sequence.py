@@ -115,7 +115,8 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
     return validated, ""
 
 
-def _prepare_step(step: dict, snapshot: dict) -> tuple[dict | None, str]:
+def _prepare_step(step: dict, snapshot: dict,
+                  user_request: str = "") -> tuple[dict | None, str]:
     label = step["button_label"]
     expected = step["expected_result"]
 
@@ -147,18 +148,14 @@ def _prepare_step(step: dict, snapshot: dict) -> tuple[dict | None, str]:
         "runtime_id": item.get("runtime_id", ()),
         "rect": item.get("rect"),
     }
-    context_text = " ".join(
-        ui._safe_name(record.get("name")) for record in snapshot["records"]
-    )
+    from core.autonomy_policy import requires_ui_confirmation
     return {
         "label": label,
         "expected": expected,
         "handle": snapshot["handle"],
         "process_id": snapshot["process_id"],
         "signature": signature,
-        "requires_confirmation": ui._requires_confirmation(
-            label, expected, context_text,
-        ),
+        "requires_confirmation": requires_ui_confirmation(label, user_request=user_request),
     }, ""
 
 
@@ -227,31 +224,8 @@ def _continue_sequence(state: dict, start_index: int) -> str:
             step = state["steps"][index]
             if step["action"] == "set_tree_item_expanded":
                 label = step["item_label"]
-                if ui_tree._requires_confirmation(label):
-                    pending = confirm.pending_title()
-                    if pending:
-                        return _stop_with_step_result(
-                            state, index,
-                            outcome.ask(
-                                "run_ui_sequence",
-                                "another action is already waiting for HUD confirmation",
-                                pending_title=pending,
-                            ),
-                        )
-                    verb = "expand" if step["expanded"] else "collapse"
-                    return confirm.request(
-                        key="run_ui_sequence",
-                        title=f"MARK sequence {index + 1}/{len(state['steps'])}: {verb} {label}",
-                        detail=(
-                            f"This is step {index + 1} of {len(state['steps'])}. "
-                            f"MARK will {verb} the visible tree item '{label}' in "
-                            "the original application window. It will not activate "
-                            "a child item or submit a form. Later steps run only "
-                            "after this state is verified."
-                        ),
-                        run=lambda: _resume_tree_after_confirmation(state, index, step),
-                        on_cancel=lambda: _release_sequence(state["id"]),
-                    )
+                # Expanding/collapsing a tree node is reversible view navigation.
+                # It never activates the item and therefore does not need a prompt.
                 result = ui_tree._set_tree_item_expanded_in_window(
                     label, step["expanded"],
                     state["window_handle"], state["process_id"],
@@ -297,7 +271,9 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                             f"the original application window could not be inspected ({type(exc).__name__})",
                         ),
                     )
-            prepared, problem = _prepare_step(step, snapshot)
+            prepared, problem = _prepare_step(
+                step, snapshot, state.get("user_request", ""),
+            )
             if prepared is None:
                 return _stop_with_step_result(state, index, problem)
 
@@ -417,7 +393,8 @@ def _capture_active_window() -> dict:
     return ui._snapshot()
 
 
-def _start_sequence(steps: list[dict], initial_snapshot: dict) -> str:
+def _start_sequence(steps: list[dict], initial_snapshot: dict,
+                   user_request: str = "") -> str:
     token = _claim_sequence()
     if token is None:
         return outcome.ask(
@@ -433,6 +410,7 @@ def _start_sequence(steps: list[dict], initial_snapshot: dict) -> str:
         "initial_snapshot": initial_snapshot,
         "window_handle": initial_snapshot["handle"],
         "process_id": initial_snapshot["process_id"],
+        "user_request": user_request[:4000],
     }
     return _continue_sequence(state, 0)
 
@@ -459,7 +437,8 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
             "run_ui_sequence",
             f"could not identify the active application window ({type(exc).__name__})",
         )
-    return _start_sequence(steps, snapshot)
+    from core.autonomy_policy import scope_request
+    return _start_sequence(steps, snapshot, scope_request(session_memory))
 
 
 TOOL = {

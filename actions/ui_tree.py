@@ -113,7 +113,8 @@ def _set_on_window(window_handle, process_id, item_label, desired, cancelled):
 
 
 def _requires_confirmation(label: str) -> bool:
-    return ui_checkbox._needs_confirmation(label) or ui._requires_confirmation(label)
+    """Tree expansion is view navigation, not activation of the item."""
+    return False
 
 
 def _set_tree_item_expanded_in_window(item_label: str, desired: bool,

@@ -172,12 +172,48 @@ class CheckboxTests(unittest.TestCase):
         for label in ("Agree to terms", "Allow notifications", "Share location",
                       "Zgadzam się na regulamin", "Przetwarzanie danych",
                       "Udostępnianie lokalizacji", "Powiadomienia",
-                      "Accept all cookies", "Reject analytics"):
+                      "Accept all cookies"):
             with self.subTest(label=label):
                 self.assertTrue(ui_checkbox._needs_confirmation(label))
         self.assertFalse(ui_checkbox._needs_confirmation("Remember this device"))
 
+    def test_reject_analytics_is_a_safe_opt_out(self):
+        self.assertFalse(ui_checkbox._needs_confirmation("Reject analytics", True))
+
+    def test_unchecking_privacy_controls_never_asks_for_confirmation(self):
+        with patch.object(ui_checkbox.ui, "_snapshot",
+                          return_value={"handle": 111, "process_id": 222}), \
+             patch("core.confirm.pending_title") as pending, \
+             patch("core.confirm.request") as request, \
+             patch.object(ui_checkbox.ui, "_run_uia",
+                          return_value=(True, ("changed", ""), None)) as run_uia:
+            result = ui_checkbox.set_checkbox_state({
+                "checkbox_label": "Allow tracking", "checked": False,
+            })
+        self.assertIn("status=done", result)
+        pending.assert_not_called()
+        request.assert_not_called()
+        run_uia.assert_called_once()
+
+    def test_explicitly_requested_privacy_setting_change_needs_no_second_prompt(self):
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Włącz lokalizację")
+        with patch.object(ui_checkbox.ui, "_snapshot",
+                          return_value={"handle": 111, "process_id": 222}), \
+             patch("core.confirm.pending_title") as pending, \
+             patch("core.confirm.request") as request, \
+             patch.object(ui_checkbox.ui, "_run_uia",
+                          return_value=(True, ("changed", ""), None)) as run_uia:
+            result = ui_checkbox.set_checkbox_state({
+                "checkbox_label": "Lokalizacja", "checked": True,
+            }, session_memory=scope)
+        self.assertIn("status=done", result)
+        pending.assert_not_called()
+        request.assert_not_called()
+        run_uia.assert_called_once()
+
     def test_invalid_parameters_fail_before_desktop_access(self):
+
         with patch.object(ui_checkbox.ui, "_snapshot") as snapshot:
             for params in (
                 {"checkbox_label": "PIN", "checked": True},

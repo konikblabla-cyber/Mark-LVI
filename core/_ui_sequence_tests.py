@@ -355,18 +355,13 @@ class UISequenceTests(unittest.TestCase):
         snapshot.assert_not_called()
         click.assert_not_called()
 
-    def test_high_impact_tree_step_waits_for_hud_then_resumes(self):
+    def test_tree_expansion_never_prompts_even_when_label_looks_high_impact(self):
         from core import confirm
         initial = self._snapshot("Application")
         click_snapshot = self._snapshot("Open panel")
-        requests = []
-        def fake_request(**kwargs):
-            requests.append(kwargs)
-            return "[CONFIRMATION_PENDING]"
-
         with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
              patch.object(ui_sequence.ui, "_snapshot", return_value=click_snapshot), \
-             patch.object(ui_sequence.ui_tree, "_requires_confirmation", return_value=True), \
+             patch.object(ui_sequence.ui_tree, "_requires_confirmation", return_value=True) as classify, \
              patch.object(
                  ui_sequence.ui_tree, "_set_tree_item_expanded_in_window",
                  return_value="status=done action=set_tree_item_expanded verified=true expanded=true",
@@ -376,24 +371,20 @@ class UISequenceTests(unittest.TestCase):
                  return_value="status=done action=click_and_verify verified=true",
              ) as click, \
              patch.object(confirm, "pending_title", return_value=""), \
-             patch.object(confirm, "request", side_effect=fake_request):
-            pending = ui_sequence.run_ui_sequence({
+             patch.object(confirm, "request") as request:
+            result = ui_sequence.run_ui_sequence({
                 "steps": [
-                    self._tree_step("Privacy", True),
+                    self._tree_step("Delete", True),
                     self._step("Open panel", "Panel ready"),
                 ],
             })
-            self.assertEqual(pending, "[CONFIRMATION_PENDING]")
-            expand.assert_not_called()
-            click.assert_not_called()
-            self.assertEqual(len(requests), 1)
-            self.assertIn("Privacy", requests[0]["title"])
-            resumed = requests[0]["run"]()
 
-        self.assertTrue(resumed.startswith("status=done action=run_ui_sequence "), resumed)
-        self.assertIn("steps_completed=2", resumed)
-        expand.assert_called_once_with("Privacy", True, 101, 4321)
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        self.assertIn("steps_completed=2", result)
+        classify.assert_not_called()
+        expand.assert_called_once_with("Delete", True, 101, 4321)
         click.assert_called_once()
+        request.assert_not_called()
 
     def test_two_critical_steps_request_two_distinct_hud_confirmations(self):
         from core import confirm
