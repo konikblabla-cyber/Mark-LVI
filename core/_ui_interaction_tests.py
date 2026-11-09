@@ -18,6 +18,11 @@ class UIInteractionTests(unittest.TestCase):
             with self.subTest(label=label):
                 self.assertTrue(_requires_confirmation(label))
 
+    def test_high_impact_postconditions_also_require_confirmation(self):
+        for result in ("Payment completed", "Account deleted", "Message sent"):
+            with self.subTest(result=result):
+                self.assertTrue(_requires_confirmation(result))
+
     def test_ordinary_navigation_does_not_require_confirmation(self):
         self.assertFalse(_requires_confirmation("Settings"))
 
