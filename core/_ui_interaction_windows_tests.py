@@ -166,8 +166,10 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             prefix="mark-uia-test-", suffix=".log", delete=False,
         )
         cls._log_path = Path(cls._log_file.name)
+        repo_root = Path(__file__).resolve().parents[1]
         cls._process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), "--serve"],
+            [sys.executable, "-m", "core._ui_interaction_windows_tests", "--serve"],
+            cwd=str(repo_root),
             stdout=cls._log_file,
             stderr=subprocess.STDOUT,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
