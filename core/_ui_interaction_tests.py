@@ -76,6 +76,15 @@ class UIInteractionTests(unittest.TestCase):
         self.assertEqual(status, "already_set")
         self.assertEqual(pattern.CurrentValue, "already here")
 
+    def test_value_pattern_refuses_to_overwrite_an_existing_secret_like_value(self):
+        pattern = self.FakeValuePattern("A" * 48)
+        status, reason = _set_and_verify_value_pattern(
+            pattern, "new project title", threading.Event(),
+        )
+        self.assertEqual(status, "sensitive_existing_value")
+        self.assertIn("credential", reason)
+        self.assertEqual(pattern.CurrentValue, "A" * 48)
+
     def test_value_pattern_refuses_read_only_fields(self):
         pattern = self.FakeValuePattern("old", readonly=True)
         status, _ = _set_and_verify_value_pattern(
