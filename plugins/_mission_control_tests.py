@@ -111,11 +111,11 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.start(mission_id)
         self.scope = {"user_request": "Continue the mission"}
         recovery = self.start(mission_id)
-        self.assertIn("[MISSION_RECOVERY]", recovery)
+        self.assertIn("[MISSION_RECOVERY_REQUIRED]", recovery)
         self.assertIn("Do NOT repeat", recovery)
         self.assertNotIn("[MISSION_CONTINUE]", recovery)
         mission = mission_control._read()["missions"][0]
-        self.assertEqual(mission["steps"][0]["status"], "running")
+        self.assertEqual(mission["steps"][0]["status"], "blocked")
 
     def test_begin_step_is_idempotently_refused_for_running_step(self):
         mission_id = self.plan()
@@ -218,7 +218,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.scope = {"user_request": "Continue the mission"}
         recovery = self.start(mission_id)
         self.assertIn("[MISSION_RECOVERY]", recovery)
-        self.assertIn("persisted receipt", recovery)
+        self.assertIn("persisted verified receipt", recovery)
         self.assertIn("_mission_execution", self.scope)
         completed = self.complete(mission_id)
         self.assertIn("[MISSION_COMPLETE]", completed)
@@ -241,7 +241,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
 
         self.scope = {"user_request": "Continue the mission"}
         recovery = self.start(mission_id)
-        self.assertIn("[MISSION_RECOVERY]", recovery)
+        self.assertIn("[MISSION_RECOVERY_REQUIRED]", recovery)
         self.assertIn("Do NOT repeat", recovery)
         self.assertNotIn("persisted receipt", recovery)
         self.assertNotIn(
