@@ -24,25 +24,15 @@ _SENSITIVE_MARKERS = (
     "one-time code", "otp", "recovery code",
 )
 _HIGH_IMPACT_WORDS = (
-    "delete", "remove", "discard", "send", "submit", "publish", "post",
-    "purchase", "buy", "pay", "payment", "checkout", "order", "transfer",
-    "unsubscribe", "revoke", "cancel", "confirm", "upload", "share", "grant",
-    "erase", "destroy", "wipe", "reset", "format", "authorize", "sign",
-    "deleted", "removed", "sent", "submitted", "published", "transferred",
-    "purchased", "paid", "uploaded", "shared", "granted", "posted", "created",
-    "closed", "cancelled", "canceled", "permanent", "permanently",
-    "irreversible", "irreversibly", "usuń", "usun", "usunąć", "usunac",
-    "usuwanie", "usunięcie", "usuniecie", "usunięcia", "usuniecia",
-    "wyślij", "wyslij", "wysłać", "wyslac", "wysyłanie", "wysylanie",
-    "opublikuj", "opublikować", "opublikowac", "kup", "kupić", "kupic",
-    "zakup", "zakupić", "zakupic", "płatność", "platnosc", "płatności",
-    "platnosci", "zapłać", "zaplac", "zapłacić", "zaplacic", "zamów",
-    "zamow", "zamówienie", "zamowienie", "przelew", "przelewu", "przelać",
-    "przelac", "anuluj", "anulować", "anulowac", "anulowanie", "potwierdź",
-    "potwierdz", "potwierdzić", "potwierdzic", "zatwierdź", "zatwierdz",
-    "zatwierdzić", "zatwierdzic", "udostępnij", "udostepnij",
-    "udostępnianie", "udostepnianie", "usunięto", "usunieto", "wysłano",
-    "wyslano", "opublikowano", "przelano",
+    # Irreversible/destructive and financial actions only. Ordinary words such
+    # as "confirm", "created", "closed" and "remove" are intentionally absent.
+    "delete", "erase", "destroy", "wipe", "format", "permanent", "permanently",
+    "payment", "pay", "purchase", "buy", "checkout", "transfer", "wire",
+    "withdraw", "refund", "factory", "reset", "revoke", "authorize", "sign",
+    "account deletion", "close account", "delete account",
+    "usuń", "usun", "skasuj", "zniszcz", "wyczyść", "wyczysc",
+    "sformatuj", "resetuj", "zapłać", "zaplac", "płatność", "platnosc",
+    "kup", "zakup", "przelew", "usuń konto", "usun konto", "zamknij konto",
 )
 _MAX_CONTROLS = 240
 _MAX_SCANNED_CONTROLS = 1200
@@ -78,10 +68,11 @@ def _safe_name(value: object) -> str:
 
 
 def _requires_confirmation(*texts: str) -> bool:
-    words = set()
-    for text in texts:
-        words.update(re.findall(r"[\w-]+", _normalise(text)))
-    return bool(words.intersection(_HIGH_IMPACT_WORDS))
+    # Shared compatibility helper. It deliberately checks only the actual
+    # target text; page-wide context and expected-result labels caused prompts
+    # for unrelated words elsewhere on screen.
+    from core.autonomy_policy import requires_ui_confirmation
+    return requires_ui_confirmation(" ".join(str(text or "") for text in texts))
 
 
 def _matching_controls(controls: list[dict], label: str) -> list[dict]:
@@ -796,10 +787,8 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
         "runtime_id": matches[0].get("runtime_id", ()),
         "rect": matches[0].get("rect"),
     }
-    context_text = " ".join(
-        _safe_name(item.get("name")) for item in snapshot["records"]
-    )
-    if _requires_confirmation(label, expected, context_text):
+    from core.autonomy_policy import requires_ui_confirmation, scope_request
+    if requires_ui_confirmation(label, user_request=scope_request(session_memory)):
         from core import confirm
         if confirm.pending_title():
             return outcome.ask(

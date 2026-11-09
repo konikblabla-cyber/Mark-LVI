@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from core import confirm, outcome
+from core.autonomy_policy import consume_explicit_send_authorization
 from core.lazyimport import LazyModule, installed
 
 # Imported on first USE, not at launch — see core/lazyimport.py. PAUSE is 0.06
@@ -339,9 +340,14 @@ def send_message(
             to=receiver, platform=platform,
         )
 
-    # Outbound communication is irreversible. The HUD, not the model, owns
-    # the approval decision. Show the exact recipient, platform and message;
-    # no worker is started until the user presses CONFIRM.
+    # A direct user instruction naming this recipient is already consent to
+    # send one message. Consume that one-turn scope once; model-supplied tool
+    # arguments cannot create or broaden the authorization. If the user did not
+    # explicitly ask for this send, retain the HUD gate.
+    if consume_explicit_send_authorization(session_memory, receiver):
+        return _queue_send(player, platform, receiver, message_text)
+
+    # Unrequested outbound communication still requires an explicit HUD approval.
     title = f"Send message to {receiver} via {platform}?"
     detail = (
         f"Recipient: {receiver}\n"
@@ -425,11 +431,13 @@ TOOL = {
     "description": (
         "Sends a text message via WhatsApp, Telegram, or another messaging "
         "platform. Write 'message_text' in the USER'S OWN LANGUAGE, exactly "
-        "what they asked to be said. This is an irreversible outbound action: "
-        "the tool first shows the exact recipient, platform and message on the "
-        "HUD and MUST wait for the user to press CONFIRM. If confirmation is "
-        "pending, do not call this tool again and do not say it was sent. Only "
-        "after the user confirms does the background send begin. On "
+        "what they asked to be said. When the user's current instruction clearly "
+        "asks to send a message to this recipient, that request is the approval "
+        "for this one message; do not ask again. A one-shot, recipient-matched "
+        "authorization is supplied by the application, not by tool arguments. "
+        "For messages the user did not explicitly request, show the exact "
+        "recipient, platform and message on the HUD and wait for confirmation. "
+        "Never send a different recipient or repeat a consumed one-shot send. On "
         "status=started say only that you are sending it, never that it is "
         "sent. The result follows separately: status=done means it was "
         "confirmed delivered to the conversation, status=unverified means the "

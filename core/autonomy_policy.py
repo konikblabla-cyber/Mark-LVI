@@ -1,0 +1,167 @@
+"""Least-prompt autonomy policy.
+
+Routine, reversible actions should not interrupt the user. Ask only when an
+action is critical or has an external effect that the user's current request
+did not clearly authorize. Authorization is attached to the actual user turn,
+never to model-supplied tool parameters.
+"""
+from __future__ import annotations
+
+import re
+import threading
+
+_TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
+_NEGATED_SEND = re.compile(
+    r"\b(?:do\s+not|don't|never|not)\s+(?:send|text|message|email|dm)\b|"
+    r"\bnie\s+(?:wysyłaj|wysylaj|wysyłać|wysylac|wyślij|wyslij|przesyłaj|przesylaj)\b",
+    re.IGNORECASE,
+)
+_SEND_INTENT = re.compile(
+    r"\b(?:send|text|message|email|dm)\b|"
+    r"\b(?:wyślij|wyslij|prześlij|przeslij|napisz\s+do)\b",
+    re.IGNORECASE,
+)
+_EXTERNAL_ACTION = re.compile(
+    r"\b(?:send|text|message|submit|publish|post|share|upload|subscribe|unsubscribe|"
+    r"sign|authorize|grant|revoke)\b|"
+    r"cancel[\s_-]+subscription|"
+    r"\b(?:wyślij|wyslij|prześlij|przeslij|opublikuj|udostępnij|udostepnij|"
+    r"subskrybuj|anuluj)\b|"
+    r"anuluj[\s_-]+subskrypcj[ęe]",
+    re.IGNORECASE,
+)
+_CRITICAL_ACTION = re.compile(
+    r"\b(?:pay|payment|purchase|buy|checkout|transfer|wire|withdraw|refund|"
+    r"delete|erase|destroy|wipe|format|factory|reset|revoke|authorize|sign)\b|"
+    r"\b(?:permanent|permanently|irreversible)\b|"
+    r"(?:delete|close|terminate)[\s_-]+(?:account|profile|membership)|"
+    r"\b(?:zapłać|zaplac|płatność|platnosc|kup|zakup|przelew|usuń|usun|"
+    r"skasuj|zniszcz|sformatuj|resetuj|wyczyść|wyczysc)\b|"
+    r"(?:usuń|usun|zamknij)[\s_-]+(?:konto|profil)",
+    re.IGNORECASE,
+)
+_SETTING_VERB = re.compile(
+    r"\b(?:enable|disable|turn|switch|allow|deny|check|uncheck|tick|untick|"
+    r"activate|deactivate|włącz|wlacz|wyłącz|wylacz|zaznacz|odznacz|"
+    r"zezwól|zezwol|zablokuj|aktywuj|dezaktywuj)\b",
+    re.IGNORECASE,
+)
+_PRIVACY_TERMS = {
+    "consent", "permission", "allow", "authorize", "authorization",
+    "subscribe", "subscription", "marketing", "privacy", "location",
+    "notifications", "tracking", "personalization", "share", "accept",
+    "cookies", "cookie", "analytics", "telemetry", "data", "pliki",
+    "ciasteczka", "analityka", "telemetria", "zgoda", "regulamin",
+    "prywatność", "prywatnosc", "powiadomienia", "lokalizacja",
+    "udostępnianie", "udostepnianie", "udostępnij", "udostepnij",
+    "pozwól", "pozwol", "zezwól", "zezwol", "subskrypcja",
+    "subskrybuj", "śledzenie", "sledzenie", "dane", "danych",
+    "przetwarzanie", "przetwarzania", "trenowanie",
+}
+_DENY_TERMS = {
+    "reject", "decline", "deny", "disable", "off", "stop",
+    "odrzuć", "odrzuc", "odmów", "odmow", "wyłącz", "wylacz",
+    "zablokuj", "wyłączone", "wylaczone", "nie",
+}
+_SCOPE_LOCK = threading.Lock()
+
+
+def new_turn_authorization(user_request: str = "") -> dict:
+    """Create a mutable, one-turn authorization scope for trusted app context."""
+    return {
+        "user_request": str(user_request or "")[:4000],
+        "direct_send_used": False,
+    }
+
+
+def scope_request(scope) -> str:
+    """Read the actual user request from app-owned context, never tool args."""
+    if not isinstance(scope, dict):
+        return ""
+    return str(scope.get("user_request") or "")[:4000]
+
+
+def _tokens(value: str) -> set[str]:
+    return {t.casefold() for t in _TOKEN.findall(str(value or "")) if len(t) > 1}
+
+
+def _target_mentioned(user_request: str, target: str) -> bool:
+    request_tokens = _tokens(user_request)
+    target_tokens = _tokens(target)
+    if not request_tokens or not target_tokens:
+        return False
+    # Match exact words or inflected Polish names/verbs by a short shared stem.
+    return any(
+        req == term or (len(req) >= 4 and len(term) >= 4
+                        and req[:4] == term[:4])
+        for req in request_tokens
+        for term in target_tokens
+    )
+
+
+def explicitly_requested_target_action(user_request: str, target: str) -> bool:
+    """True only when this turn names the target and explicitly asks to act on it."""
+    request = str(user_request or "")
+    if not request or _NEGATED_SEND.search(request):
+        return False
+    has_action_verb = bool(re.search(
+        r"\b(?:click|press|select|choose|submit|send|publish|share|upload|"
+        r"wybierz|kliknij|naciśnij|nacisnij|zatwierdź|zatwierdz|"
+        r"wyślij|wyslij|opublikuj|udostępnij|udostepnij)\b",
+        request, re.IGNORECASE,
+    ))
+    return has_action_verb and _target_mentioned(request, target)
+
+
+def requires_ui_confirmation(target: str, user_request: str = "") -> bool:
+    """Critical actions always ask; other external effects ask only without scope."""
+    target = str(target or "")
+    if _CRITICAL_ACTION.search(target):
+        return True
+    if _EXTERNAL_ACTION.search(target):
+        return not explicitly_requested_target_action(user_request, target)
+    return False
+
+
+def requires_checkbox_confirmation(label: str, desired: bool,
+                                   session_memory=None) -> bool:
+    """Ask only for enabling privacy/consent choices, never for opting out."""
+    label = str(label or "")
+    if _CRITICAL_ACTION.search(label):
+        return True
+    if not desired:
+        return False
+    words = _tokens(label)
+    if not words.intersection(_PRIVACY_TERMS):
+        return False
+    request = scope_request(session_memory)
+    request_words = _tokens(request)
+    if request and _SETTING_VERB.search(request) and words.intersection(request_words):
+        return False
+    # A checkbox labelled as a rejection/opt-out is safe to enable.
+    if words.intersection(_DENY_TERMS):
+        return False
+    return True
+
+
+def consume_explicit_send_authorization(session_memory, receiver: str) -> bool:
+    """Consume one direct, recipient-scoped send request from the current user turn."""
+    if not isinstance(session_memory, dict):
+        return False
+    with _SCOPE_LOCK:
+        if session_memory.get("direct_send_used"):
+            return False
+        request = scope_request(session_memory)
+        if not request or _NEGATED_SEND.search(request) or not _SEND_INTENT.search(request):
+            return False
+        if not _target_mentioned(request, receiver):
+            return False
+        session_memory["direct_send_used"] = True
+        return True
+
+
+__all__ = [
+    "new_turn_authorization", "scope_request",
+    "explicitly_requested_target_action", "requires_ui_confirmation",
+    "requires_checkbox_confirmation", "consume_explicit_send_authorization",
+]
