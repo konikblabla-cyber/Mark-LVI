@@ -131,7 +131,7 @@ def format_picker_diagnostics(records, limit=_MAX_ITEMS):
             break
         visible_items += 1
 
-    return "\\n".join(lines) if lines else (
+    return "\n".join(lines) if lines else (
         "No safe visible date/time picker controls were exposed by Windows UI Automation."
     )
 
