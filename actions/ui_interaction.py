@@ -1,13 +1,14 @@
-"""Local, accessibility-based clicks with an observable postcondition.
+"""Local UI Automation clicks with a checked, exact postcondition.
 
-This action deliberately does not use screenshots, coordinates, the clipboard,
-or a vision/model call. It invokes one uniquely named control in the active
-window and reports success only when the requested accessible text appears
-afterward. High-impact controls require the on-screen human confirmation gate.
+All COM work is isolated to short-lived, explicitly initialized worker threads.
+No COM element is passed between threads. A delayed confirmation is bound to
+the original window handle and control identity, not whichever window the HUD
+happens to have in the foreground when the user confirms.
 """
 from __future__ import annotations
 
 import re
+import threading
 import time
 
 from core import outcome
@@ -23,19 +24,23 @@ _SENSITIVE_MARKERS = (
 )
 _HIGH_IMPACT_WORDS = (
     "delete", "remove", "discard", "send", "submit", "publish", "post",
-    "purchase", "buy", "pay", "checkout", "order", "transfer", "unsubscribe",
-    "revoke", "cancel", "confirm", "upload", "share", "grant", "erase",
-    "destroy", "wipe", "reset", "format", "authorize", "sign", "deleted",
-    "removed", "sent", "submitted", "published", "transferred", "purchased",
-    "paid", "payment", "uploaded", "shared", "granted", "posted",
-    "created", "closed", "cancelled", "canceled", "usuń", "usun", "wyślij",
-    "wyslij", "opublikuj", "kup", "zapłać", "zaplac", "zamów", "zamow",
-    "przelew", "anuluj", "potwierdź", "potwierdz", "usunięto", "usunieto",
-    "wysłano", "wyslano", "opublikowano", "przelano",
+    "purchase", "buy", "pay", "payment", "checkout", "order", "transfer",
+    "unsubscribe", "revoke", "cancel", "confirm", "upload", "share", "grant",
+    "erase", "destroy", "wipe", "reset", "format", "authorize", "sign",
+    "deleted", "removed", "sent", "submitted", "published", "transferred",
+    "purchased", "paid", "uploaded", "shared", "granted", "posted", "created",
+    "closed", "cancelled", "canceled", "permanent", "permanently",
+    "irreversible", "irreversibly", "usuń", "usun", "wyślij", "wyslij",
+    "opublikuj", "kup", "zapłać", "zaplac", "zamów", "zamow", "przelew",
+    "anuluj", "potwierdź", "potwierdz", "usunięto", "usunieto", "wysłano",
+    "wyslano", "opublikowano", "przelano",
 )
 _MAX_CONTROLS = 240
-_VERIFY_ATTEMPTS = 10
-_VERIFY_INTERVAL = 0.2
+_SNAPSHOT_TIMEOUT_SECONDS = 4.0
+_INVOKE_TIMEOUT_SECONDS = 4.0
+_VERIFY_ATTEMPTS = 8
+_VERIFY_INTERVAL = 0.25
+_RECT_TOLERANCE = 8
 
 
 def _normalise(value: object) -> str:
@@ -50,10 +55,11 @@ def _safe_name(value: object) -> str:
     return text[:240]
 
 
-def _requires_confirmation(label: str) -> bool:
-    normal = _normalise(label)
-    words = re.findall(r"[\w-]+", normal)
-    return any(word in words for word in _HIGH_IMPACT_WORDS)
+def _requires_confirmation(*texts: str) -> bool:
+    words = set()
+    for text in texts:
+        words.update(re.findall(r"[\w-]+", _normalise(text)))
+    return bool(words.intersection(_HIGH_IMPACT_WORDS))
 
 
 def _matching_controls(controls: list[dict], label: str) -> list[dict]:
@@ -67,25 +73,92 @@ def _matching_controls(controls: list[dict], label: str) -> list[dict]:
     ]
 
 
-def _format_snapshot(records: list[dict]) -> str:
-    from actions.screen_understanding import format_accessible_elements
-    return format_accessible_elements(
-        records, max_elements=_MAX_CONTROLS, max_chars=20_000,
+def _has_exact_expected_text(records: list[dict], expected: str) -> bool:
+    """Match a whole accessible element name, never a substring.
+
+    In particular, "Saved" must not match "Not saved" or "Unsaved".
+    """
+    wanted = _normalise(expected)
+    if not wanted:
+        return False
+    return any(
+        isinstance(item, dict)
+        and item.get("role") in _ALLOWED_ROLES
+        and not item.get("password")
+        and not item.get("offscreen")
+        and _normalise(_safe_name(item.get("name"))) == wanted
+        for item in records
     )
 
 
-def _active_window_snapshot():
-    """Return the active UIA window and bounded safe control records."""
+def _control_signature(info, rect) -> dict:
+    automation_id = ""
+    for attr in ("automation_id", "auto_id"):
+        try:
+            automation_id = str(getattr(info, attr, "") or "").strip()
+        except Exception:
+            automation_id = ""
+        if automation_id:
+            break
     try:
-        from pywinauto import Desktop
-    except ImportError as exc:
-        raise RuntimeError("pywinauto is not installed; local UI Automation is unavailable") from exc
+        bounds = (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+    except Exception:
+        bounds = None
+    return {"automation_id": automation_id, "rect": bounds}
 
-    desktop = Desktop(backend="uia")
-    window = desktop.get_active()
-    if window is None or not window.is_visible():
-        raise RuntimeError("there is no visible active window")
 
+def _same_control_identity(candidate: dict, original: dict) -> bool:
+    if candidate.get("role") != original.get("role"):
+        return False
+    old_id = str(original.get("automation_id") or "")
+    new_id = str(candidate.get("automation_id") or "")
+    if old_id:
+        return new_id == old_id
+    old_rect, new_rect = original.get("rect"), candidate.get("rect")
+    if not old_rect or not new_rect or len(old_rect) != 4 or len(new_rect) != 4:
+        return False
+    return all(
+        abs(int(a) - int(b)) <= _RECT_TOLERANCE
+        for a, b in zip(old_rect, new_rect)
+    )
+
+
+def _run_bounded(callback, timeout: float):
+    """Run a callback once on a daemon thread and never retry it on timeout."""
+    finished = threading.Event()
+    result = {}
+
+    def worker():
+        try:
+            result["value"] = callback()
+        except Exception as exc:
+            result["error"] = exc
+        finally:
+            finished.set()
+
+    thread = threading.Thread(
+        target=worker, daemon=True, name="mark-ui-automation",
+    )
+    thread.start()
+    if not finished.wait(max(0.01, float(timeout))):
+        return False, None, None
+    return True, result.get("value"), result.get("error")
+
+
+def _run_uia(callback, timeout: float):
+    """Run fresh UIA objects in their own initialized COM apartment."""
+    def with_com():
+        import comtypes
+        comtypes.CoInitialize()
+        try:
+            return callback()
+        finally:
+            comtypes.CoUninitialize()
+
+    return _run_bounded(with_com, timeout)
+
+
+def _collect_accessible_controls(window, include_wrappers: bool = False):
     records = []
     clickables = []
     for control in window.descendants():
@@ -106,28 +179,109 @@ def _active_window_snapshot():
             rect = control.rectangle()
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
+            signature = _control_signature(info, rect)
             record = {"role": role, "name": label}
             records.append(record)
             if role in _INVOKABLE_ROLES and control.is_enabled():
-                clickables.append({
-                    "control": control, "role": role, "name": label,
-                })
+                item = {
+                    "role": role, "name": label,
+                    "automation_id": signature["automation_id"],
+                    "rect": signature["rect"],
+                }
+                if include_wrappers:
+                    item["control"] = control
+                clickables.append(item)
         except Exception:
-            # An inaccessible or stale UIA element is not a reason to abort
-            # inspection of the rest of the active window.
+            # A stale or inaccessible element must not invalidate the rest.
             continue
-    return window, records, clickables
+    return records, clickables
+
+
+def _read_window_snapshot(window_handle=None) -> dict:
+    """Read one specific window; None means the current active window.
+
+    The handle form is intentionally independent of foreground focus so a
+    confirmation button in MARK's HUD cannot redirect the pending operation.
+    """
+    try:
+        from pywinauto import Desktop
+    except ImportError as exc:
+        raise RuntimeError(
+            "pywinauto is not installed; local UI Automation is unavailable"
+        ) from exc
+
+    desktop = Desktop(backend="uia")
+    if window_handle is None:
+        window = desktop.get_active()
+    else:
+        window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if window is None or not window.is_visible():
+        raise RuntimeError("the target window is no longer visible")
+    handle = getattr(window, "handle", None)
+    if handle is None:
+        raise RuntimeError("the target window has no stable Windows handle")
+    if window_handle is not None and int(handle) != int(window_handle):
+        raise RuntimeError("the target window handle changed")
+
+    records, clickables = _collect_accessible_controls(window)
+    return {
+        "handle": int(handle),
+        "process_id": int(getattr(window.element_info, "process_id", 0) or 0),
+        "records": records,
+        "clickables": clickables,
+    }
+
+
+def _snapshot(window_handle=None) -> dict:
+    completed, value, error = _run_uia(
+        lambda: _read_window_snapshot(window_handle),
+        _SNAPSHOT_TIMEOUT_SECONDS,
+    )
+    if not completed:
+        raise TimeoutError("UI Automation could not inspect the window within 4 seconds")
+    if error is not None:
+        raise RuntimeError(
+            f"UI Automation could not inspect the window ({type(error).__name__})"
+        ) from error
+    return value
+
+
+def _invoke_on_window(window_handle: int, label: str,
+                      original_signature: dict) -> tuple[str, str]:
+    """Re-find and invoke the same control inside the target window."""
+    from pywinauto import Desktop
+
+    desktop = Desktop(backend="uia")
+    window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if not window.is_visible():
+        return "missing_window", "the original window is no longer visible"
+
+    _records, clickables = _collect_accessible_controls(
+        window, include_wrappers=True,
+    )
+    matches = _matching_controls(clickables, label)
+    if not matches:
+        return "missing_control", "the original control is no longer available"
+    if len(matches) != 1:
+        return "ambiguous", "the control label is no longer unique"
+    target = matches[0]
+    if not _same_control_identity(target, original_signature):
+        return "changed_control", "the matching control is not the one originally identified"
+
+    # InvokePattern calls the actual accessible control; no coordinate guess.
+    target["control"].iface_invoke.Invoke()
+    return "invoked", ""
 
 
 def _wait_for_expected_result(expected: str, snapshot_reader,
                               attempts: int = _VERIFY_ATTEMPTS,
                               interval: float = _VERIFY_INTERVAL,
                               sleep=time.sleep) -> bool:
-    wanted = _normalise(expected)
     for attempt in range(max(1, int(attempts))):
         try:
             snapshot = snapshot_reader()
-            if wanted and wanted in _normalise(snapshot):
+            records = snapshot.get("records", []) if isinstance(snapshot, dict) else snapshot
+            if _has_exact_expected_text(records, expected):
                 return True
         except Exception:
             pass
@@ -137,7 +291,8 @@ def _wait_for_expected_result(expected: str, snapshot_reader,
 
 
 def _click_and_verify(button_label: str, expected_result: str,
-                      expected_window_handle=None) -> str:
+                      expected_window_handle: int,
+                      original_signature: dict) -> str:
     label = " ".join(str(button_label or "").split())
     expected = " ".join(str(expected_result or "").split())
     if not label or len(label) > 120:
@@ -145,39 +300,31 @@ def _click_and_verify(button_label: str, expected_result: str,
     if not expected or len(expected) > 160:
         return outcome.failed(
             "click_and_verify",
-            "an observable expected result is required (maximum 160 characters)",
+            "an exact accessible result is required (maximum 160 characters)",
             button=label,
         )
 
     try:
-        window, records, clickables = _active_window_snapshot()
+        before = _snapshot(expected_window_handle)
     except Exception as exc:
         return outcome.failed(
-            "click_and_verify", str(exc), button=label,
-        )
-
-    handle = getattr(window, "handle", None)
-    if (expected_window_handle is not None
-            and handle != expected_window_handle):
-        return outcome.failed(
             "click_and_verify",
-            "the active window changed while confirmation was pending; nothing was clicked",
+            f"the original window is unavailable ({type(exc).__name__}); nothing was clicked",
             button=label,
         )
 
-    before = _format_snapshot(records)
-    if _normalise(expected) in _normalise(before):
+    if _has_exact_expected_text(before["records"], expected):
         return outcome.failed(
             "click_and_verify",
-            "the expected result is already visible, so it cannot verify a new effect",
+            "the exact expected text is already visible; no click was made",
             button=label, expected=expected,
         )
 
-    matches = _matching_controls(clickables, label)
+    matches = _matching_controls(before["clickables"], label)
     if not matches:
         return outcome.failed(
             "click_and_verify",
-            "no visible, enabled button with that exact accessible label exists in the active window",
+            "no visible, enabled button with that exact accessible label exists in the original window",
             button=label,
         )
     if len(matches) != 1:
@@ -186,31 +333,50 @@ def _click_and_verify(button_label: str, expected_result: str,
             "more than one visible control has that exact label; nothing was clicked",
             button=label, matches=len(matches),
         )
+    if not _same_control_identity(matches[0], original_signature):
+        return outcome.failed(
+            "click_and_verify",
+            "the control changed after it was identified; nothing was clicked",
+            button=label,
+        )
 
-    control = matches[0]["control"]
-    try:
-        # InvokePattern is preferred over coordinate clicks: it addresses the
-        # actual accessible control and does not guess where it is on screen.
-        control.iface_invoke.Invoke()
-    except Exception as exc:
+    completed, invocation, error = _run_uia(
+        lambda: _invoke_on_window(
+            expected_window_handle, label, original_signature,
+        ),
+        _INVOKE_TIMEOUT_SECONDS,
+    )
+    if not completed:
         return outcome.unverified(
             "click_and_verify",
-            f"the control invocation could not be confirmed ({type(exc).__name__})",
+            "UI Automation did not return within 4 seconds; the invocation may still be running. Do not retry it.",
+            button=label, expected=expected, timed_out=True,
+        )
+    if error is not None:
+        return outcome.unverified(
+            "click_and_verify",
+            f"UI Automation raised {type(error).__name__}; whether the application acted is unknown. Do not retry automatically.",
             button=label, expected=expected,
         )
 
-    def read_current_snapshot():
-        _current, current_records, _current_clickables = _active_window_snapshot()
-        return _format_snapshot(current_records)
+    status, reason = invocation
+    if status != "invoked":
+        return outcome.failed(
+            "click_and_verify", reason or "the control was not invoked",
+            button=label, target_status=status,
+        )
 
-    verified = _wait_for_expected_result(expected, read_current_snapshot)
+    verified = _wait_for_expected_result(
+        expected,
+        lambda: _snapshot(expected_window_handle),
+    )
     if verified:
         return outcome.done(
             "click_and_verify", button=label, expected=expected, verified=True,
         )
     return outcome.unverified(
         "click_and_verify",
-        "the button was invoked, but the requested accessible result did not appear",
+        "the control was invoked, but the exact expected accessible text did not appear in the original window",
         button=label, expected=expected,
     )
 
@@ -225,19 +391,21 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
             "both button_label and expected_result are required",
         )
 
-    # Validate the target and expected state before raising a confirmation
-    # banner, so we never ask the user to approve an action we cannot identify.
+    # Identify the exact target before asking for confirmation. No UIA object
+    # crosses the worker thread boundary; only plain metadata is retained.
     try:
-        window, records, clickables = _active_window_snapshot()
+        snapshot = _snapshot()
     except Exception as exc:
         return outcome.failed("click_and_verify", str(exc), button=label)
-    if _normalise(expected) in _normalise(_format_snapshot(records)):
+
+    if _has_exact_expected_text(snapshot["records"], expected):
         return outcome.failed(
             "click_and_verify",
-            "the expected result is already visible; no click was made",
+            "the exact expected text is already visible; no click was made",
             button=label, expected=expected,
         )
-    matches = _matching_controls(clickables, label)
+
+    matches = _matching_controls(snapshot["clickables"], label)
     if not matches:
         return outcome.failed(
             "click_and_verify",
@@ -251,15 +419,16 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
             button=label, matches=len(matches),
         )
 
-    handle = getattr(window, "handle", None)
-    if handle is None:
-        return outcome.failed(
-            "click_and_verify",
-            "the active window could not be identified safely; nothing was clicked",
-            button=label,
-        )
-
-    if _requires_confirmation(label) or _requires_confirmation(expected):
+    handle = snapshot["handle"]
+    signature = {
+        "role": matches[0]["role"],
+        "automation_id": matches[0].get("automation_id", ""),
+        "rect": matches[0].get("rect"),
+    }
+    context_text = " ".join(
+        _safe_name(item.get("name")) for item in snapshot["records"]
+    )
+    if _requires_confirmation(label, expected, context_text):
         from core import confirm
         if confirm.pending_title():
             return outcome.ask(
@@ -271,37 +440,39 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
             key="click_and_verify",
             title=f"Confirm click: {label}",
             detail=(
-                f"MARK will invoke the '{label}' control in the currently active "
-                f"window and then look for: {expected}. Confirm only if this is "
-                "the intended action."
+                f"MARK will invoke the '{label}' control in the same window "
+                f"identified before this prompt, then look for the exact text: "
+                f"{expected}. Confirm only if this is the intended action."
             ),
-            run=lambda: _click_and_verify(label, expected, handle),
+            run=lambda: _click_and_verify(label, expected, handle, signature),
         )
 
-    return _click_and_verify(label, expected, handle)
+    return _click_and_verify(label, expected, handle, signature)
 
 
 TOOL = {
     "name": "click_and_verify",
     "tier": "core",
-    "brief": "Click one exact accessible control locally and verify the expected visible result.",
+    "brief": "Click one exact accessible control locally and verify the exact expected result.",
     "description": (
         "Use only when the user explicitly asks you to click a visible button, "
-        "link or menu item AND you know the exact accessible label and a concrete "
-        "piece of text that should appear afterward. Provide both button_label "
-        "and expected_result; do not invent the expected result. This uses local "
-        "Windows UI Automation, not screenshots, coordinates, clipboard access "
-        "or a vision/model call. It clicks only one exact, unique, visible and "
-        "enabled accessible control in the active window. It reports success "
-        "only if expected_result was absent before the click and appears in the "
-        "accessible UI afterward. Missing, ambiguous or unobservable outcomes "
-        "are never reported as success. Controls whose labels imply sending, "
-        "submitting, publishing, deleting, purchasing, payment, transfer, "
-        "cancellation or confirmation require the human HUD confirmation gate. "
-        "Never use for a payment, purchase, account deletion or other critical "
-        "action unless the user explicitly asked for that specific action; "
-        "confirmation is still required. Accessible text is returned to the "
-        "active assistant conversation."
+        "link or menu item AND you know the exact accessible label and exact "
+        "accessible text that should appear afterward. Provide both "
+        "button_label and expected_result; do not invent the expected result. "
+        "This uses local Windows UI Automation, not screenshots, coordinates, "
+        "clipboard access or a vision/model call. It clicks only one exact, "
+        "unique, visible and enabled accessible control in the original window. "
+        "The original window and control identity are rechecked after any HUD "
+        "confirmation, even if MARK's confirmation window became foreground. "
+        "It reports success only when the exact expected accessible element "
+        "name was absent before the click and appears afterward; partial text "
+        "matches such as 'Saved' inside 'Not saved' do not count. Missing, "
+        "ambiguous or unobservable outcomes are never reported as success. "
+        "Potentially high-impact actions inferred from the button, expected "
+        "result or visible accessible dialog context require the human HUD "
+        "confirmation gate. A UI Automation call is bounded by a timeout and "
+        "is never automatically retried. No UIA element is shared between COM "
+        "threads. The accessible result is returned to the active conversation."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -312,7 +483,7 @@ TOOL = {
             },
             "expected_result": {
                 "type": "STRING",
-                "description": "Exact distinctive text that should become visible after clicking.",
+                "description": "Exact accessible name of a distinctive UI element that should appear after clicking.",
             },
         },
         "required": ["button_label", "expected_result"],
