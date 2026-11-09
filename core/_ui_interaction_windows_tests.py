@@ -24,7 +24,7 @@ from actions.ui_interaction import (
     _snapshot,
     _fill_text_and_verify,
 )
-from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox, ui_radio
+from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox, ui_radio, ui_tab
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -38,10 +38,13 @@ _SAVE_TITLE_BUTTON_ID = 106
 _CHECKBOX_ID = 108
 _RADIO_EMAIL_ID = 109
 _RADIO_SMS_ID = 110
+_TAB_CONTROL_ID = 111
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _comctl32 = ctypes.WinDLL("comctl32", use_last_error=True)
+    _comctl32.InitCommonControls.restype = None
 
     _WNDPROC = ctypes.WINFUNCTYPE(
         ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
@@ -124,6 +127,7 @@ def _serve_native_window() -> int:
     project_title_hwnd = [None]
     checkbox_hwnd = [None]
     radio_hwnds = [None, None]
+    tab_hwnd = [None]
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -240,10 +244,37 @@ def _serve_native_window() -> int:
     if radio_hwnds[0] and radio_hwnds[1]:
         _user32.SendMessageW(radio_hwnds[0], 0x00F1, 1, 0)
         _user32.SendMessageW(radio_hwnds[1], 0x00F1, 0, 0)
+    _comctl32.InitCommonControls()
+    tab_hwnd[0] = _user32.CreateWindowExW(
+        0, "SysTabControl32", "",
+        0x50010000, 20, 365, 400, 48, hwnd,
+        ctypes.c_void_p(_TAB_CONTROL_ID), hinstance, None,
+    )
+    if tab_hwnd[0]:
+        class _TCITEMW(ctypes.Structure):
+            _fields_ = [
+                ("mask", wintypes.UINT),
+                ("dwState", wintypes.UINT),
+                ("dwStateMask", wintypes.UINT),
+                ("pszText", wintypes.LPWSTR),
+                ("cchText", ctypes.c_int),
+                ("iImage", ctypes.c_int),
+                ("lParam", ctypes.c_ssize_t),
+            ]
+        for index, label in enumerate(("Overview", "Details")):
+            item = _TCITEMW()
+            item.mask = 0x0001  # TCIF_TEXT
+            item.pszText = label
+            item.cchText = len(label)
+            inserted = _user32.SendMessageW(
+                tab_hwnd[0], 0x133E, index, ctypes.addressof(item),
+            )  # TCM_INSERTITEMW
+            if inserted < 0:
+                raise RuntimeError("could not add native test tab")
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
                 project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0],
-                radio_hwnds[0], radio_hwnds[1])):
+                radio_hwnds[0], radio_hwnds[1], tab_hwnd[0])):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -571,6 +602,22 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertIn("status=done", second, second)
         self.assertIn("changed=false", second)
         self.assertEqual(_user32.SendMessageW(sms, 0x00F0, 0, 0), 1)
+
+
+    def test_native_tab_item_selection_is_verified_and_idempotent(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        tab = _user32.GetDlgItem(self.hwnd, _TAB_CONTROL_ID)
+        self.assertTrue(tab)
+        self.assertEqual(_user32.SendMessageW(tab, 0x130B, 0, 0), 0)  # TCM_GETCURSEL
+        first = ui_tab.select_tab_item({"tab_label": "Details"})
+        self.assertIn("status=done", first, first)
+        self.assertIn("selected=true", first)
+        self.assertEqual(_user32.SendMessageW(tab, 0x130B, 0, 0), 1)
+        second = ui_tab.select_tab_item({"tab_label": "Details"})
+        self.assertIn("status=done", second, second)
+        self.assertIn("changed=false", second)
+        self.assertEqual(_user32.SendMessageW(tab, 0x130B, 0, 0), 1)
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
