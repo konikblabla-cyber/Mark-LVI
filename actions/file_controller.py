@@ -761,7 +761,7 @@ def organize_desktop() -> str:
             if len(moved) > 8:
                 result += f"\n... and {len(moved) - 8} more."
         if skipped:
-            result += f"\n{len(skipped)} file(s) skipped (unsafe link or name conflict)."
+            result += f"\n{len(skipped)} item(s) skipped (unsafe link or name conflict)."
         return result
 
     except Exception as e:

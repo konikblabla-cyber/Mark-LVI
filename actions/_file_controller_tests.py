@@ -120,7 +120,7 @@ class FileControllerSafetyTests(unittest.TestCase):
             with patch.object(files, "_get_desktop", return_value=desktop):
                 result = files.organize_desktop()
             self.assertIn("0 files moved", result)
-            self.assertIn("1 file(s) skipped", result)
+            self.assertIn("1 item(s) skipped", result)
             self.assertTrue(link.is_symlink())
             self.assertEqual(outside.read_text(encoding="utf-8"), "outside")
         finally:
@@ -141,7 +141,7 @@ class FileControllerSafetyTests(unittest.TestCase):
             with patch.object(files, "_get_desktop", return_value=desktop):
                 result = files.organize_desktop()
             self.assertIn("0 files moved", result)
-            self.assertIn("1 file(s) skipped", result)
+            self.assertIn("2 item(s) skipped", result)
             self.assertTrue((desktop / "document.pdf").exists())
             self.assertFalse((outside / "document.pdf").exists())
         finally:
