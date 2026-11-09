@@ -52,6 +52,10 @@ on:
       - "ui.py"
       - "main.py"
       - "actions/dev_agent.py"
+      - "actions/browser_control.py"
+      - "core/browser_safety.py"
+      - "core/_browser_safety_tests.py"
+      - "actions/_browser_control_tests.py"
       - "actions/proactive.py"
       - "core/_proactive_tests.py"
       - ".github/workflows/model-router.yml"
@@ -90,7 +94,7 @@ jobs:
         run: python -m pip install numpy
       - name: Compile changed Python modules
         run: |
-          python -m py_compile actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_slider.py core/_ui_slider_tests.py actions/ui_tree.py core/_ui_tree_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py actions/ui_reasoning.py core/ui_reasoning.py core/_ui_reasoning_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/_mission_control_tests.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
+          python -m py_compile actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_slider.py core/_ui_slider_tests.py actions/ui_tree.py core/_ui_tree_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py actions/ui_reasoning.py core/ui_reasoning.py core/_ui_reasoning_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/_mission_control_tests.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py actions/browser_control.py actions/_browser_control_tests.py core/browser_safety.py core/_browser_safety_tests.py
       - name: Run offline router tests
         run: python -m core._model_router_tests
       - name: Run offline capability tests
@@ -133,6 +137,10 @@ jobs:
         run: python -m core._ui_reasoning_tests
       - name: Run Mission Control reliability tests
         run: python -m plugins._mission_control_tests
+      - name: Run browser safety classifier tests
+        run: python -m core._browser_safety_tests
+      - name: Run browser behavior safety tests
+        run: python -m actions._browser_control_tests
 
   windows-uia:
     runs-on: windows-latest
