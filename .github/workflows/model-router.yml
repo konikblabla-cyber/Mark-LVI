@@ -14,6 +14,7 @@ on:
       - "core/_screen_understanding_tests.py"
       - "actions/ui_interaction.py"
       - "core/_ui_interaction_tests.py"
+      - "core/_ui_interaction_windows_tests.py"
       - "memory/conversation_history.py"
       - "plugins/conversation_history.py"
       - "plugins/mission_control.py"
@@ -47,7 +48,7 @@ jobs:
         run: python -m pip install numpy
       - name: Compile changed Python modules
         run: |
-          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py core/_ui_interaction_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
+          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
       - name: Run offline router tests
         run: python -m core._model_router_tests
       - name: Run offline capability tests
@@ -60,3 +61,17 @@ jobs:
         run: python -m core._screen_understanding_tests
       - name: Run offline UI interaction tests
         run: python -m core._ui_interaction_tests
+
+  windows-uia:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Windows UI Automation dependencies
+        run: python -m pip install pywinauto pywin32
+      - name: Compile UI Automation modules
+        run: python -m py_compile actions/screen_understanding.py actions/ui_interaction.py core/_screen_understanding_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py
+      - name: Run native Windows UI Automation integration tests
+        run: python -m core._ui_interaction_windows_tests
