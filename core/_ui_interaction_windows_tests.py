@@ -454,13 +454,13 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         time.sleep(0.1)
         result = text_entry.fill_text_field({
             "field_label": "Project title",
-            "text": "Standalone draft",
+            "text": "Quarterly plan",
         })
         self.assertTrue(
             result.startswith("status=done action=fill_text_field "),
             result,
         )
-        self.assertNotIn("Standalone draft", result)
+        self.assertNotIn("Quarterly plan", result)
         after = _snapshot(int(self.hwnd))
         matches = [item for item in after["records"] if item["name"] == "Standalone draft"]
         self.assertFalse(matches, "Entered value must not be returned as an accessible name")
