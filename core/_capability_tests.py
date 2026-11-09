@@ -151,7 +151,7 @@ class MissionControlTests(unittest.TestCase):
                 created = mission.run({
                     "action": "plan", "title": "Build the assistant",
                     "goal": "Create a safe multi-step assistant",
-                    "steps": "Audit capabilities\\nAdd persistent task tracking",
+                    "steps": "Audit capabilities\nAdd persistent task tracking",
                 })
                 self.assertIn("MISSION M-", created)
                 mission_id = created.split("MISSION ", 1)[1].split(":", 1)[0]
@@ -191,7 +191,7 @@ class MissionControlTests(unittest.TestCase):
                 planned = mission.run({
                     "action": "plan", "title": "Create a project",
                     "goal": "Create and verify two project files",
-                    "steps": "Create the first file\\nCreate the second file",
+                    "steps": "Create the first file\nCreate the second file",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 self.assertNotIn("[MISSION_CONTINUE]", planned)
@@ -233,7 +233,7 @@ class MissionControlTests(unittest.TestCase):
                 planned = mission.run({
                     "action": "plan", "title": "Ordered job",
                     "goal": "Perform steps in order",
-                    "steps": "First step\\nSecond step",
+                    "steps": "First step\nSecond step",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 scope = self._new_scope("Run ordered job")
