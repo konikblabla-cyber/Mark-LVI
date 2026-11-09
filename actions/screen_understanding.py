@@ -62,17 +62,30 @@ def format_accessible_elements(elements, max_elements: int = _MAX_ELEMENTS,
 
 
 def _active_top_level_window(desktop):
-    """Promote UIA's focused element to the window that owns the full UI tree.
+    """Return the unique foreground top-level window using pywinauto 0.6.9.
 
-    Under pywinauto's UIA backend, Desktop.get_active() returns the element
-    with input focus, not the top-level application window. Descendant
-    inspection on that control would usually see only a tiny subtree (often
-    no controls at all).
+    Desktop.get_active() is not available in the pywinauto 0.6.9 runtime used
+    by MARK. Desktop.windows() has existed since 0.6.6 and forwards
+    active_only/visible_only to findwindows.find_elements. Keeping this query
+    at the top level avoids accidentally scanning only the focused child.
     """
-    focused = desktop.get_active()
-    if focused is None:
+    try:
+        windows = desktop.windows(
+            active_only=True, visible_only=True, top_level_only=True,
+        )
+    except Exception:
         return None
-    return focused.top_level_parent()
+
+    visible = []
+    for window in windows or []:
+        try:
+            if window is not None and window.is_visible():
+                visible.append(window)
+        except Exception:
+            continue
+
+    # Never guess if the provider unexpectedly reports multiple active roots.
+    return visible[0] if len(visible) == 1 else None
 
 
 def _read_active_window() -> str:
