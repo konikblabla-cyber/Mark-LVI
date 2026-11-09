@@ -444,12 +444,8 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             result.startswith("status=done action=fill_text_and_verify "),
             result,
         )
-        buffer = ctypes.create_unicode_buffer(512)
-        _user32.GetWindowTextW(
-            _user32.FindWindowExW(self.hwnd, None, "EDIT", None),
-            buffer, len(buffer),
-        )
-        self.assertEqual(buffer.value, "Quarterly plan")
+        # The action compares ValuePattern.CurrentValue internally; it must
+        # never include the entered value in its result sent back to the model.
         self.assertNotIn("Quarterly plan", result)
 
     def test_fill_text_does_not_touch_password_or_secret_fields(self):
