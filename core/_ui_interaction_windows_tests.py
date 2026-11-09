@@ -100,6 +100,10 @@ if sys.platform == "win32":
     ]
     _user32.FindWindowW.restype = wintypes.HWND
     _user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    _user32.FindWindowExW.restype = wintypes.HWND
+    _user32.FindWindowExW.argtypes = [
+        wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR,
+    ]
     _user32.GetMessageW.restype = ctypes.c_int
     _user32.GetMessageW.argtypes = [
         ctypes.POINTER(wintypes.MSG), wintypes.HWND,
@@ -307,11 +311,20 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
                 pass
 
     def setUp(self):
-        # Reset the isolated fixture directly so tests never inherit typed data.
+        # Each test starts with a clean fixture and a free in-memory sequence guard.
+        with ui_sequence._SEQUENCE_STATE_LOCK:
+            ui_sequence._ACTIVE_SEQUENCE_ID = None
         _user32.SendMessageW(
             self.hwnd, 0x0111, _RESET_BUTTON_ID, 0,
         )
         time.sleep(0.05)
+
+    def _checkbox_handle(self):
+        handle = _user32.FindWindowExW(
+            self.hwnd, None, "BUTTON", "Enable notifications",
+        )
+        self.assertTrue(handle, "native checkbox fixture was not found")
+        return handle
 
     def test_real_native_button_without_expected_change_is_not_reported_done(self):
         snapshot = _snapshot(int(self.hwnd))
@@ -472,7 +485,8 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
     def test_form_sequence_fills_edit_then_clicks_save_button(self):
         # This test isolates ValuePattern entry; the separate checkbox test
         # verifies that changing a checkbox itself requires HUD approval.
-        _user32.SendMessageW(self.checkbox_hwnd, 0x00F1, 1, 0)  # BM_SETCHECK BST_CHECKED
+        checkbox_handle = self._checkbox_handle()
+        _user32.SendMessageW(checkbox_handle, 0x00F1, 1, 0)  # BM_SETCHECK BST_CHECKED
         self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
         time.sleep(0.1)
         active = _snapshot()
@@ -535,8 +549,9 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
                 ],
             })
             self.assertEqual(pending, "[CONFIRMATION_PENDING]")
+            checkbox_handle = self._checkbox_handle()
             self.assertEqual(
-                _user32.SendMessageW(self.checkbox_hwnd, 0x00F0, 0, 0), 0,
+                _user32.SendMessageW(checkbox_handle, 0x00F0, 0, 0), 0,
                 "checkbox changed before HUD approval",
             )
             self.assertEqual(len(requests), 1)
@@ -546,7 +561,7 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
         self.assertIn("steps_completed=3", result)
         self.assertEqual(
-            _user32.SendMessageW(self.checkbox_hwnd, 0x00F0, 0, 0), 1,
+            _user32.SendMessageW(self._checkbox_handle(), 0x00F0, 0, 0), 1,
         )
         after = _snapshot(int(self.hwnd))
         self.assertTrue(
