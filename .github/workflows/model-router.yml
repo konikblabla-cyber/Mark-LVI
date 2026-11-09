@@ -42,6 +42,7 @@ on:
       - "feature/local-ui-vision"
       - "feature/verified-ui-actions"
       - "feature/verified-ui-sequences"
+      - "feature/verified-form-entry"
 
 jobs:
   router:
