@@ -39,24 +39,24 @@ _EXTERNAL_ACTION = re.compile(
     re.IGNORECASE,
 )
 _CRITICAL_ACTION = re.compile(
-    r"\\b(?:pay|payment|purchase|buy|checkout|transfer|wire|withdraw|refund|"
+    r"\b(?:pay|payment|purchase|buy|checkout|transfer|wire|withdraw|refund|"
     r"destroy|wipe|format|factory|revoke|authorize|security|authentication|"
-    r"credential|password|passcode|otp|2fa)\\b|"
-    r"\\b(?:permanent|permanently|irreversible)\\b|"
-    r"factory[\\s_-]+reset|reset[\\s_-]+(?:pc|computer|system|password|account|security)|"
-    r"sign[\\s_-]+(?:contract|document|agreement)|"
-    r"change[\\s_-]+(?:password|security)|"
-    r"(?:delete|close|terminate|remove)[\\s_-]+(?:account|profile|membership)|"
-    r"(?:account|profile|membership)[\\s_-]+(?:deleted|closed)|"
-    r"(?:deleted|closed)[\\s_-]+(?:account|profile|membership)|"
-    r"clear[\\s_-]+(?:all[\\s_-]+)?(?:data|files)|"
-    r"\\b(?:zapłać|zaplac|płatność|platnosc|kup|zakup|przelew|usuń|usun|"
-    r"skasuj|zniszcz|sformatuj|wyczyść|wyczysc|password|hasło|haslo)\\b|"
-    r"(?:usuń\\w*|usun\\w*|zamknij)[\\s_-]+(?:konto|profil)|"
-    r"resetuj[\\s_-]+(?:komputer|system|hasło|haslo|konto|zabezpieczenia)|"
-    r"zmień[\\s_-]+hasło|zmien[\\s_-]+haslo|"
-    r"podpisz[\\s_-]+(?:umowę|umowe|dokument)|"
-    r"bezpieczeństw\\w*|bezpieczenstw\\w*|uwierzyteln\\w*",
+    r"credential|password|passcode|otp|2fa)\b|"
+    r"\b(?:permanent|permanently|irreversible)\b|"
+    r"factory[\s_-]+reset|reset[\s_-]+(?:pc|computer|system|password|account|security)|"
+    r"sign[\s_-]+(?:contract|document|agreement)|"
+    r"change[\s_-]+(?:password|security)|"
+    r"(?:delete|close|terminate|remove)[\s_-]+(?:account|profile|membership)|"
+    r"(?:account|profile|membership)[\s_-]+(?:deleted|closed)|"
+    r"(?:deleted|closed)[\s_-]+(?:account|profile|membership)|"
+    r"clear[\s_-]+(?:all[\s_-]+)?(?:data|files)|"
+    r"\b(?:zapłać|zaplac|płatność|platnosc|kup|zakup|przelew|usuń|usun|"
+    r"skasuj|zniszcz|sformatuj|wyczyść|wyczysc|password|hasło|haslo)\b|"
+    r"(?:usuń\w*|usun\w*|zamknij)[\s_-]+(?:konto|profil)|"
+    r"resetuj[\s_-]+(?:komputer|system|hasło|haslo|konto|zabezpieczenia)|"
+    r"zmień[\s_-]+hasło|zmien[\s_-]+haslo|"
+    r"podpisz[\s_-]+(?:umowę|umowe|dokument)|"
+    r"bezpieczeństw\w*|bezpieczenstw\w*|uwierzyteln\w*",
     re.IGNORECASE,
 )
 
