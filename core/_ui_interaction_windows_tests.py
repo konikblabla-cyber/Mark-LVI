@@ -24,7 +24,7 @@ from actions.ui_interaction import (
     _snapshot,
     _fill_text_and_verify,
 )
-from actions import ui_sequence
+from actions import ui_sequence, ui_picker_diagnostics
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -484,6 +484,25 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             any(item["name"] == "Title saved" for item in after["records"]),
             after["records"],
         )
+
+    def test_picker_diagnostics_are_bounded_and_do_not_return_edit_contents(self):
+        snapshot = _snapshot(int(self.hwnd))
+        sentinel = "PRIVATE_FIELD_VALUE_NOT_FOR_MODEL_48291"
+        result = _fill_text_and_verify(
+            "Project title", sentinel, int(self.hwnd), snapshot["process_id"],
+        )
+        self.assertTrue(result.startswith("status=done action=fill_text_and_verify "), result)
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        report = ui_picker_diagnostics.inspect_picker_controls()
+        self.assertIn("Project title", report)
+        self.assertNotIn(sentinel, report)
+        # Inspection is read-only: a subsequent local snapshot still has one
+        # Edit control, and the diagnostic response contains no field value.
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(any(item["name"] == "Project title" for item in after["records"]), after["records"])
+        self.assertNotIn(sentinel, report)
+
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
         matches = _matching_controls(snapshot["clickables"], "Definitely not present")
