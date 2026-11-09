@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from actions import file_controller as files
+from core import confirm
+from core.autonomy_policy import new_turn_authorization
 
 
 class FileControllerSafetyTests(unittest.TestCase):
@@ -175,6 +177,61 @@ class FileControllerSafetyTests(unittest.TestCase):
         self.assertIn("Could not write file", result)
         self.assertEqual(target.read_text(encoding="utf-8"), "before")
         self.assertFalse(list(self.root.glob(".mark-write-*.tmp")))
+
+    def test_unrequested_delete_waits_for_hud_confirmation(self):
+        target = self.root / "report.txt"
+        target.write_text("keep", encoding="utf-8")
+        params = {"action": "delete", "path": str(self.root), "name": target.name}
+        with patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as gate:
+            result = files.file_controller(params, session_memory=new_turn_authorization("Show me the folder."))
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        gate.assert_called_once()
+        self.assertTrue(target.exists())
+
+    def test_explicit_exact_delete_skips_second_confirmation(self):
+        target = self.root / "report.txt"
+        target.write_text("keep", encoding="utf-8")
+        params = {"action": "delete", "path": str(self.root), "name": target.name}
+        with patch.object(confirm, "request") as gate, patch.object(files, "_safe_trash", return_value="Moved to Trash: report.txt"):
+            result = files.file_controller(params, session_memory=new_turn_authorization("Delete report.txt."))
+        self.assertIn("Moved to Trash", result)
+        gate.assert_not_called()
+
+    def test_permanent_delete_always_waits_for_hud_confirmation(self):
+        target = self.root / "report.txt"
+        target.write_text("keep", encoding="utf-8")
+        params = {"action": "delete", "path": str(self.root), "name": target.name}
+        with patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as gate:
+            result = files.file_controller(params, session_memory=new_turn_authorization("Permanently delete report.txt."))
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        gate.assert_called_once()
+        self.assertTrue(target.exists())
+
+    def test_unrequested_desktop_organize_waits_for_confirmation(self):
+        params = {"action": "organize_desktop"}
+        with patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as gate, patch.object(files, "organize_desktop") as organize:
+            result = files.file_controller(params, session_memory=new_turn_authorization("What is on my desktop?"))
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        gate.assert_called_once()
+        organize.assert_not_called()
+
+    def test_explicit_desktop_organize_runs_without_second_prompt(self):
+        params = {"action": "organize_desktop"}
+        with patch.object(confirm, "request") as gate, patch.object(files, "organize_desktop", return_value="Desktop organized: 0 files moved.") as organize:
+            result = files.file_controller(params, session_memory=new_turn_authorization("Sort my desktop."))
+        self.assertIn("Desktop organized", result)
+        gate.assert_not_called()
+        organize.assert_called_once()
+
+    def test_large_overwrite_requires_confirmation_even_when_requested(self):
+        target = self.root / "large.log"
+        target.write_bytes(b"x" * (files._UNDO_CONTENT_LIMIT + 1))
+        params = {"action": "write", "path": str(self.root), "name": target.name, "content": "replacement"}
+        with patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as gate:
+            result = files.file_controller(params, session_memory=new_turn_authorization("Replace large.log with replacement."))
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        gate.assert_called_once()
+        self.assertEqual(target.stat().st_size, files._UNDO_CONTENT_LIMIT + 1)
 
     def test_disk_usage_rejects_path_outside_safe_root(self):
         self.assertIn("Access denied", files.get_disk_usage(str(self.root.parent)))

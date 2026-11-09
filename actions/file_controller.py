@@ -792,7 +792,7 @@ def get_file_info(path: str, name: str = "") -> str:
     except Exception as e:
         return f"Could not get file info: {e}"
 
-def file_controller(
+def _file_controller_execute(
     parameters: dict = None,
     response=None,
     player=None,
@@ -866,6 +866,83 @@ def file_controller(
 
     except Exception as e:
         return f"File controller error ({action}): {e}"
+
+
+def _file_confirmation(parameters: dict, session_memory=None, player=None):
+    """Gate unrequested deletion, bulk desktop moves, and non-undoable overwrites."""
+    from core import confirm
+    from core.autonomy_policy import requires_ui_confirmation, scope_request
+    import re
+    params = parameters or {}
+    action = str(params.get("action") or "").strip().lower()
+    path = str(params.get("path") or "desktop")
+    name = str(params.get("name") or "").strip()
+    request = scope_request(session_memory)
+    if action == "delete":
+        target = name or path
+        if requires_ui_confirmation("delete " + target, user_request=request):
+            return confirm.request(
+                key="file_delete", title=("Move to Trash: " + target)[:120],
+                detail=("File action: delete (move to Trash)\nTarget: " + target +
+                        "\nFolder: " + path +
+                        "\n\nThis file or folder will be moved to the system Trash. "
+                        "Confirm only if this exact target should be removed.")[:1800],
+                run=lambda: _file_controller_execute(
+                    params, response=None, player=player, session_memory=session_memory),
+            )
+    elif action == "organize_desktop":
+        action_requested = bool(re.search(
+            r"\b(?:organize|organise|sort|tidy|move|clean|uporządkuj|uporzadkuj|"
+            r"porządkuj|porzadkuj|posortuj|sortuj|przenieś|przenies|"
+            r"posprzątaj|posprzataj)\b", request, re.IGNORECASE))
+        desktop_named = bool(re.search(r"\b(?:desktop|pulpit)\b", request, re.IGNORECASE))
+        if not (action_requested and desktop_named):
+            return confirm.request(
+                key="file_organize_desktop", title="Organize Desktop files",
+                detail=("This can move multiple Desktop files into type-based folders. "
+                        "It is reversible with Undo, but changes many paths. "
+                        "Confirm only if the desktop should be organized now."),
+                run=lambda: _file_controller_execute(
+                    params, response=None, player=player, session_memory=session_memory),
+            )
+    elif action == "write":
+        target = _resolve_path(path)
+        if name:
+            target = target / name
+        try:
+            target = target.resolve(strict=False)
+            if (_is_safe_path(target) and target.is_file()
+                    and target.stat().st_size > _UNDO_CONTENT_LIMIT):
+                size = _format_size(target.stat().st_size)
+                return confirm.request(
+                    key="file_large_overwrite",
+                    title=("Overwrite large file: " + target.name)[:120],
+                    detail=(f"File: {target}\nSize: {size}\n\n"
+                            "This file exceeds the in-memory Undo backup limit. "
+                            "The write is atomic, but Undo cannot reverse it. "
+                            "Confirm this overwrite explicitly.")[:1800],
+                    run=lambda: _file_controller_execute(
+                        params, response=None, player=player, session_memory=session_memory),
+                )
+        except OSError:
+            pass
+    return None
+
+
+def file_controller(parameters: dict = None, response=None, player=None, session_memory=None) -> str:
+    params = parameters or {}
+    try:
+        pending = _file_confirmation(params, session_memory=session_memory, player=player)
+        if pending is not None:
+            return pending
+    except Exception as exc:
+        action = str(params.get("action") or "").strip().lower()
+        if action in {"delete", "organize_desktop", "write"}:
+            return (f"File action blocked: safety confirmation could not be completed "
+                    f"({type(exc).__name__}). Nothing was changed.")
+        return f"File safety check failed ({type(exc).__name__}). Nothing was changed."
+    return _file_controller_execute(
+        params, response=response, player=player, session_memory=session_memory)
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
