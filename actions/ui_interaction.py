@@ -8,6 +8,7 @@ happens to have in the foreground when the user confirms.
 from __future__ import annotations
 
 import re
+import sys
 import threading
 import time
 
@@ -41,6 +42,8 @@ _INVOKE_TIMEOUT_SECONDS = 4.0
 _VERIFY_ATTEMPTS = 8
 _VERIFY_INTERVAL = 0.25
 _RECT_TOLERANCE = 8
+_COMTYPES_IMPORT_LOCK = threading.Lock()
+_INVOKE_LOCK = threading.Lock()
 
 
 def _normalise(value: object) -> str:
@@ -146,10 +149,19 @@ def _run_bounded(callback, timeout: float):
 
 
 def _run_uia(callback, timeout: float):
-    """Run fresh UIA objects in their own initialized COM apartment."""
+    """Run fresh UIA objects in their own initialized COM apartment.
+
+    comtypes initializes the importing thread automatically. If this is its
+    first import in the worker, that initialization is already in place;
+    otherwise each worker must initialize COM explicitly. Balance exactly one
+    initialization in either case.
+    """
     def with_com():
-        import comtypes
-        comtypes.CoInitialize()
+        with _COMTYPES_IMPORT_LOCK:
+            already_loaded = "comtypes" in sys.modules
+            import comtypes
+            if already_loaded:
+                comtypes.CoInitialize()
         try:
             return callback()
         finally:
@@ -249,28 +261,35 @@ def _snapshot(window_handle=None) -> dict:
 def _invoke_on_window(window_handle: int, label: str,
                       original_signature: dict) -> tuple[str, str]:
     """Re-find and invoke the same control inside the target window."""
-    from pywinauto import Desktop
+    # A timed-out Invoke may still be blocked in a system modal dialog. Do not
+    # start another invocation until that one has actually left the worker.
+    if not _INVOKE_LOCK.acquire(blocking=False):
+        return "busy", "a previous UI Automation invocation is still running"
+    try:
+        from pywinauto import Desktop
 
-    desktop = Desktop(backend="uia")
-    window = desktop.window(handle=int(window_handle)).wrapper_object()
-    if not window.is_visible():
-        return "missing_window", "the original window is no longer visible"
+        desktop = Desktop(backend="uia")
+        window = desktop.window(handle=int(window_handle)).wrapper_object()
+        if not window.is_visible():
+            return "missing_window", "the original window is no longer visible"
 
-    _records, clickables = _collect_accessible_controls(
-        window, include_wrappers=True,
-    )
-    matches = _matching_controls(clickables, label)
-    if not matches:
-        return "missing_control", "the original control is no longer available"
-    if len(matches) != 1:
-        return "ambiguous", "the control label is no longer unique"
-    target = matches[0]
-    if not _same_control_identity(target, original_signature):
-        return "changed_control", "the matching control is not the one originally identified"
+        _records, clickables = _collect_accessible_controls(
+            window, include_wrappers=True,
+        )
+        matches = _matching_controls(clickables, label)
+        if not matches:
+            return "missing_control", "the original control is no longer available"
+        if len(matches) != 1:
+            return "ambiguous", "the control label is no longer unique"
+        target = matches[0]
+        if not _same_control_identity(target, original_signature):
+            return "changed_control", "the matching control is not the one originally identified"
 
-    # InvokePattern calls the actual accessible control; no coordinate guess.
-    target["control"].iface_invoke.Invoke()
-    return "invoked", ""
+        # InvokePattern calls the actual accessible control; no coordinate guess.
+        target["control"].iface_invoke.Invoke()
+        return "invoked", ""
+    finally:
+        _INVOKE_LOCK.release()
 
 
 def _wait_for_expected_result(expected: str, snapshot_reader,
