@@ -6,6 +6,9 @@ import types
 import unittest
 from unittest.mock import patch
 
+from actions import ui_interaction
+from core.action_loader import _validate
+
 from actions.ui_interaction import (
     _has_exact_expected_text,
     _matching_controls,
@@ -19,6 +22,20 @@ from actions.ui_interaction import (
 
 
 class UIInteractionTests(unittest.TestCase):
+    def test_action_is_discoverable_by_the_real_action_loader(self):
+        record = _validate(ui_interaction, "ui_interaction.py")
+        self.assertTrue(record.valid, record.error)
+        self.assertEqual(record.name, "click_and_verify")
+        self.assertEqual(
+            set(record.parameters["required"]),
+            {"button_label", "expected_result"},
+        )
+
+    def test_handler_rejects_missing_operands_without_touching_desktop(self):
+        result = ui_interaction.click_and_verify({})
+        self.assertIn("status=failed", result)
+        self.assertIn("action=click_and_verify", result)
+
     def test_normalises_whitespace_and_case(self):
         self.assertEqual(_normalise("  Save   Changes "), "save changes")
 
