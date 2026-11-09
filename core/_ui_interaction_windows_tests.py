@@ -227,7 +227,9 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             "rect": matches[0].get("rect"),
         }
 
-        result = _click_and_verify("Save", "Saved", int(self.hwnd), signature)
+        result = _click_and_verify(
+            "Save", "Saved", int(self.hwnd), snapshot["process_id"], signature,
+        )
         self.assertTrue(
             result.startswith("status=done action=click_and_verify "),
             result,
@@ -244,7 +246,8 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertEqual(matches, [])
         result = _click_and_verify(
             "Definitely not present", "Completed",
-            int(self.hwnd), {"role": "Button", "automation_id": "", "runtime_id": (), "rect": None},
+            int(self.hwnd), snapshot["process_id"],
+            {"role": "Button", "automation_id": "", "runtime_id": (), "rect": None},
         )
         self.assertTrue(result.startswith("status=failed action=click_and_verify "), result)
 
