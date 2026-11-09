@@ -193,9 +193,52 @@ class FileControllerSafetyTests(unittest.TestCase):
         target.write_text("keep", encoding="utf-8")
         params = {"action": "delete", "path": str(self.root), "name": target.name}
         with patch.object(confirm, "request") as gate, patch.object(files, "_safe_trash", return_value="Moved to Trash: report.txt"):
-            result = files.file_controller(params, session_memory=new_turn_authorization("Delete report.txt."))
+            result = files.file_controller(params, session_memory=new_turn_authorization(f"Delete report.txt in {self.root.name}."))
         self.assertIn("Moved to Trash", result)
         gate.assert_not_called()
+
+    def test_delete_name_does_not_authorize_same_name_in_another_folder(self):
+        desktop = self.root / "Desktop"
+        downloads = self.root / "Downloads"
+        desktop.mkdir()
+        downloads.mkdir()
+        target = downloads / "report.txt"
+        target.write_text("keep", encoding="utf-8")
+        params = {"action": "delete", "path": str(downloads), "name": target.name}
+        request = new_turn_authorization("Delete report.txt from Desktop.")
+        with patch.object(files, "_get_desktop", return_value=desktop), patch.object(
+            confirm, "request", return_value="[CONFIRMATION_PENDING]"
+        ) as gate:
+            result = files.file_controller(params, session_memory=request)
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        gate.assert_called_once()
+        self.assertTrue(target.exists())
+
+    def test_exact_named_downloads_folder_authorizes_delete_without_second_prompt(self):
+        target = self.root / "report.txt"
+        target.write_text("keep", encoding="utf-8")
+        params = {"action": "delete", "path": "downloads", "name": target.name}
+        with patch.object(files, "_get_downloads", return_value=self.root), patch.object(
+            confirm, "request"
+        ) as gate, patch.object(
+            files, "_safe_trash", return_value="Moved to Trash: report.txt"
+        ):
+            result = files.file_controller(
+                params, session_memory=new_turn_authorization("Delete report.txt from Downloads.")
+            )
+        self.assertIn("Moved to Trash", result)
+        gate.assert_not_called()
+
+    def test_move_to_desktop_does_not_authorize_bulk_desktop_organization(self):
+        params = {"action": "organize_desktop"}
+        with patch.object(
+            confirm, "request", return_value="[CONFIRMATION_PENDING]"
+        ) as gate:
+            result = files.file_controller(
+                params, session_memory=new_turn_authorization("Move the report to Desktop.")
+            )
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        gate.assert_called_once()
 
     def test_permanent_delete_always_waits_for_hud_confirmation(self):
         target = self.root / "report.txt"

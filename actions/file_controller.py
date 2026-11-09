@@ -868,6 +868,51 @@ def _file_controller_execute(
         return f"File controller error ({action}): {e}"
 
 
+def _delete_target_was_explicitly_requested(request: str, path: str, name: str) -> bool:
+    """Bind a delete authorization to both the named item and its containing folder."""
+    from core.autonomy_policy import explicitly_requested_target_action
+    import re
+
+    request = str(request or "")
+    name = str(name or "").strip()
+    if not name or not explicitly_requested_target_action(request, name):
+        return False
+    try:
+        actual = _resolve_path(path).resolve(strict=False)
+    except Exception:
+        return False
+
+    # A bare filename means the default Desktop only. A different folder must
+    # be named in the user's request, not guessed by the model.
+    desktop = _get_desktop().resolve(strict=False)
+    if actual == desktop:
+        return True
+
+    locations = {
+        "desktop": _get_desktop(), "pulpit": _get_desktop(), "pulpitu": _get_desktop(),
+        "downloads": _get_downloads(), "download": _get_downloads(),
+        "pobrane": _get_downloads(), "pobranych": _get_downloads(),
+        "documents": _get_documents(), "document": _get_documents(),
+        "dokumenty": _get_documents(), "dokumentów": _get_documents(),
+        "pictures": _get_pictures(), "images": _get_pictures(),
+        "obrazy": _get_pictures(), "zdjęcia": _get_pictures(), "zdjecia": _get_pictures(),
+        "music": _get_music(), "muzyka": _get_music(),
+        "videos": _get_videos(), "video": _get_videos(), "wideo": _get_videos(),
+    }
+    tokens = {token.casefold() for token in re.findall(r"[^\W_]+", request, re.UNICODE)}
+    mentioned = {alias for alias in locations if alias in tokens}
+    if mentioned:
+        for alias in mentioned:
+            root = locations[alias].resolve(strict=False)
+            if actual == root or actual.is_relative_to(root):
+                return True
+        return False
+
+    # Custom folders are authorized only when their own name was included.
+    folder_name = actual.name.casefold()
+    return len(folder_name) > 1 and folder_name in tokens
+
+
 def _file_confirmation(parameters: dict, session_memory=None, player=None):
     """Gate unrequested deletion, bulk desktop moves, and non-undoable overwrites."""
     from core import confirm
@@ -880,7 +925,8 @@ def _file_confirmation(parameters: dict, session_memory=None, player=None):
     request = scope_request(session_memory)
     if action == "delete":
         target = name or path
-        if requires_ui_confirmation("delete " + target, user_request=request):
+        explicit_target = _delete_target_was_explicitly_requested(request, path, name)
+        if requires_ui_confirmation("delete " + target, user_request=request) or not explicit_target:
             return confirm.request(
                 key="file_delete", title=("Move to Trash: " + target)[:120],
                 detail=("File action: delete (move to Trash)\nTarget: " + target +
@@ -892,9 +938,8 @@ def _file_confirmation(parameters: dict, session_memory=None, player=None):
             )
     elif action == "organize_desktop":
         action_requested = bool(re.search(
-            r"\b(?:organize|organise|sort|tidy|move|clean|uporządkuj|uporzadkuj|"
-            r"porządkuj|porzadkuj|posortuj|sortuj|przenieś|przenies|"
-            r"posprzątaj|posprzataj)\b", request, re.IGNORECASE))
+            r"\b(?:organize|organise|sort|tidy|uporządkuj|uporzadkuj|"
+            r"porządkuj|porzadkuj|posortuj|sortuj|posprzątaj|posprzataj)\b", request, re.IGNORECASE))
         desktop_named = bool(re.search(r"\b(?:desktop|pulpit)\b", request, re.IGNORECASE))
         if not (action_requested and desktop_named):
             return confirm.request(
