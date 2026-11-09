@@ -13,10 +13,10 @@ import time
 
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _NEGATED_ACTION = re.compile(
-    r"\b(?:do\\s+not|don't|never|not)\\s+(?:click|press|select|choose|submit|"
-    r"send|text|message|publish|post|share|upload|delete|remove)\\b|"
-    r"\bnie\\s+(?:klikaj|kliknij|naciskaj|naciskaj|wybieraj|wybierz|"
-    r"wysyłaj|wysylaj|wyślij|wyslij|usuwaj|usun|kasuj|publikuj|opublikuj)\\b",
+    r"\b(?:do\s+not|don't|never|not)\s+(?:click|press|select|choose|submit|"
+    r"send|text|message|publish|post|share|upload|delete|remove)\b|"
+    r"\bnie\s+(?:klikaj|kliknij|naciskaj|naciskaj|wybieraj|wybierz|"
+    r"wysyłaj|wysylaj|wyślij|wyslij|usuwaj|usun|kasuj|publikuj|opublikuj)\b",
     re.IGNORECASE,
 )
 _NEGATED_SEND = re.compile(
