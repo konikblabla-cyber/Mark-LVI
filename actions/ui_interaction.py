@@ -39,7 +39,8 @@ _HIGH_IMPACT_WORDS = (
     "platnosci", "zapłać", "zaplac", "zapłacić", "zaplacic", "zamów",
     "zamow", "zamówienie", "zamowienie", "przelew", "przelewu", "przelać",
     "przelac", "anuluj", "anulować", "anulowac", "anulowanie", "potwierdź",
-    "potwierdz", "potwierdzić", "potwierdzic", "udostępnij", "udostepnij",
+    "potwierdz", "potwierdzić", "potwierdzic", "zatwierdź", "zatwierdz",
+    "zatwierdzić", "zatwierdzic", "udostępnij", "udostepnij",
     "udostępnianie", "udostepnianie", "usunięto", "usunieto", "wysłano",
     "wyslano", "opublikowano", "przelano",
 )
@@ -524,7 +525,8 @@ TOOL = {
         "result or visible accessible dialog context require the human HUD "
         "confirmation gate. A UI Automation call is bounded by a timeout and "
         "is never automatically retried. No UIA element is shared between COM "
-        "threads. The accessible result is returned to the active conversation."
+        "threads. Only the verification status is returned to the active conversation; "
+        "the rest of the accessibility tree remains local."
     ),
     "parameters": {
         "type": "OBJECT",
