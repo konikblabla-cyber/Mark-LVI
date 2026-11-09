@@ -79,7 +79,7 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             value = raw.get("text")
             if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
                 return None, f"step {index} has a missing or overlong field_label"
-            if not isinstance(value, str) or not value or len(value) > 4000 or "\\x00" in value:
+            if not isinstance(value, str) or not value or len(value) > 4000 or "\x00" in value:
                 return None, f"step {index} text must contain 1 to 4000 characters and no NUL bytes"
             validated.append({
                 "action": "fill_text",
