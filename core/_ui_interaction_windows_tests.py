@@ -16,13 +16,14 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from actions.ui_interaction import (
     _click_and_verify,
     _matching_controls,
     _snapshot,
 )
-from actions.ui_sequence import run_ui_sequence
+from actions import ui_sequence
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -364,12 +365,13 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             any(item["name"] == "Open panel" for item in active["clickables"]),
             active["clickables"],
         )
-        result = run_ui_sequence({
-            "steps": [
-                {"button_label": "Open panel", "expected_result": "Panel ready"},
-                {"button_label": "Finish workflow", "expected_result": "Workflow complete"},
-            ],
-        })
+        with patch.object(ui_sequence, "_capture_active_window", return_value=active):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {"button_label": "Open panel", "expected_result": "Panel ready"},
+                    {"button_label": "Finish workflow", "expected_result": "Workflow complete"},
+                ],
+            })
         self.assertTrue(
             result.startswith("status=done action=run_ui_sequence "),
             result,
@@ -390,12 +392,13 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             any(item["name"] == "No change" for item in active["clickables"]),
             active["clickables"],
         )
-        result = run_ui_sequence({
-            "steps": [
-                {"button_label": "No change", "expected_result": "Should not appear"},
-                {"button_label": "Finish workflow", "expected_result": "Workflow complete"},
-            ],
-        })
+        with patch.object(ui_sequence, "_capture_active_window", return_value=active):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {"button_label": "No change", "expected_result": "Should not appear"},
+                    {"button_label": "Finish workflow", "expected_result": "Workflow complete"},
+                ],
+            })
         self.assertTrue(
             result.startswith("status=unverified action=run_ui_sequence "),
             result,
