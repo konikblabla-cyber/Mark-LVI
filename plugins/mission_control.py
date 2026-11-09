@@ -99,28 +99,51 @@ def _next_open_step(mission: dict):
                  if step.get("status") in {"pending", "running"}), None)
 
 
-def _continue_instruction(mission: dict) -> str:
-    """Durable hand-off with crash-safe handling of a possibly interrupted action."""
+def _has_valid_persisted_tool_evidence(step: dict) -> bool:
+    """Trust only complete application receipts, never legacy or malformed rows."""
+    evidence = step.get("tool_evidence") if isinstance(step, dict) else None
+    if not isinstance(evidence, dict) or evidence.get("status") != "done":
+        return False
+    if evidence.get("verified") is not True:
+        return False
+    tool_name = evidence.get("tool_name")
+    if not isinstance(tool_name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
+        return False
+    if evidence.get("action") != tool_name:
+        return False
+    digest = evidence.get("result_sha256")
+    return isinstance(digest, str) and bool(re.fullmatch(r"[0-9a-f]{64}", digest))
+
+
+def _continue_instruction(mission: dict, recovery: bool = False) -> str:
+    """Hand off the already-claimed step, or recover without replaying it."""
     step = _next_open_step(mission)
     if mission.get("status") == "completed" or step is None:
         return ("\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
                 "Report the completed result to the user; do not invent extra work.")
-    if step.get("status") == "running":
+    if step.get("status") == "running" and recovery:
+        if _has_valid_persisted_tool_evidence(step):
+            return ("\n[MISSION_RECOVERY] The previous session has a persisted receipt from "
+                    "a tool that returned status=done verified=true. Do NOT repeat the action. Call "
+                    "complete_step for this exact step; the application will accept it only "
+                    "if the persisted receipt still matches the running mission step.")
         if step.get("ui_action"):
-            return ("\n[MISSION_RECOVERY] A UI action plan was already issued for this step before "
-                    "the last session ended. The action may or may not have happened. Do NOT issue "
-                    "or repeat it. First use read-only tools to inspect the real state. If success "
-                    "is verified, call complete_step; if uncertain, call block_step and explain why.")
-        return ("\n[MISSION_RECOVERY] This step was started before the last session ended. "
-                "Its action may already have happened. Do NOT repeat side effects. First use "
-                "read-only tools to inspect the real state. If success is verified, call "
-                "complete_step; if uncertain, call block_step and explain why.")
-    return ("\n[MISSION_CONTINUE] Continue this autonomous mission now. "
-            f"MISSION_ID={mission['id']} STEP_ID={step['id']}. "
-            "First call begin_step and wait for its result. Only then execute this step once "
-            f"using existing tools: {step['title']}. "
-            "After a real tool result verifies success, call complete_step. On a blocker, "
-            "call block_step and stop. Never invent tool results.")
+            return ("\n[MISSION_RECOVERY] A UI action plan was persisted before the last "
+                    "session ended. The action may or may not have happened. Do NOT issue "
+                    "or repeat it. First inspect the real state using read-only tools. "
+                    "Only complete the step after a fresh tool result verifies the outcome; "
+                    "otherwise block_step and stop.")
+        return ("\n[MISSION_RECOVERY] This step was already running before the current "
+                "execution context. Its action may already have happened. Do NOT repeat "
+                "side effects. Inspect with read-only tools and obtain a fresh verifiable "
+                "result; otherwise block_step and stop.")
+    return ("\n[MISSION_CONTINUE] The current step is already durably marked running. "
+            "Execute exactly this step once using the existing tools; do NOT call begin_step "
+            f"again. MISSION_ID={mission['id']} STEP_ID={step['id']}. "
+            f"Step: {step['title']}. After a real tool returns matching status=done verified=true, "
+            "immediately call complete_step for this mission and step. If the tool fails, "
+            "is ambiguous, unverified or waits for confirmation, do not claim success; "
+            "block the step or stop at the confirmation gate.")
 
 
 def _format(mission: dict) -> str:
@@ -221,6 +244,50 @@ def _fresh_ui_plan(goal: str) -> dict:
     return {"status": "planned", "execution": "not_started", "steps": [safe_item]}
 
 
+def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
+    """Persist the actual dispatcher receipt for the currently running step.
+
+    This is an internal application hook, not a model-callable plugin action.
+    Raw tool output is reduced to a status/action pair and a SHA-256 fingerprint.
+    """
+    from core.mission_evidence import (
+        record_tool_result as record_turn_result,
+        verified_evidence,
+    )
+
+    accepted = record_turn_result(session_memory, tool_name, result)
+    current = (session_memory.get("_mission_execution")
+               if isinstance(session_memory, dict) else None)
+    if not isinstance(current, dict):
+        return False
+    mission_id = str(current.get("mission_id") or "")
+    step_id = str(current.get("step_id") or "")
+    if not mission_id or not step_id:
+        return False
+
+    evidence = verified_evidence(session_memory, mission_id, step_id) if accepted else None
+    try:
+        with _LOCK:
+            data = _read()
+            mission = next((m for m in data["missions"] if m.get("id") == mission_id), None)
+            if mission is None:
+                return False
+            step = next((s for s in mission.get("steps", []) if s.get("id") == step_id), None)
+            if step is None or step.get("status") != "running":
+                return False
+            if evidence is None:
+                step.pop("tool_evidence", None)
+            else:
+                step["tool_evidence"] = evidence
+            step["updated_at"] = _now()
+            mission["updated_at"] = _now()
+            _write(data)
+        return evidence is not None
+    except Exception:
+        # Failure to persist evidence must never authorize a completion.
+        return False
+
+
 def run(parameters: dict, player=None, session_memory=None) -> str:
     action = str(parameters.get("action") or "list").strip().lower()
     mission_id = str(parameters.get("mission_id") or "").strip()
@@ -268,15 +335,32 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if mission.get("status") in {"completed", "archived"}:
                     return "This mission is completed or archived and cannot be started."
                 if any(step.get("status") == "blocked" for step in mission.get("steps", [])):
-                    return ("[MISSION_RECOVERY_REQUIRED] This mission has an unresolved step. "
-                            "Inspect the real state with read-only tools, then use resolve_step: "
-                            "resolution='completed' if the result is already present, or "
-                            "resolution='retry_safe' only if inspection proves no side effect occurred.")
+                    return "This mission has a blocked step. Resolve the blocker, then use resume."
                 mission["execution_mode"] = "autonomous"
                 mission["status"] = "active"
                 mission["updated_at"] = _now()
+                next_step = _next_open_step(mission)
+                was_running = bool(next_step and next_step.get("status") == "running")
+                if next_step and next_step.get("status") == "pending":
+                    next_step["status"] = "running"
+                    next_step["started_at"] = _now()
+                    next_step["updated_at"] = _now()
+                    from core.mission_evidence import activate_step
+                    next_step.pop("tool_evidence", None)
+                    activate_step(session_memory, mission_id, next_step["id"])
+                elif next_step and next_step.get("status") == "running":
+                    from core.mission_evidence import activate_step, seed_step_evidence
+                    activate_step(session_memory, mission_id, next_step["id"])
+                    restored = seed_step_evidence(
+                        session_memory, mission_id, next_step["id"],
+                        next_step.get("tool_evidence"),
+                    )
+                    if not restored:
+                        next_step.pop("tool_evidence", None)
                 _write(data)
-                result = _format(mission) + _continue_instruction(mission)
+                result = _format(mission) + _continue_instruction(
+                    mission, recovery=was_running,
+                )
             elif action in {"list", "show", "next"}:
                 selected = None
                 if mission_id:
@@ -342,20 +426,23 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if step is None:
                     return "Give me a valid step_id for that mission."
                 if step.get("status") == "running":
-                    return "[MISSION_RECOVERY] This step was already started. Do not repeat side effects; inspect with read-only tools, then complete_step if verified or block_step if uncertain."
+                    return "[MISSION_RECOVERY] This step was already started. Do not repeat side effects; inspect with read-only tools and obtain fresh evidence, or block_step if uncertain."
                 expected = _next_open_step(mission)
                 if expected is None or expected.get("id") != sid or step.get("status") != "pending":
                     return "Only the next pending step can be started."
                 step["status"] = "running"
-                try:
-                    step["attempts"] = max(0, int(step.get("attempts", 0))) + 1
-                except (TypeError, ValueError):
-                    step["attempts"] = 1
+                step.pop("tool_evidence", None)
                 step["started_at"] = _now()
                 step["updated_at"] = _now()
                 mission["updated_at"] = _now()
+                from core.mission_evidence import activate_step
+                activate_step(session_memory, mission_id, sid)
                 _write(data)
-                result = _format(mission) + "\n[MISSION_STEP_STARTED] Step is durably marked running. Execute it once, verify the real outcome, then call complete_step."
+                result = _format(mission) + (
+                    "\n[MISSION_STEP_STARTED] Step is durably marked running. "
+                    "Execute it once, then complete_step only after a matching tool result "
+                    "returns status=done."
+                )
             elif action == "complete_step":
                 sid = str(parameters.get("step_id") or "").strip()
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
@@ -373,18 +460,37 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     return (f"Out-of-order completion refused. The next pending step is "
                             f"{expected['id']}: {expected['title']}.")
                 if step.get("status") != "running":
-                    return "Call begin_step before executing this step; completion is not accepted yet."
-                verification = str(parameters.get("verification") or "").strip()
-                if not verification:
-                    return ("Give me the verified result from the tool that completed this step. "
-                            "I will not mark a step done without evidence.")
+                    return "Only the currently running step can be completed."
+                from core.mission_evidence import (
+                    clear_step, verification_summary, verified_evidence,
+                )
+                evidence = verified_evidence(session_memory, mission_id, sid)
+                if evidence is None:
+                    return (
+                        "No matching verified tool result is recorded for this mission step. "
+                        "The step remains running. Do not invent a verification sentence. "
+                        "Run one appropriate existing tool and complete the step only after "
+                        "it returns status=done verified=true for that same tool."
+                    )
                 step["status"] = "done"
-                step["verification"] = verification[:500]
+                step["verification"] = verification_summary(evidence)
                 step["blocked_reason"] = ""
                 step["updated_at"] = _now()
                 mission["updated_at"] = _now()
-                if all(s["status"] == "done" for s in mission["steps"]):
+                clear_step(session_memory, mission_id, sid)
+                next_step = _next_open_step(mission)
+                step.pop("tool_evidence", None)
+                if next_step is None:
                     mission["status"] = "completed"
+                elif next_step.get("status") == "pending":
+                    # Claim the next safe step now; the model can act without
+                    # another tool round-trip just to call begin_step.
+                    next_step["status"] = "running"
+                    next_step["started_at"] = _now()
+                    next_step["updated_at"] = _now()
+                    from core.mission_evidence import activate_step
+                    next_step.pop("tool_evidence", None)
+                    activate_step(session_memory, mission_id, next_step["id"])
                 _write(data)
                 result = _format(mission)
                 if mission.get("execution_mode") == "autonomous":
@@ -402,65 +508,20 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     return "Give me a valid step_id and a concise blocker reason."
                 expected = _next_open_step(mission)
                 if expected is not None and expected.get("id") != sid:
-                    return f"Only the next pending step ({expected['id']}) can be blocked."
+                    return f"Only the next active step ({expected['id']}) can be blocked."
                 step["status"] = "blocked"
+                step.pop("tool_evidence", None)
                 step["blocked_reason"] = reason[:500]
-                step["outcome_uncertain"] = True
-                step["blocked_at"] = _now()
                 step["updated_at"] = _now()
                 mission["status"] = "paused"
                 mission["updated_at"] = _now()
+                from core.mission_evidence import clear_step
+                clear_step(session_memory, mission_id, sid)
                 _write(data)
                 result = _format(mission) + (
                     "\n[MISSION_BLOCKED] Stop this mission here. Explain the exact "
                     "blocker to the user and do not attempt later steps."
                 )
-            elif action == "resolve_step":
-                sid = str(parameters.get("step_id") or "").strip()
-                resolution = str(parameters.get("resolution") or "").strip().lower()
-                verification = str(parameters.get("verification") or "").strip()
-                mission = next((m for m in missions if m.get("id") == mission_id), None)
-                if mission is None:
-                    return "Give me a valid mission_id."
-                if mission.get("status") != "paused":
-                    return "Resolve a step only after Mission Control has paused on a blocker."
-                step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
-                if step is None or step.get("status") != "blocked":
-                    return "Give me the blocked step_id that needs recovery."
-                if resolution not in {"completed", "retry_safe"}:
-                    return "Choose resolution='completed' or resolution='retry_safe'."
-                if not verification:
-                    return ("Recovery requires evidence from a read-only inspection. "
-                            "Do not guess whether the earlier action took effect.")
-                step["recovery_verification"] = verification[:500]
-                step["recovery_resolution"] = resolution
-                step["recovery_resolved_at"] = _now()
-                step["blocked_reason"] = ""
-                step["outcome_uncertain"] = False
-                step["updated_at"] = _now()
-                if resolution == "completed":
-                    step["status"] = "done"
-                    step["verification"] = verification[:500]
-                else:
-                    # The previous attempt is retained for audit, but must not be
-                    # replayed. A fresh plan is required after read-only proof that
-                    # no externally visible effect occurred.
-                    if step.get("ui_action"):
-                        step["last_ui_action"] = step.pop("ui_action")
-                    if step.get("ui_action_planned_at"):
-                        step["last_ui_action_planned_at"] = step.pop("ui_action_planned_at")
-                    step["status"] = "pending"
-                    step["verification"] = ""
-                    step.pop("started_at", None)
-                mission["status"] = (
-                    "completed" if all(s.get("status") == "done" for s in mission["steps"])
-                    else "active"
-                )
-                mission["updated_at"] = _now()
-                _write(data)
-                result = _format(mission)
-                if mission.get("execution_mode") == "autonomous":
-                    result += _continue_instruction(mission)
             elif action == "add_step":
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
                 title = str(parameters.get("title") or "").strip()[:220]
@@ -482,26 +543,41 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                           "complete": "completed"}[action]
                 if action == "complete" and any(s["status"] != "done" for s in mission["steps"]):
                     return "This mission still has unfinished steps. Complete or explicitly archive those first."
+                recovery = False
                 if action == "resume":
-                    blocked = next((s for s in mission.get("steps", [])
-                                    if s.get("status") == "blocked"), None)
-                    if blocked:
-                        return (
-                            f"[MISSION_RECOVERY_REQUIRED] Step {blocked['id']} may already have "
-                            "changed the real world. Do not reset or repeat it. Inspect the outcome "
-                            "with read-only tools, then call resolve_step with resolution='completed' "
-                            "if success is visible, or resolution='retry_safe' only if evidence "
-                            "proves that no side effect occurred."
+                    # A previously running step is recovery: never replay it.
+                    for step in mission.get("steps", []):
+                        if step.get("status") == "blocked":
+                            step["status"] = "pending"
+                            step["blocked_reason"] = ""
+                            step["updated_at"] = _now()
+                    mission["status"] = "active"
+                    next_step = _next_open_step(mission)
+                    recovery = bool(next_step and next_step.get("status") == "running")
+                    if next_step and next_step.get("status") == "pending":
+                        next_step["status"] = "running"
+                        next_step["started_at"] = _now()
+                        next_step["updated_at"] = _now()
+                        from core.mission_evidence import activate_step
+                        next_step.pop("tool_evidence", None)
+                        activate_step(session_memory, mission_id, next_step["id"])
+                    elif next_step and next_step.get("status") == "running":
+                        from core.mission_evidence import activate_step, seed_step_evidence
+                        activate_step(session_memory, mission_id, next_step["id"])
+                        seed_step_evidence(
+                            session_memory, mission_id, next_step["id"],
+                            next_step.get("tool_evidence"),
                         )
-                mission["status"] = status
+                else:
+                    mission["status"] = status
                 mission["updated_at"] = _now()
                 _write(data)
                 result = _format(mission)
                 if action == "resume" and mission.get("execution_mode") == "autonomous":
-                    result += _continue_instruction(mission)
+                    result += _continue_instruction(mission, recovery=recovery)
             else:
                 return ("Choose plan, start, list, show, next, plan_ui_step, begin_step, complete_step, block_step, "
-                        "resolve_step, add_step, pause, resume, complete or archive.")
+                        "add_step, pause, resume, complete or archive.")
 
         if player:
             try:
@@ -532,7 +608,8 @@ PLUGIN = {
         "action='start' with its mission_id. The [MISSION_CONTINUE] result is an instruction "
         "to execute the next step immediately using the existing tools, record verified "
         "success with complete_step, and continue until [MISSION_COMPLETE] or [MISSION_BLOCKED]. "
-        "For a running desktop-UI step, call plan_ui_step after begin_step. It takes a fresh "
+        "Starting or resuming an autonomous mission claims the current step automatically; do not call begin_step again. "
+                "For a running desktop-UI step, call plan_ui_step. It takes a fresh "
         "privacy-filtered local UI snapshot and returns at most one exact existing verified action; "
         "it never executes that action. Execute only that returned tool and parameters once, then "
         "complete_step only with real verification evidence. A UI plan is persisted before hand-off; "
@@ -540,27 +617,21 @@ PLUGIN = {
         "asks for clarification or blocks, do not guess. High-impact actions still require the real "
         "HUD confirmation. Never mark a step done without tool evidence. Stop at "
         "[CONFIRMATION_PENDING] and ask for the real HUD confirmation. The live assistant executes "
-        "A blocked step is never reset by resume: first inspect with read-only tools, then "
-        "call resolve_step with resolution='completed' if the outcome is already visible, "
-        "or resolution='retry_safe' only when evidence proves the previous attempt had no "
-        "side effect. Preserve old UI plans for audit and create a fresh plan before retrying. "
-        "Never blindly repeat an uncertain action. The live assistant executes steps through "
-        "existing verified tools."
+        "steps through existing verified tools."
     ),
     "tier": "core",
     "brief": "Create and track durable multi-step missions, see next steps and resume paused work.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "plan, start, list, show, next, plan_ui_step, begin_step, complete_step, block_step, resolve_step, add_step, pause, resume, complete or archive"},
+            "action": {"type": "STRING", "description": "plan, start, list, show, next, plan_ui_step, begin_step, complete_step, block_step, add_step, pause, resume, complete or archive"},
             "title": {"type": "STRING", "description": "Mission title"},
             "goal": {"type": "STRING", "description": "What must be achieved"},
             "steps": {"type": "STRING", "description": "Optional ordered step list, one step per line"},
             "mission_id": {"type": "STRING", "description": "ID of an existing mission"},
             "step_id": {"type": "STRING", "description": "Step ID such as S01"},
-            "verification": {"type": "STRING", "description": "For complete_step: actual tool result; for resolve_step: actual read-only inspection evidence."},
+            "verification": {"type": "STRING", "description": "Short result or evidence from the tool that completed the step"},
             "reason": {"type": "STRING", "description": "Why the current step cannot proceed, for block_step"},
-            "resolution": {"type": "STRING", "description": "For resolve_step: completed or retry_safe, chosen only after read-only verification."},
         },
         "required": ["action"],
     },

@@ -664,6 +664,16 @@ class JarvisLive:
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
         from core.autonomy_policy import new_turn_authorization
         self._turn_authorization = new_turn_authorization("")
+        def _mission_confirmation_result(tool_name):
+            scope = self._turn_authorization
+            def _record_confirmed_result(result):
+                try:
+                    from plugins.mission_control import record_tool_result
+                    record_tool_result(scope, tool_name, result)
+                except Exception as _evidence_error:
+                    print(f"[Mission] Confirmed-action evidence failed closed: {_evidence_error}")
+            return _record_confirmed_result
+        confirm_gate.set_result_observer_factory(_mission_confirmation_result)
 
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
@@ -973,6 +983,8 @@ class JarvisLive:
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+        from core.autonomy_policy import new_turn_authorization
+        self._turn_authorization = new_turn_authorization(text)
         # Respect wake-word sleep: a typed command must not be answered while
         # asleep either (the sleep gate is not just for the mic). Wake first with
         # "Hey Jarvis" or the WAKE NOW button.
@@ -1364,6 +1376,11 @@ class JarvisLive:
             if key and value:
                 update_memory({category: {key: {"value": value}}})
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+            try:
+                from plugins.mission_control import record_tool_result
+                record_tool_result(self._turn_authorization, name, "")
+            except Exception:
+                pass
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
@@ -1548,7 +1565,10 @@ class JarvisLive:
                 if self._plugin_registry.has(name):
                     r = await loop.run_in_executor(
                         None,
-                        lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
+                        lambda: self._plugin_registry.run(
+                            name, args, player=self.ui,
+                            session_memory=self._turn_authorization,
+                        )
                     )
                     result = r or "Done."
                 else:
@@ -1558,6 +1578,17 @@ class JarvisLive:
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
             self.speak_error(name, e)
+
+        # Mission completion is bound to the actual dispatcher result, not a
+        # verification sentence supplied by the model. Mission Control itself
+        # manages the active mission/step scope; every other tool call replaces
+        # the evidence for the currently running step.
+        if name != "mission_control":
+            try:
+                from plugins.mission_control import record_tool_result
+                record_tool_result(self._turn_authorization, name, result)
+            except Exception as _mission_evidence_error:
+                print(f"[Mission] Evidence recording failed closed: {_mission_evidence_error}")
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
@@ -2398,11 +2429,11 @@ class JarvisLive:
     # "providers are not installed" — the assistant then runs exactly as it did
     # before any of this existed.
     def _engine_mode(self) -> str:
-        try:
-            from memory.config_manager import get_provider_mode
-            return get_provider_mode()
-        except Exception:
-            return "gemini"
+        # A configuration read failure must not silently switch a local-only
+        # setup to Gemini Live. The config manager returns the legacy default
+        # only when no engine mode has ever been configured.
+        from memory.config_manager import get_provider_mode
+        return get_provider_mode()
 
     def _resolve_engine_caps(self):
         """What the chosen engine can do — or None for Gemini Live.
@@ -2451,13 +2482,13 @@ class JarvisLive:
             caps["audio_out"] = bool(str(pipe.get("tts") or "").strip())
             return caps
         except Exception as e:
-            # A local engine that will not start must never mean no assistant.
-            # Falling back to Live is the whole reason the ladder exists, and
-            # the reason is said out loud rather than left in a console.
-            self.ui.write_log(f"SYS: local engine unavailable ({e}) — "
-                              f"using Gemini Live.")
-            print(f"[JARVIS] Pipeline engine unavailable: {e}")
-            return None
+            # Never send a supposedly local conversation to Gemini Live when
+            # its selected pipeline is unavailable or misconfigured.
+            from core.engine_policy import local_engine_unavailable
+            self.ui.write_log(
+                f"SYS: local engine unavailable ({e}) — cloud fallback disabled.")
+            print(f"[JARVIS] Pipeline engine unavailable; refusing cloud fallback: {e}")
+            raise local_engine_unavailable(e) from e
 
     @asynccontextmanager
     async def _open_session(self, live_model: str, config):
