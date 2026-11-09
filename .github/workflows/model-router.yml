@@ -24,6 +24,8 @@ on:
       - "actions/ui_radio.py"
       - "core/_ui_tab_tests.py"
       - "actions/ui_tab.py"
+      - "core/_ui_list_tests.py"
+      - "actions/ui_list.py"
       - "core/_ui_dropdown_tests.py"
       - "core/_ui_calendar_tests.py"
       - "core/_ui_time_tests.py"
@@ -65,6 +67,7 @@ on:
       - "feature/verified-checkbox-state-rebased"
       - "feature/verified-radio-selection-rebased"
       - "feature/verified-tab-selection-rebased"
+      - "feature/verified-list-selection-rebased"
 
 jobs:
   router:

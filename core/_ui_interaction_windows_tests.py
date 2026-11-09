@@ -24,7 +24,7 @@ from actions.ui_interaction import (
     _snapshot,
     _fill_text_and_verify,
 )
-from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox, ui_radio, ui_tab
+from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox, ui_radio, ui_tab, ui_list
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -39,6 +39,7 @@ _CHECKBOX_ID = 108
 _RADIO_EMAIL_ID = 109
 _RADIO_SMS_ID = 110
 _TAB_CONTROL_ID = 111
+_LISTBOX_ID = 112
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -128,6 +129,7 @@ def _serve_native_window() -> int:
     checkbox_hwnd = [None]
     radio_hwnds = [None, None]
     tab_hwnd = [None]
+    listbox_hwnd = [None]
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -185,7 +187,7 @@ def _serve_native_window() -> int:
             raise ctypes.WinError(error)
 
     hwnd = _user32.CreateWindowExW(
-        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 430,
+        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 520,
         None, None, hinstance, None,
     )
     if not hwnd:
@@ -271,10 +273,28 @@ def _serve_native_window() -> int:
             )  # TCM_INSERTITEMW
             if inserted < 0:
                 raise RuntimeError("could not add native test tab")
+    listbox_hwnd[0] = _user32.CreateWindowExW(
+        0, "LISTBOX", "", 0x50010001,
+        20, 415, 400, 60, hwnd,
+        ctypes.c_void_p(_LISTBOX_ID), hinstance, None,
+    )
+    if listbox_hwnd[0]:
+        for label in ("Projects", "Invoices"):
+            # Keep the Unicode buffer alive until SendMessageW has synchronously
+            # copied the string into the native listbox.
+            text_buffer = ctypes.create_unicode_buffer(label)
+            added = _user32.SendMessageW(
+                listbox_hwnd[0], 0x0180, 0, ctypes.addressof(text_buffer),
+            )  # LB_ADDSTRING
+            if added < 0:
+                raise RuntimeError("could not add native test list item")
+            if added != (0 if label == "Projects" else 1):
+                raise RuntimeError("native test listbox inserted an unexpected item index")
+        _user32.SendMessageW(listbox_hwnd[0], 0x0186, 0, 0)  # LB_SETCURSEL
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
                 project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0],
-                radio_hwnds[0], radio_hwnds[1], tab_hwnd[0])):
+                radio_hwnds[0], radio_hwnds[1], tab_hwnd[0], listbox_hwnd[0])):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -618,6 +638,26 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertIn("status=done", second, second)
         self.assertIn("changed=false", second)
         self.assertEqual(_user32.SendMessageW(tab, 0x130B, 0, 0), 1)
+
+
+    def test_native_single_selection_list_item_is_verified_and_idempotent(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        listbox = _user32.GetDlgItem(self.hwnd, _LISTBOX_ID)
+        self.assertTrue(listbox)
+        self.assertEqual(_user32.SendMessageW(listbox, 0x018B, 0, 0), 2)  # LB_GETCOUNT
+        self.assertEqual(_user32.SendMessageW(listbox, 0x0188, 0, 0), 0)  # LB_GETCURSEL
+        visible = _snapshot(int(self.hwnd))
+        self.assertTrue(any(item.get("name") == "Invoices" for item in visible["records"]),
+                        visible["records"])
+        first = ui_list.select_list_item({"item_label": "Invoices"})
+        self.assertIn("status=done", first, f"{first}; controls={_snapshot(int(self.hwnd))['records']}")
+        self.assertIn("selected=true", first)
+        self.assertEqual(_user32.SendMessageW(listbox, 0x0188, 0, 0), 1)
+        second = ui_list.select_list_item({"item_label": "Invoices"})
+        self.assertIn("status=done", second, second)
+        self.assertIn("changed=false", second)
+        self.assertEqual(_user32.SendMessageW(listbox, 0x0188, 0, 0), 1)
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
