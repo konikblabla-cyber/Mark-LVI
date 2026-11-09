@@ -79,9 +79,25 @@ def format_picker_diagnostics(records, limit=_MAX_ITEMS):
     lines = []
     seen = set()
     output_chars = 0
+
+    def append_line(line, truncation_marker=False):
+        nonlocal output_chars
+        separator = 1 if lines else 0
+        if output_chars + separator + len(line) <= _MAX_OUTPUT_CHARS:
+            lines.append(line)
+            output_chars += separator + len(line)
+            return True
+        marker = "- [output truncated]"
+        marker_separator = 1 if lines else 0
+        if not truncation_marker and output_chars + marker_separator + len(marker) <= _MAX_OUTPUT_CHARS:
+            lines.append(marker)
+            output_chars += marker_separator + len(marker)
+        return False
+
+    visible_items = 0
     for scanned, item in enumerate(iterator):
         if scanned >= _MAX_SCANNED:
-            lines.append("- [scan limit reached]")
+            append_line("- [scan limit reached]")
             break
         if not isinstance(item, dict):
             continue
@@ -106,13 +122,16 @@ def format_picker_diagnostics(records, limit=_MAX_ITEMS):
                 patterns.append(value)
         detail = ", ".join(patterns) if patterns else "no supported action pattern detected"
         suffix = f"; AutomationId={safe_id}" if safe_id else ""
+        line = f"- {role}: {label}{suffix}; patterns: {detail}"
 
-        if len(lines) >= safe_limit:
-            lines.append("- [item limit reached]")
+        if visible_items >= safe_limit:
+            append_line("- [item limit reached]")
             break
-        lines.append(f"- {role}: {label}{suffix}; patterns: {detail}")
+        if not append_line(line):
+            break
+        visible_items += 1
 
-    return "\n".join(lines) if lines else (
+    return "\\n".join(lines) if lines else (
         "No safe visible date/time picker controls were exposed by Windows UI Automation."
     )
 
