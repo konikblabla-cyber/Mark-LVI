@@ -766,7 +766,7 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         time.sleep(0.1)
         tree = _user32.GetDlgItem(self.hwnd, _TREE_ID)
         self.assertTrue(tree)
-        root = _native_tree_item_handle("Projects")
+        root = _native_tree_item_handle()
         self.assertFalse(_native_tree_item_expanded(tree, root))
 
         snapshot = _snapshot(int(self.hwnd))
