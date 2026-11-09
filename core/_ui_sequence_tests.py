@@ -24,6 +24,10 @@ class UISequenceTests(unittest.TestCase):
         return {"action": "fill_text", "field_label": label, "text": text}
 
     @staticmethod
+    def _checkbox_step(label, checked):
+        return {"action": "set_checkbox", "checkbox_label": label, "checked": checked}
+
+    @staticmethod
     def _snapshot(label, role="Button"):
         return {
             "handle": 101,
@@ -56,6 +60,33 @@ class UISequenceTests(unittest.TestCase):
             "text": "Quarterly plan",
         })
         self.assertEqual(steps[1]["action"], "click")
+
+    def test_validation_accepts_checkbox_state_step(self):
+        steps, error = ui_sequence._validate_steps([
+            self._checkbox_step("Enable notifications", True),
+            self._step("Save", "Saved"),
+        ])
+        self.assertEqual(error, "")
+        self.assertEqual(steps[0], {
+            "action": "set_checkbox",
+            "checkbox_label": "Enable notifications",
+            "checked": True,
+        })
+
+    def test_validation_rejects_invalid_or_sensitive_checkbox_steps(self):
+        invalid = [
+            {"action": "set_checkbox", "checkbox_label": "Accept terms", "checked": "yes"},
+            {"action": "set_checkbox", "checkbox_label": "Accept terms", "checked": 1},
+            {"action": "set_checkbox", "checkbox_label": "Password visibility", "checked": True},
+            {"action": "set_checkbox", "checkbox_label": "Enable notifications", "checked": True, "extra": "no"},
+        ]
+        for step in invalid:
+            with self.subTest(step=step):
+                validated, error = ui_sequence._validate_steps([
+                    step, self._step("Save", "Saved"),
+                ])
+                self.assertIsNone(validated)
+                self.assertTrue(error)
 
     def test_validation_rejects_malformed_fill_text_steps(self):
         invalid = [
@@ -166,6 +197,109 @@ class UISequenceTests(unittest.TestCase):
         fill.assert_called_once()
         snapshot.assert_not_called()
         click.assert_not_called()
+
+    def test_checkbox_change_waits_for_hud_approval_then_verifies_before_next_step(self):
+        from core import confirm
+        snapshot = self._snapshot("Save")
+        requests = []
+        def fake_request(**kwargs):
+            requests.append(kwargs)
+            return "[CONFIRMATION_PENDING]"
+
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+             patch.object(
+                 ui_sequence.ui, "_inspect_checkbox",
+                 return_value=(
+                     "found", False,
+                     {"role": "CheckBox", "automation_id": "notifications",
+                      "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, "",
+                 ),
+             ), \\
+             patch.object(ui_sequence.ui, "_set_checkbox_and_verify",
+                          return_value="status=done action=set_checkbox_and_verify checked=true verified=true changed=true") as set_checkbox, \\
+             patch.object(ui_sequence.ui, "_snapshot", return_value=snapshot), \\
+             patch.object(ui_sequence.ui, "_click_and_verify",
+                          return_value="status=done action=click_and_verify verified=true") as click, \\
+             patch.object(confirm, "pending_title", return_value=""), \\
+             patch.object(confirm, "request", side_effect=fake_request):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._checkbox_step("Enable notifications", True),
+                    self._step("Save", "Saved"),
+                ],
+            })
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            set_checkbox.assert_not_called()
+            self.assertEqual(len(requests), 1)
+            self.assertIn("Confirm checkbox", requests[0]["title"])
+            resumed = requests[0]["run"]()
+
+        self.assertTrue(resumed.startswith("status=done action=run_ui_sequence "), resumed)
+        set_checkbox.assert_called_once()
+        click.assert_called_once()
+
+    def test_checkbox_already_in_requested_state_does_not_toggle_or_prompt(self):
+        from core import confirm
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+             patch.object(
+                 ui_sequence.ui, "_inspect_checkbox",
+                 return_value=("found", True, {"role": "CheckBox", "automation_id": "n",
+                  "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, ""),
+             ), \\
+             patch.object(ui_sequence.ui, "_set_checkbox_and_verify") as toggle, \\
+             patch.object(ui_sequence.ui, "_snapshot", return_value=self._snapshot("Save")), \\
+             patch.object(ui_sequence.ui, "_click_and_verify",
+                          return_value="status=done action=click_and_verify verified=true"), \\
+             patch.object(confirm, "pending_title", return_value=""), \\
+             patch.object(confirm, "request") as request:
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._checkbox_step("Enable notifications", True),
+                    self._step("Save", "Saved"),
+                ],
+            })
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        toggle.assert_not_called()
+        request.assert_not_called()
+
+    def test_checkbox_cancel_releases_active_sequence_guard(self):
+        from core import confirm
+        captured = []
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+             patch.object(
+                 ui_sequence.ui, "_inspect_checkbox",
+                 return_value=("found", False, {"role": "CheckBox", "automation_id": "n",
+                  "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, ""),
+             ), \\
+             patch.object(confirm, "pending_title", return_value=""), \\
+             patch.object(confirm, "request",
+                          side_effect=lambda **kwargs: (captured.append(kwargs) or "[CONFIRMATION_PENDING]")):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._checkbox_step("Enable notifications", True),
+                    self._step("Save", "Saved"),
+                ],
+            })
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            captured[0]["on_cancel"]()
+
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+             patch.object(
+                 ui_sequence.ui, "_inspect_checkbox",
+                 return_value=("found", True, {"role": "CheckBox", "automation_id": "n",
+                  "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, ""),
+             ), \\
+             patch.object(ui_sequence.ui, "_snapshot", return_value=self._snapshot("Save")), \\
+             patch.object(ui_sequence.ui, "_click_and_verify",
+                          return_value="status=done action=click_and_verify verified=true"), \\
+             patch.object(confirm, "pending_title", return_value=""):
+            next_result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._checkbox_step("Enable notifications", True),
+                    self._step("Save", "Saved"),
+                ],
+            })
+        self.assertTrue(next_result.startswith("status=done action=run_ui_sequence "), next_result)
 
     def test_unverified_step_stops_every_later_step(self):
         snapshots = [
