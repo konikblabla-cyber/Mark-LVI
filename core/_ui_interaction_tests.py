@@ -48,9 +48,11 @@ class UIInteractionTests(unittest.TestCase):
                 "rect": (10, 10, 100, 40),
             }],
         }
-        with patch.object(ui_interaction, "_snapshot", return_value=snapshot), \\
-             patch.object(confirm, "pending_title", return_value=""), \\
-             patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as request:
+        with (
+            patch.object(ui_interaction, "_snapshot", return_value=snapshot),
+            patch.object(confirm, "pending_title", return_value=""),
+            patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as request,
+        ):
             result = ui_interaction.click_and_verify({
                 "button_label": "Delete", "expected_result": "Deleted",
             })
@@ -70,9 +72,11 @@ class UIInteractionTests(unittest.TestCase):
                 "rect": (10, 10, 100, 40),
             }],
         }
-        with patch.object(ui_interaction, "_snapshot", return_value=snapshot), \\
-             patch.object(confirm, "pending_title", return_value="Another action"), \\
-             patch.object(confirm, "request") as request:
+        with (
+            patch.object(ui_interaction, "_snapshot", return_value=snapshot),
+            patch.object(confirm, "pending_title", return_value="Another action"),
+            patch.object(confirm, "request") as request,
+        ):
             result = ui_interaction.click_and_verify({
                 "button_label": "Delete", "expected_result": "Deleted",
             })
