@@ -28,6 +28,60 @@ class ConfirmationCleanupTests(unittest.TestCase):
             confirm._pending = self._old[0]
         confirm.bind(self._old[1], self._old[2], self._old[3])
 
+    def test_second_request_cannot_replace_existing_hud_prompt(self):
+        first_cleaned = []
+        second_cleaned = []
+        first_run = []
+        first = confirm.request(
+            "first", "Original action", "original detail",
+            lambda: first_run.append("ran"),
+            on_cancel=lambda: first_cleaned.append("first"),
+        )
+        second = confirm.request(
+            "second", "Competing action", "competing detail",
+            lambda: self.fail("competing action must never run"),
+            on_cancel=lambda: second_cleaned.append("second"),
+        )
+        self.assertIn("[CONFIRMATION_PENDING]", first)
+        self.assertIn("[CONFIRMATION_BUSY]", second)
+        self.assertEqual(confirm.pending_title(), "Original action")
+        self.assertEqual(len(self.shown), 1)
+        self.assertEqual(second_cleaned, ["second"])
+        confirm.resolve(False)
+        self.assertEqual(first_cleaned, ["first"])
+        self.assertEqual(first_run, [])
+
+    def test_concurrent_requests_cannot_overwrite_the_single_hud_slot(self):
+        barrier = threading.Barrier(2)
+        results = {}
+        cleaned = []
+        def request(name):
+            results[name] = confirm.request(
+                name, f"{name} action", "detail",
+                lambda: f"{name} executed",
+                on_cancel=lambda: cleaned.append(name),
+            )
+        with patch.object(
+            confirm, "pending_title",
+            side_effect=lambda: (barrier.wait(timeout=2) and ""),
+        ):
+            threads = [
+                threading.Thread(target=request, args=("first",)),
+                threading.Thread(target=request, args=("second",)),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=3)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        pending = confirm.pending_title()
+        self.assertIn(pending, {"first action", "second action"})
+        self.assertEqual(len(self.shown), 1)
+        self.assertEqual(sum("[CONFIRMATION_PENDING]" in value for value in results.values()), 1)
+        self.assertEqual(sum("[CONFIRMATION_BUSY]" in value for value in results.values()), 1)
+        self.assertEqual(len(cleaned), 1)
+        confirm.resolve(False)
+
     def test_cancel_releases_action_owned_state(self):
         cleaned = []
         result = confirm.request(
