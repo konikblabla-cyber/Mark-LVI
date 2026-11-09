@@ -24,7 +24,7 @@ from actions.ui_interaction import (
     _snapshot,
     _fill_text_and_verify,
 )
-from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox
+from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox, ui_radio
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -36,6 +36,8 @@ _OPEN_PANEL_BUTTON_ID = 104
 _FINISH_WORKFLOW_BUTTON_ID = 105
 _SAVE_TITLE_BUTTON_ID = 106
 _CHECKBOX_ID = 108
+_RADIO_EMAIL_ID = 109
+_RADIO_SMS_ID = 110
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -121,6 +123,7 @@ def _serve_native_window() -> int:
     status_hwnd = [None]
     project_title_hwnd = [None]
     checkbox_hwnd = [None]
+    radio_hwnds = [None, None]
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -135,6 +138,9 @@ def _serve_native_window() -> int:
                 _user32.SetWindowTextW(project_title_hwnd[0], "")
             if checkbox_hwnd[0]:
                 _user32.SendMessageW(checkbox_hwnd[0], 0x00F1, 0, 0)  # BM_SETCHECK / BST_UNCHECKED
+            if radio_hwnds[0] and radio_hwnds[1]:
+                _user32.SendMessageW(radio_hwnds[0], 0x00F1, 1, 0)  # BM_SETCHECK / BST_CHECKED
+                _user32.SendMessageW(radio_hwnds[1], 0x00F1, 0, 0)
             _user32.SetWindowTextW(status_hwnd[0], "Not saved")
             return 0
         if message == 0x0111 and command_id == _OPEN_PANEL_BUTTON_ID:
@@ -175,7 +181,7 @@ def _serve_native_window() -> int:
             raise ctypes.WinError(error)
 
     hwnd = _user32.CreateWindowExW(
-        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 360,
+        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 430,
         None, None, hinstance, None,
     )
     if not hwnd:
@@ -223,9 +229,21 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Remember this device", 0x50010003,
         190, 288, 220, 28, hwnd, ctypes.c_void_p(_CHECKBOX_ID), hinstance, None,
     )
+    radio_hwnds[0] = _user32.CreateWindowExW(
+        0, "BUTTON", "Email updates", 0x50030009,
+        20, 330, 180, 28, hwnd, ctypes.c_void_p(_RADIO_EMAIL_ID), hinstance, None,
+    )
+    radio_hwnds[1] = _user32.CreateWindowExW(
+        0, "BUTTON", "SMS updates", 0x50010009,
+        210, 330, 180, 28, hwnd, ctypes.c_void_p(_RADIO_SMS_ID), hinstance, None,
+    )
+    if radio_hwnds[0] and radio_hwnds[1]:
+        _user32.SendMessageW(radio_hwnds[0], 0x00F1, 1, 0)
+        _user32.SendMessageW(radio_hwnds[1], 0x00F1, 0, 0)
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
-                project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0])):
+                project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0],
+                radio_hwnds[0], radio_hwnds[1])):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -533,6 +551,26 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertIn("status=done", second)
         self.assertIn("changed=false", second)
         self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 1)
+
+
+    def test_native_radio_selection_is_verified_and_idempotent(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        email = _user32.GetDlgItem(self.hwnd, _RADIO_EMAIL_ID)
+        sms = _user32.GetDlgItem(self.hwnd, _RADIO_SMS_ID)
+        self.assertTrue(email)
+        self.assertTrue(sms)
+        self.assertEqual(_user32.SendMessageW(email, 0x00F0, 0, 0), 1)
+        self.assertEqual(_user32.SendMessageW(sms, 0x00F0, 0, 0), 0)
+        first = ui_radio.select_radio_option({"radio_label": "SMS updates"})
+        self.assertIn("status=done", first, first)
+        self.assertIn("selected=true", first)
+        self.assertEqual(_user32.SendMessageW(email, 0x00F0, 0, 0), 0)
+        self.assertEqual(_user32.SendMessageW(sms, 0x00F0, 0, 0), 1)
+        second = ui_radio.select_radio_option({"radio_label": "SMS updates"})
+        self.assertIn("status=done", second, second)
+        self.assertIn("changed=false", second)
+        self.assertEqual(_user32.SendMessageW(sms, 0x00F0, 0, 0), 1)
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
