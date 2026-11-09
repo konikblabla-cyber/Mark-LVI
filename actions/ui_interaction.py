@@ -436,6 +436,11 @@ def _set_and_verify_value_pattern(pattern, text: str,
         return "unsupported_value_pattern", "the field did not expose a readable ValuePattern"
     if current_value == text:
         return "already_set", ""
+    if _looks_like_secret_payload(current_value):
+        return (
+            "sensitive_existing_value",
+            "the existing field content resembles a credential or opaque token; it was not changed",
+        )
     if cancelled.is_set():
         return "cancelled", "the operation expired before changing the field"
     try:
@@ -573,6 +578,10 @@ def _fill_text_and_verify(field_label: str, text: str,
         )
     if status == "ambiguous_field":
         return outcome.ask(
+            "fill_text_and_verify", reason, field=label,
+        )
+    if status == "sensitive_existing_value":
+        return outcome.failed(
             "fill_text_and_verify", reason, field=label,
         )
     return outcome.failed(
