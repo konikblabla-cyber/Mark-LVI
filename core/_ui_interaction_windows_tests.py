@@ -28,6 +28,7 @@ _CLASS_NAME = "MARK_UIA_Integration_Window"
 _WINDOW_TITLE = "MARK UIA Integration Test"
 _BUTTON_ID = 101
 _NOOP_BUTTON_ID = 102
+_RESET_BUTTON_ID = 103
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -102,8 +103,12 @@ def _serve_native_window() -> int:
 
     @_WNDPROC
     def wnd_proc(hwnd, message, wparam, lparam):
-        if message == 0x0111 and (wparam & 0xFFFF) == _BUTTON_ID:  # WM_COMMAND
+        command_id = wparam & 0xFFFF
+        if message == 0x0111 and command_id == _BUTTON_ID:  # WM_COMMAND
             _user32.SetWindowTextW(status_hwnd[0], "Saved")
+            return 0
+        if message == 0x0111 and command_id == _RESET_BUTTON_ID:
+            _user32.SetWindowTextW(status_hwnd[0], "Not saved")
             return 0
         if message == 0x0002:  # WM_DESTROY
             _user32.PostQuitMessage(0)
@@ -122,7 +127,7 @@ def _serve_native_window() -> int:
             raise ctypes.WinError(error)
 
     hwnd = _user32.CreateWindowExW(
-        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 420, 180,
+        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 420, 230,
         None, None, hinstance, None,
     )
     if not hwnd:
@@ -141,7 +146,11 @@ def _serve_native_window() -> int:
         0, "BUTTON", "No change", 0x50000000,
         170, 70, 140, 34, hwnd, ctypes.c_void_p(_NOOP_BUTTON_ID), hinstance, None,
     )
-    if not status_hwnd[0] or not button_hwnd or not noop_button_hwnd:
+    reset_button_hwnd = _user32.CreateWindowExW(
+        0, "BUTTON", "Restore baseline", 0x50000000,
+        20, 120, 160, 34, hwnd, ctypes.c_void_p(_RESET_BUTTON_ID), hinstance, None,
+    )
+    if not status_hwnd[0] or not button_hwnd or not noop_button_hwnd or not reset_button_hwnd:
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -218,6 +227,27 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
                 log_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def setUp(self):
+        # Tests share one native window, so restore a known state each time.
+        snapshot = _snapshot(int(self.hwnd))
+        matches = _matching_controls(snapshot["clickables"], "Restore baseline")
+        self.assertEqual(len(matches), 1, snapshot["clickables"])
+        item = matches[0]
+        signature = {
+            "role": item["role"],
+            "automation_id": item.get("automation_id", ""),
+            "runtime_id": item.get("runtime_id", ()),
+            "rect": item.get("rect"),
+        }
+        result = _click_and_verify(
+            "Restore baseline", "Not saved", int(self.hwnd),
+            snapshot["process_id"], signature,
+        )
+        self.assertTrue(
+            result.startswith("status=done action=click_and_verify "),
+            result,
+        )
 
     def test_real_native_button_without_expected_change_is_not_reported_done(self):
         snapshot = _snapshot(int(self.hwnd))
