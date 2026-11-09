@@ -24,7 +24,7 @@ from actions.ui_interaction import (
     _snapshot,
     _fill_text_and_verify,
 )
-from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox, ui_radio, ui_tab, ui_list
+from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox, ui_radio, ui_tab, ui_list, ui_tree
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -40,6 +40,7 @@ _RADIO_EMAIL_ID = 109
 _RADIO_SMS_ID = 110
 _TAB_CONTROL_ID = 111
 _LISTBOX_ID = 112
+_TREE_ID = 113
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -130,6 +131,8 @@ def _serve_native_window() -> int:
     radio_hwnds = [None, None]
     tab_hwnd = [None]
     listbox_hwnd = [None]
+    tree_hwnd = [None]
+    tree_items = {}
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -187,7 +190,7 @@ def _serve_native_window() -> int:
             raise ctypes.WinError(error)
 
     hwnd = _user32.CreateWindowExW(
-        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 520,
+        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 650,
         None, None, hinstance, None,
     )
     if not hwnd:
@@ -291,10 +294,65 @@ def _serve_native_window() -> int:
             if added != (0 if label == "Projects" else 1):
                 raise RuntimeError("native test listbox inserted an unexpected item index")
         _user32.SendMessageW(listbox_hwnd[0], 0x0186, 0, 0)  # LB_SETCURSEL
+    tree_hwnd[0] = _user32.CreateWindowExW(
+        0, "SysTreeView32", "",
+        0x50010007, 20, 485, 400, 120, hwnd,
+        ctypes.c_void_p(_TREE_ID), hinstance, None,
+    )
+    if tree_hwnd[0]:
+        class _TVITEMW(ctypes.Structure):
+            _fields_ = [
+                ("mask", wintypes.UINT),
+                ("hItem", wintypes.HANDLE),
+                ("state", wintypes.UINT),
+                ("stateMask", wintypes.UINT),
+                ("pszText", wintypes.LPWSTR),
+                ("cchTextMax", ctypes.c_int),
+                ("iImage", ctypes.c_int),
+                ("iSelectedImage", ctypes.c_int),
+                ("cChildren", ctypes.c_int),
+                ("lParam", ctypes.c_ssize_t),
+            ]
+        class _TVINSERTSTRUCTW(ctypes.Structure):
+            _fields_ = [
+                ("hParent", wintypes.HANDLE),
+                ("hInsertAfter", wintypes.HANDLE),
+                ("item", _TVITEMW),
+            ]
+        pointer_mask = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
+        tvi_root = ctypes.c_void_p((-0x10000) & pointer_mask)
+        tvi_last = ctypes.c_void_p((-0xFFFE) & pointer_mask)
+
+        root_item = _TVINSERTSTRUCTW()
+        root_item.hParent = tvi_root
+        root_item.hInsertAfter = tvi_last
+        root_item.item.mask = 0x0001 | 0x0040  # TVIF_TEXT | TVIF_CHILDREN
+        root_item.item.pszText = "Projects"
+        root_item.item.cChildren = 1
+        root_handle = _user32.SendMessageW(
+            tree_hwnd[0], 0x1132, 0, ctypes.addressof(root_item),
+        )  # TVM_INSERTITEMW
+        if not root_handle:
+            raise RuntimeError("could not create native test tree root")
+
+        child_item = _TVINSERTSTRUCTW()
+        child_item.hParent = ctypes.c_void_p(int(root_handle))
+        child_item.hInsertAfter = tvi_last
+        child_item.item.mask = 0x0001 | 0x0040
+        child_item.item.pszText = "Reports"
+        child_item.item.cChildren = 0
+        child_handle = _user32.SendMessageW(
+            tree_hwnd[0], 0x1132, 0, ctypes.addressof(child_item),
+        )  # TVM_INSERTITEMW
+        if not child_handle:
+            raise RuntimeError("could not create native test tree child")
+        tree_items["Projects"] = int(root_handle)
+        tree_items["Reports"] = int(child_handle)
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
                 project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0],
-                radio_hwnds[0], radio_hwnds[1], tab_hwnd[0], listbox_hwnd[0])):
+                radio_hwnds[0], radio_hwnds[1], tab_hwnd[0], listbox_hwnd[0],
+                tree_hwnd[0])):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -308,6 +366,46 @@ def _serve_native_window() -> int:
         _user32.TranslateMessage(ctypes.byref(message))
         _user32.DispatchMessageW(ctypes.byref(message))
     return 0
+
+
+def _native_tree_item_handle(label: str) -> int:
+    # The fixture server records the native HTREEITEM values in its own process.
+    # The single known root is the first inserted child of TVI_ROOT.
+    tree = _user32.GetDlgItem(_user32.FindWindowW(_CLASS_NAME, _WINDOW_TITLE), _TREE_ID)
+    class _TVITEMW(ctypes.Structure):
+        _fields_ = [
+            ("mask", wintypes.UINT), ("hItem", wintypes.HANDLE),
+            ("state", wintypes.UINT), ("stateMask", wintypes.UINT),
+            ("pszText", wintypes.LPWSTR), ("cchTextMax", ctypes.c_int),
+            ("iImage", ctypes.c_int), ("iSelectedImage", ctypes.c_int),
+            ("cChildren", ctypes.c_int), ("lParam", ctypes.c_ssize_t),
+        ]
+    # TVM_GETNEXTITEM / TVGN_ROOT retrieves the root item handle.
+    root = _user32.SendMessageW(tree, 0x110A, 0, 0)
+    if not root:
+        raise AssertionError("native tree fixture has no root item")
+    return int(root)
+
+
+def _native_tree_item_expanded(tree_hwnd, item_handle) -> bool:
+    class _TVITEMW(ctypes.Structure):
+        _fields_ = [
+            ("mask", wintypes.UINT), ("hItem", wintypes.HANDLE),
+            ("state", wintypes.UINT), ("stateMask", wintypes.UINT),
+            ("pszText", wintypes.LPWSTR), ("cchTextMax", ctypes.c_int),
+            ("iImage", ctypes.c_int), ("iSelectedImage", ctypes.c_int),
+            ("cChildren", ctypes.c_int), ("lParam", ctypes.c_ssize_t),
+        ]
+    item = _TVITEMW()
+    item.mask = 0x0008  # TVIF_STATE
+    item.hItem = ctypes.c_void_p(int(item_handle))
+    item.stateMask = 0x0020  # TVIS_EXPANDED
+    result = _user32.SendMessageW(
+        tree_hwnd, 0x113E, 0, ctypes.addressof(item),
+    )  # TVM_GETITEMW
+    if not result:
+        raise AssertionError("could not read native TreeView item state")
+    return bool(item.state & 0x0020)
 
 
 class WindowsUIAIntegrationTests(unittest.TestCase):
@@ -658,6 +756,48 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertIn("status=done", second, second)
         self.assertIn("changed=false", second)
         self.assertEqual(_user32.SendMessageW(listbox, 0x0188, 0, 0), 1)
+
+    def test_native_tree_item_expand_and_collapse_are_verified_and_idempotent(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        tree = _user32.GetDlgItem(self.hwnd, _TREE_ID)
+        self.assertTrue(tree)
+        root = _native_tree_item_handle("Projects")
+        self.assertFalse(_native_tree_item_expanded(tree, root))
+
+        snapshot = _snapshot(int(self.hwnd))
+        self.assertTrue(any(
+            item.get("name") == "Projects" and item.get("role") == "TreeItem"
+            for item in snapshot["records"]
+        ), snapshot["records"])
+
+        first = ui_tree.set_tree_item_expanded({
+            "item_label": "Projects", "expanded": True,
+        })
+        self.assertIn("status=done", first, first)
+        self.assertIn("expanded=true", first)
+        self.assertTrue(_native_tree_item_expanded(tree, root))
+
+        second = ui_tree.set_tree_item_expanded({
+            "item_label": "Projects", "expanded": True,
+        })
+        self.assertIn("status=done", second, second)
+        self.assertIn("changed=false", second)
+        self.assertTrue(_native_tree_item_expanded(tree, root))
+
+        collapsed = ui_tree.set_tree_item_expanded({
+            "item_label": "Projects", "expanded": False,
+        })
+        self.assertIn("status=done", collapsed, collapsed)
+        self.assertIn("expanded=false", collapsed)
+        self.assertFalse(_native_tree_item_expanded(tree, root))
+
+        again = ui_tree.set_tree_item_expanded({
+            "item_label": "Projects", "expanded": False,
+        })
+        self.assertIn("status=done", again, again)
+        self.assertIn("changed=false", again)
+        self.assertFalse(_native_tree_item_expanded(tree, root))
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
