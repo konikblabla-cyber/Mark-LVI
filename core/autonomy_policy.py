@@ -52,7 +52,8 @@ _CRITICAL_ACTION = re.compile(
 )
 _SETTING_VERB = re.compile(
     r"\b(?:enable|disable|turn|switch|allow|deny|check|uncheck|tick|untick|"
-    r"activate|deactivate|włącz|wlacz|wyłącz|wylacz|zaznacz|odznacz|"
+    r"accept|agree|consent|subscribe|share|activate|deactivate|"
+    r"włącz|wlacz|wyłącz|wylacz|zaznacz|odznacz|akceptuj|zgadzam|"
     r"zezwól|zezwol|zablokuj|aktywuj|dezaktywuj)\b",
     re.IGNORECASE,
 )
@@ -69,7 +70,8 @@ _PRIVACY_TERMS = {
     "przetwarzanie", "przetwarzania", "trenowanie",
 }
 _DENY_TERMS = {
-    "reject", "decline", "deny", "disable", "off", "stop",
+    "reject", "decline", "deny", "disable", "off", "stop", "not", "no",
+    "unsubscribe", "odsubskrybuj",
     "odrzuć", "odrzuc", "odmów", "odmow", "wyłącz", "wylacz",
     "zablokuj", "wyłączone", "wylaczone", "nie",
 }

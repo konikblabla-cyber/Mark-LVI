@@ -91,7 +91,12 @@ class AutonomyPolicyTests(unittest.TestCase):
             "Lokalizacja", True,
             new_turn_authorization("Włącz lokalizację"),
         ))
+        self.assertFalse(requires_checkbox_confirmation(
+            "Accept all cookies", True,
+            new_turn_authorization("Akceptuj cookies"),
+        ))
         self.assertFalse(requires_checkbox_confirmation("Reject analytics", True))
+        self.assertFalse(requires_checkbox_confirmation("Do not track", True))
 
 
 if __name__ == "__main__":
