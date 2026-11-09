@@ -6,8 +6,6 @@ session methods with small async fakes instead of opening a real browser.
 """
 import asyncio
 import importlib
-import sys
-import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -119,10 +117,11 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
             result = browser.browser_control(
                 {"action": "click", "text": "Send"}
             )
-        self.assertIn("[CONFIRMATION_PENDING]", result)
-        self.assertEqual(executed, [])
-        request_args["run"]()
-        self.assertEqual(executed, ["ran"])
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            self.assertEqual(executed, [])
+            # Invoke the stored callback while the fake executor is still patched.
+            request_args["run"]()
+            self.assertEqual(executed, ["ran"])
 
     def test_safe_click_does_not_ask_confirmation(self):
         with patch.object(browser.confirm, "request") as request, \
