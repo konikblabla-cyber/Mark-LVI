@@ -103,20 +103,20 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
     """Hand off the already-claimed step, or recover without replaying it."""
     step = _next_open_step(mission)
     if mission.get("status") == "completed" or step is None:
-        return ("\\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
+        return ("\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
                 "Report the completed result to the user; do not invent extra work.")
     if step.get("status") == "running" and recovery:
         if step.get("ui_action"):
-            return ("\\n[MISSION_RECOVERY] A UI action plan was persisted before the last "
+            return ("\n[MISSION_RECOVERY] A UI action plan was persisted before the last "
                     "session ended. The action may or may not have happened. Do NOT issue "
                     "or repeat it. First inspect the real state using read-only tools. "
                     "Only complete the step after a fresh tool result verifies the outcome; "
                     "otherwise block_step and stop.")
-        return ("\\n[MISSION_RECOVERY] This step was already running before the current "
+        return ("\n[MISSION_RECOVERY] This step was already running before the current "
                 "execution context. Its action may already have happened. Do NOT repeat "
                 "side effects. Inspect with read-only tools and obtain a fresh verifiable "
                 "result; otherwise block_step and stop.")
-    return ("\\n[MISSION_CONTINUE] The current step is already durably marked running. "
+    return ("\n[MISSION_CONTINUE] The current step is already durably marked running. "
             "Execute exactly this step once using the existing tools; do NOT call begin_step "
             f"again. MISSION_ID={mission['id']} STEP_ID={step['id']}. "
             f"Step: {step['title']}. After a real tool returns matching status=done, "
@@ -363,7 +363,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 activate_step(session_memory, mission_id, sid)
                 _write(data)
                 result = _format(mission) + (
-                    "\\n[MISSION_STEP_STARTED] Step is durably marked running. "
+                    "\n[MISSION_STEP_STARTED] Step is durably marked running. "
                     "Execute it once, then complete_step only after a matching tool result "
                     "returns status=done."
                 )
@@ -440,7 +440,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 clear_step(session_memory, mission_id, sid)
                 _write(data)
                 result = _format(mission) + (
-                    "\\n[MISSION_BLOCKED] Stop this mission here. Explain the exact "
+                    "\n[MISSION_BLOCKED] Stop this mission here. Explain the exact "
                     "blocker to the user and do not attempt later steps."
                 )
             elif action == "add_step":

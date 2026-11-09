@@ -163,7 +163,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertNotEqual(mission_control._read()["missions"][0]["status"], "completed")
 
     def test_all_steps_verified_marks_mission_complete(self):
-        mission_id = self.plan("First\\nSecond")
+        mission_id = self.plan("First\nSecond")
         self.start(mission_id)
         for _step_id in ("S01", "S02"):
             self.record_verified_tool()
