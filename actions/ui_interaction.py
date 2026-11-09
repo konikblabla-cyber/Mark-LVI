@@ -148,24 +148,34 @@ def _run_bounded(callback, timeout: float):
     return True, result.get("value"), result.get("error")
 
 
-def _run_uia(callback, timeout: float):
+def _run_uia(callback, timeout: float, exclusive_lock=None):
     """Run fresh UIA objects in their own initialized COM apartment.
 
     comtypes initializes the importing thread automatically. If this is its
     first import in the worker, that initialization is already in place;
-    otherwise each worker must initialize COM explicitly. Balance exactly one
-    initialization in either case.
+    otherwise each worker initializes COM explicitly. An optional lock is
+    acquired before COM setup so a timed-out worker reserves the single
+    invocation slot until it truly exits.
     """
     def with_com():
-        with _COMTYPES_IMPORT_LOCK:
-            already_loaded = "comtypes" in sys.modules
-            import comtypes
-            if already_loaded:
-                comtypes.CoInitialize()
+        acquired = False
+        if exclusive_lock is not None:
+            acquired = exclusive_lock.acquire(blocking=False)
+            if not acquired:
+                return ("busy", "another UI Automation invocation is still running")
         try:
-            return callback()
+            with _COMTYPES_IMPORT_LOCK:
+                already_loaded = "comtypes" in sys.modules
+                import comtypes
+                if already_loaded:
+                    comtypes.CoInitialize()
+            try:
+                return callback()
+            finally:
+                comtypes.CoUninitialize()
         finally:
-            comtypes.CoUninitialize()
+            if acquired:
+                exclusive_lock.release()
 
     return _run_bounded(with_com, timeout)
 
@@ -261,35 +271,28 @@ def _snapshot(window_handle=None) -> dict:
 def _invoke_on_window(window_handle: int, label: str,
                       original_signature: dict) -> tuple[str, str]:
     """Re-find and invoke the same control inside the target window."""
-    # A timed-out Invoke may still be blocked in a system modal dialog. Do not
-    # start another invocation until that one has actually left the worker.
-    if not _INVOKE_LOCK.acquire(blocking=False):
-        return "busy", "a previous UI Automation invocation is still running"
-    try:
-        from pywinauto import Desktop
+    from pywinauto import Desktop
 
-        desktop = Desktop(backend="uia")
-        window = desktop.window(handle=int(window_handle)).wrapper_object()
-        if not window.is_visible():
-            return "missing_window", "the original window is no longer visible"
+    desktop = Desktop(backend="uia")
+    window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if not window.is_visible():
+        return "missing_window", "the original window is no longer visible"
 
-        _records, clickables = _collect_accessible_controls(
-            window, include_wrappers=True,
-        )
-        matches = _matching_controls(clickables, label)
-        if not matches:
-            return "missing_control", "the original control is no longer available"
-        if len(matches) != 1:
-            return "ambiguous", "the control label is no longer unique"
-        target = matches[0]
-        if not _same_control_identity(target, original_signature):
-            return "changed_control", "the matching control is not the one originally identified"
+    _records, clickables = _collect_accessible_controls(
+        window, include_wrappers=True,
+    )
+    matches = _matching_controls(clickables, label)
+    if not matches:
+        return "missing_control", "the original control is no longer available"
+    if len(matches) != 1:
+        return "ambiguous", "the control label is no longer unique"
+    target = matches[0]
+    if not _same_control_identity(target, original_signature):
+        return "changed_control", "the matching control is not the one originally identified"
 
-        # InvokePattern calls the actual accessible control; no coordinate guess.
-        target["control"].iface_invoke.Invoke()
-        return "invoked", ""
-    finally:
-        _INVOKE_LOCK.release()
+    # InvokePattern calls the actual accessible control; no coordinate guess.
+    target["control"].iface_invoke.Invoke()
+    return "invoked", ""
 
 
 def _wait_for_expected_result(expected: str, snapshot_reader,
@@ -364,6 +367,7 @@ def _click_and_verify(button_label: str, expected_result: str,
             expected_window_handle, label, original_signature,
         ),
         _INVOKE_TIMEOUT_SECONDS,
+        exclusive_lock=_INVOKE_LOCK,
     )
     if not completed:
         return outcome.unverified(
@@ -379,6 +383,12 @@ def _click_and_verify(button_label: str, expected_result: str,
         )
 
     status, reason = invocation
+    if status == "busy":
+        return outcome.failed(
+            "click_and_verify",
+            reason + "; this click was not started",
+            button=label,
+        )
     if status != "invoked":
         return outcome.failed(
             "click_and_verify", reason or "the control was not invoked",
