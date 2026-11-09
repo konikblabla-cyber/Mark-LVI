@@ -271,7 +271,8 @@ def _read_window_snapshot(window_handle=None) -> dict:
 
     desktop = Desktop(backend="uia")
     if window_handle is None:
-        window = desktop.get_active()
+        from actions.screen_understanding import _active_top_level_window
+        window = _active_top_level_window(desktop)
     else:
         window = desktop.window(handle=int(window_handle)).wrapper_object()
     if window is None or not window.is_visible():
