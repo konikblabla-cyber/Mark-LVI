@@ -120,6 +120,22 @@ class UIInteractionTests(unittest.TestCase):
         self.assertTrue(_same_control_identity(moved, original))
         self.assertFalse(_same_control_identity(changed, original))
 
+    def test_control_identity_prefers_runtime_id_before_geometry(self):
+        original = {
+            "role": "Button", "automation_id": "", "runtime_id": (1, 2, 3),
+            "rect": (10, 10, 100, 40),
+        }
+        moved_same = {
+            "role": "Button", "automation_id": "", "runtime_id": (1, 2, 3),
+            "rect": (200, 200, 300, 240),
+        }
+        replaced = {
+            "role": "Button", "automation_id": "", "runtime_id": (9, 8, 7),
+            "rect": (10, 10, 100, 40),
+        }
+        self.assertTrue(_same_control_identity(moved_same, original))
+        self.assertFalse(_same_control_identity(replaced, original))
+
     def test_control_identity_uses_bounded_geometry_when_id_is_missing(self):
         original = {"role": "Button", "automation_id": "", "rect": (10, 10, 100, 40)}
         near = {"role": "Button", "automation_id": "", "rect": (15, 9, 104, 44)}
