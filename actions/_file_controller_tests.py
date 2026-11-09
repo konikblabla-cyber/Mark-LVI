@@ -92,6 +92,40 @@ class FileControllerSafetyTests(unittest.TestCase):
         finally:
             outside.unlink(missing_ok=True)
 
+    def test_delete_refuses_to_move_a_symbolic_link_to_trash(self):
+        target = self.root / "target.txt"
+        link = self.root / "link.txt"
+        target.write_text("keep", encoding="utf-8")
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is not available")
+        result = files.delete_file(str(self.root), link.name)
+        self.assertIn("Deleting symbolic links is disabled", result)
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
+    def test_organize_desktop_skips_symbolic_links(self):
+        desktop = self.root / "Desktop"
+        desktop.mkdir()
+        outside = self.root.parent / (self.root.name + "-desktop-outside.txt")
+        outside.write_text("outside", encoding="utf-8")
+        link = desktop / "shortcut.txt"
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            outside.unlink(missing_ok=True)
+            self.skipTest("symlink creation is not available")
+        try:
+            with patch.object(files, "_get_desktop", return_value=desktop):
+                result = files.organize_desktop()
+            self.assertIn("0 files moved", result)
+            self.assertIn("1 file(s) skipped", result)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(outside.read_text(encoding="utf-8"), "outside")
+        finally:
+            outside.unlink(missing_ok=True)
+
     def test_create_file_never_overwrites_an_existing_file(self):
         target = self.root / "existing.txt"
         target.write_text("original", encoding="utf-8")

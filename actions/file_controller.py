@@ -370,6 +370,8 @@ def delete_file(path: str, name: str = "") -> str:
         target = (base / name) if name else base
         if not _is_safe_path(target):
             return f"Access denied: {target}"
+        if target.is_symlink():
+            return "Deleting symbolic links is disabled; choose the in-root target explicitly."
         if not target.exists():
             return f"Not found: {target.name}"
 
@@ -687,6 +689,11 @@ def organize_desktop() -> str:
 
     try:
         for item in desktop.iterdir():
+            # Do not relocate symlinks: their relative targets and undo paths
+            # can change meaning when the link is moved.
+            if item.is_symlink():
+                skipped.append(item.name)
+                continue
             # Leave folders, hidden files and organize-folders untouched
             if item.is_dir() or item.name.startswith("."):
                 continue
