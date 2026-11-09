@@ -25,6 +25,8 @@ class UIInteractionTests(unittest.TestCase):
     def test_high_impact_button_and_polish_labels_require_confirmation(self):
         for label in (
             "Delete account", "Send message", "Usuń plik", "Potwierdź",
+            "Czy na pewno chcesz usunąć konto?",
+            "Płatność zakończona", "Wysłać wiadomość",
         ):
             with self.subTest(label=label):
                 self.assertTrue(_requires_confirmation(label))
