@@ -8,8 +8,6 @@ form submission.
 from __future__ import annotations
 
 import re
-import threading
-
 from actions import ui_interaction as ui
 from actions.screen_understanding import _active_top_level_window
 from core import outcome
@@ -26,7 +24,6 @@ _SENSITIVE_PHRASES = (
     "kod jednorazowy", "numer karty", "karta płatnicza", "karta platnicza",
 )
 _SENSITIVE_WORDS = {"pin", "otp", "ssn"}
-_ENTRY_LOCK = threading.Lock()
 _SNAPSHOT_TIMEOUT_SECONDS = 4.0
 _SET_TIMEOUT_SECONDS = 4.0
 
@@ -127,7 +124,7 @@ def _snapshot() -> dict:
     completed, value, error = ui._run_uia(
         _read_active_snapshot,
         _SNAPSHOT_TIMEOUT_SECONDS,
-        exclusive_lock=_ENTRY_LOCK,
+        exclusive_lock=ui._SNAPSHOT_LOCK,
     )
     if not completed:
         raise TimeoutError("UI Automation did not inspect editable controls within 4 seconds")
@@ -233,7 +230,7 @@ def _fill_text_field(label: str, value: str, snapshot: dict) -> str:
             signature, cancelled,
         ),
         _SET_TIMEOUT_SECONDS,
-        exclusive_lock=_ENTRY_LOCK,
+        exclusive_lock=ui._INVOKE_LOCK,
         pass_cancel_event=True,
     )
     if not completed:
