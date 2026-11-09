@@ -16,6 +16,8 @@ from typing import Callable, Optional
 import numpy as np
 import sounddevice as sd
 
+from core.tts_resource_policy import select_tts_device
+
 
 
 # USE_TF=0 stops transformers from importing TensorFlow (saves 4-8 s startup).
@@ -137,62 +139,28 @@ _KOKORO_COMPAT_ERRORS = ("AlbertModel", "AutoModel", "cannot import name")
 
 
 def _import_kokoro_pipeline():
-    """Import KPipeline, auto-upgrading kokoro if a version mismatch is found.
+    """Import Kokoro without modifying the Python environment.
 
-    Old kokoro (<0.9) imports AlbertModel / AutoModel from transformers.
-    Newer transformers versions no longer export these at the top level,
-    causing an ImportError.  kokoro>=0.9 removed these dependencies.
-
-    When the error is detected we:
-      1. Upgrade kokoro to >=0.9 via pip (silent, background)
-      2. Flush stale kokoro entries from sys.modules
-      3. Re-import — this time it should succeed
+    Installing or upgrading packages is always an explicit user action. A
+    version mismatch is reported with a manual command rather than silently
+    running pip from the assistant process.
     """
-    import sys
-
-    def _try_import():
-        from kokoro import KPipeline  # noqa: PLC0415
-        return KPipeline
-
     try:
-        return _try_import()
+        from kokoro import KPipeline
+        return KPipeline
     except Exception as first_err:
         err_msg = str(first_err)
-        if not any(marker in err_msg for marker in _KOKORO_COMPAT_ERRORS):
-            # Unrelated error (kokoro not installed, etc.)
+        if any(marker in err_msg for marker in _KOKORO_COMPAT_ERRORS):
             raise RuntimeError(
-                f"Kokoro import failed: {first_err}\n"
-                "Run: pip install kokoro>=0.9 soundfile"
+                "The installed Kokoro/transformers versions are incompatible. "
+                "MARK did not install or upgrade anything automatically. "
+                "Update Kokoro manually with: pip install --upgrade 'kokoro>=0.9' "
+                "transformers soundfile"
             ) from first_err
-
-        # ── Version mismatch: upgrade kokoro silently and retry ──────────
-        print("[TTS] Kokoro/transformers version mismatch detected — upgrading kokoro…")
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "kokoro>=0.9",
-             "--upgrade", "--quiet", "--disable-pip-version-check"],
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.decode(errors="replace").strip()
-            raise RuntimeError(
-                f"Kokoro auto-upgrade failed: {stderr[:200]}\n"
-                "Run manually: pip install kokoro>=0.9 soundfile"
-            ) from first_err
-
-        # Flush any stale kokoro submodules from the import cache
-        stale = [k for k in sys.modules if k == "kokoro" or k.startswith("kokoro.")]
-        for key in stale:
-            del sys.modules[key]
-
-        print("[TTS] Kokoro upgraded — retrying import…")
-        try:
-            return _try_import()
-        except Exception as retry_err:
-            raise RuntimeError(
-                f"Kokoro still broken after upgrade: {retry_err}\n"
-                "Run manually: pip install --upgrade kokoro transformers"
-            ) from retry_err
+        raise RuntimeError(
+            f"Kokoro import failed: {first_err}\n"
+            "Install it explicitly with: pip install 'kokoro>=0.9' soundfile"
+        ) from first_err
 
 
 # Kokoro voice prefix → KPipeline lang_code mapping
@@ -241,24 +209,28 @@ class KokoroTTSEngine:
 
         lang = self._lang_code
 
-        # Prefer GPU — Kokoro on CUDA is ~10x faster than CPU.
-        try:
-            import torch
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            if device == "cpu":
-                import os as _os
-                n_threads = max(1, min(4, (_os.cpu_count() or 4) // 2))
+        # Keep VRAM free for games unless the user explicitly opts into CUDA.
+        requested_device = os.environ.get("MARK_TTS_DEVICE", "cpu")
+        cuda_available = False
+        if str(requested_device).strip().lower() in {"auto", "cuda"}:
+            try:
+                import torch
+                cuda_available = bool(torch.cuda.is_available())
+            except Exception:
+                cuda_available = False
+        device = select_tts_device(requested_device, cuda_available)
+
+        if device == "cpu":
+            try:
+                import torch
+                n_threads = max(1, min(4, (os.cpu_count() or 4) // 2))
                 try:
                     torch.set_num_threads(n_threads)
                     torch.set_num_interop_threads(2)
                 except RuntimeError:
                     pass
-                print(
-                    f"[TTS] Kokoro on CPU — for faster speech install CUDA PyTorch:\n"
-                    "      pip install torch --index-url https://download.pytorch.org/whl/cu118"
-                )
-        except Exception:
-            device = "cpu"
+            except Exception:
+                pass
 
         print(f"[TTS] Kokoro — loading (lang='{lang}', device='{device}')…")
 
