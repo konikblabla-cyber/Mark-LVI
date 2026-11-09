@@ -1,10 +1,33 @@
 """Offline tests for local active-window accessibility output."""
 import unittest
 
-from actions.screen_understanding import format_accessible_elements
+from actions.screen_understanding import (
+    _active_top_level_window,
+    format_accessible_elements,
+)
 
 
 class ScreenUnderstandingTests(unittest.TestCase):
+    def test_active_focused_control_is_promoted_to_top_level_window(self):
+        app_window = object()
+
+        class FocusedControl:
+            def top_level_parent(self):
+                return app_window
+
+        class FakeDesktop:
+            def get_active(self):
+                return FocusedControl()
+
+        self.assertIs(_active_top_level_window(FakeDesktop()), app_window)
+
+    def test_missing_focused_element_returns_no_window(self):
+        class FakeDesktop:
+            def get_active(self):
+                return None
+
+        self.assertIsNone(_active_top_level_window(FakeDesktop()))
+
     def test_formats_accessible_labels(self):
         result = format_accessible_elements([
             {"role": "Text", "name": "Settings"},
