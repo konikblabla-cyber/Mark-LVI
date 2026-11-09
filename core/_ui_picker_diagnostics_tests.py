@@ -64,7 +64,9 @@ class PickerDiagnosticsTests(unittest.TestCase):
         limited = diag.format_picker_diagnostics(many, limit=10000)
         self.assertEqual(sum(line.startswith("- Calendar:") for line in limited.splitlines()), 60)
         self.assertIn("item limit reached", limited)
-        self.assertNotIn("item limit reached", diag.format_picker_diagnostics(exactly_two, limit=-5))
+        clamped = diag.format_picker_diagnostics(exactly_two, limit=-5)
+        self.assertEqual(sum(line.startswith("- Calendar:") for line in clamped.splitlines()), 1)
+        self.assertIn("item limit reached", clamped)
 
     def test_non_iterable_input_is_safe(self):
         self.assertIn("No safe visible", diag.format_picker_diagnostics(123))
