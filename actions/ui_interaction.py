@@ -274,9 +274,26 @@ def _collect_accessible_controls(window, include_wrappers: bool = False):
             if rect.width() <= 0 or rect.height() <= 0:
                 continue
             signature = _control_signature(info, rect)
-            record = {"role": role, "name": label}
+            try:
+                enabled = bool(control.is_enabled())
+            except Exception:
+                enabled = None
+            parent_name = ""
+            try:
+                parent_control = control.parent()
+                parent_info = parent_control.element_info
+                parent_name = _safe_name(getattr(parent_info, "name", ""))
+            except Exception:
+                # A stale or unsupported parent must not invalidate this control.
+                pass
+            record = {
+                "role": role, "name": label, "visible": True,
+                "enabled": enabled,
+            }
+            if parent_name:
+                record["parent_name"] = parent_name
             records.append(record)
-            if role in _INVOKABLE_ROLES and control.is_enabled():
+            if role in _INVOKABLE_ROLES and enabled is True:
                 item = {
                     "role": role, "name": label,
                     "automation_id": signature["automation_id"],
