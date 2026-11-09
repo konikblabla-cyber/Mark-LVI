@@ -24,9 +24,13 @@ _SENSITIVE_MARKERS = (
 _HIGH_IMPACT_WORDS = (
     "delete", "remove", "discard", "send", "submit", "publish", "post",
     "purchase", "buy", "pay", "checkout", "order", "transfer", "unsubscribe",
-    "revoke", "cancel", "confirm", "usuń", "usun", "wyślij", "wyslij",
+    "revoke", "cancel", "confirm", "upload", "share", "grant", "erase",
+    "destroy", "wipe", "reset", "format", "authorize", "sign", "deleted",
+    "removed", "sent", "submitted", "published", "transferred", "purchased",
+    "paid", "uploaded", "shared", "usuń", "usun", "wyślij", "wyslij",
     "opublikuj", "kup", "zapłać", "zaplac", "zamów", "zamow", "przelew",
-    "anuluj", "potwierdź", "potwierdz",
+    "anuluj", "potwierdź", "potwierdz", "usunięto", "usunieto", "wysłano",
+    "wyslano", "opublikowano", "przelano",
 )
 _MAX_CONTROLS = 240
 _VERIFY_ATTEMPTS = 10
@@ -244,19 +248,20 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
             button=label, matches=len(matches),
         )
 
-    if _requires_confirmation(label):
+    handle = getattr(window, "handle", None)
+    if handle is None:
+        return outcome.failed(
+            "click_and_verify",
+            "the active window could not be identified safely; nothing was clicked",
+            button=label,
+        )
+
+    if _requires_confirmation(label) or _requires_confirmation(expected):
         from core import confirm
         if confirm.pending_title():
             return outcome.ask(
                 "click_and_verify",
                 "another confirmation is already waiting on the HUD",
-                button=label,
-            )
-        handle = getattr(window, "handle", None)
-        if handle is None:
-            return outcome.failed(
-                "click_and_verify",
-                "the active window could not be safely identified for delayed confirmation",
                 button=label,
             )
         return confirm.request(
@@ -270,7 +275,7 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
             run=lambda: _click_and_verify(label, expected, handle),
         )
 
-    return _click_and_verify(label, expected)
+    return _click_and_verify(label, expected, handle)
 
 
 TOOL = {
