@@ -41,6 +41,7 @@ on:
       - "feature/verified-ui-actions"
       - "feature/verified-ui-sequences"
       - "feature/verified-ui-forms-rebased"
+      - "feature/verified-dropdown-selection"
 
 jobs:
   router:
