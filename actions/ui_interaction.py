@@ -542,15 +542,27 @@ def _set_checkbox_on_window(window_handle: int, expected_process_id: int,
         pattern.Toggle()
     except Exception:
         return "invoke_uncertain", "the CheckBox TogglePattern raised an error; its state is unknown"
-    try:
-        final_state = int(pattern.CurrentToggleState)
-    except Exception:
-        return "invoke_uncertain", "the CheckBox was toggled but its state could not be verified"
-    if final_state not in (0, 1):
-        return "verification_mismatch", "the CheckBox became indeterminate after toggling"
-    if bool(final_state) == desired:
-        return "toggled", ""
-    return "verification_mismatch", "the CheckBox state did not match the requested state after toggling"
+    # Some native accessibility providers update ToggleState asynchronously
+    # after TogglePattern.Toggle() posts the underlying control notification.
+    # Poll the same pattern briefly; never issue a second toggle.
+    deadline = time.monotonic() + 1.5
+    final_state = -1
+    while True:
+        try:
+            final_state = int(pattern.CurrentToggleState)
+        except Exception:
+            return "invoke_uncertain", "the CheckBox was toggled but its state could not be verified"
+        if final_state in (0, 1) and bool(final_state) == desired:
+            return "toggled", ""
+        if final_state not in (0, 1):
+            return "verification_mismatch", "the CheckBox became indeterminate after toggling"
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+    return (
+        "verification_mismatch",
+        f"the CheckBox state did not match after TogglePattern (desired={int(desired)}, observed={final_state})",
+    )
 
 
 def _set_checkbox_and_verify(label: str, desired: bool,
