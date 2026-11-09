@@ -32,6 +32,41 @@ class UIInteractionTests(unittest.TestCase):
             {"button_label", "expected_result"},
         )
 
+    def test_click_is_not_sent_if_expected_result_appears_before_invoke(self):
+        snapshot = {
+            "handle": 100, "process_id": 1234,
+            "records": [{"role": "Text", "name": "Not saved"}],
+            "clickables": [{
+                "role": "Button", "name": "Save",
+                "automation_id": "save", "runtime_id": (1, 2, 3),
+                "rect": (10, 10, 100, 40),
+            }],
+        }
+        with (
+            patch.object(ui_interaction, "_snapshot", return_value=snapshot),
+            patch.object(
+                ui_interaction, "_run_uia",
+                return_value=(
+                    True,
+                    ("already_satisfied",
+                     "the exact expected result appeared before invocation; no click was sent"),
+                    None,
+                ),
+            ) as invoke,
+            patch.object(ui_interaction, "_wait_for_expected_result") as verify,
+        ):
+            result = ui_interaction._click_and_verify(
+                "Save", "Saved", 100, 1234,
+                {
+                    "role": "Button", "automation_id": "save",
+                    "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40),
+                },
+            )
+        self.assertTrue(result.startswith("status=unverified action=click_and_verify "), result)
+        self.assertIn("no click was sent", result)
+        invoke.assert_called_once()
+        verify.assert_not_called()
+
     def test_handler_rejects_missing_operands_without_touching_desktop(self):
         result = ui_interaction.click_and_verify({})
         self.assertIn("status=failed", result)
