@@ -344,7 +344,7 @@ def send_message(
     # send one message. Consume that one-turn scope once; model-supplied tool
     # arguments cannot create or broaden the authorization. If the user did not
     # explicitly ask for this send, retain the HUD gate.
-    if consume_explicit_send_authorization(session_memory, receiver):
+    if consume_explicit_send_authorization(session_memory, receiver, message_text):
         return _queue_send(player, platform, receiver, message_text)
 
     # Unrequested outbound communication still requires an explicit HUD approval.

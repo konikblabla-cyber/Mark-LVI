@@ -41,7 +41,7 @@ class OutboundMessageConfirmationTests(unittest.TestCase):
 
     def test_explicit_user_send_to_named_recipient_skips_second_confirmation(self):
         from core.autonomy_policy import new_turn_authorization
-        scope = new_turn_authorization("Wyślij wiadomość do Alex: będę o 18:30")
+        scope = new_turn_authorization("Wyślij wiadomość do Alex: I will arrive at 18:30.")
         with patch.object(action, "_PYAUTOGUI", True), \
              patch.object(action, "_queue_send", return_value="queued") as queue, \
              patch.object(action.confirm, "request") as request:
@@ -52,12 +52,24 @@ class OutboundMessageConfirmationTests(unittest.TestCase):
 
     def test_explicit_send_authorization_is_consumed_once(self):
         from core.autonomy_policy import new_turn_authorization
-        scope = new_turn_authorization("Send a message to Alex")
+        scope = new_turn_authorization("Send a message to Alex: I will arrive at 18:30.")
         with patch.object(action, "_PYAUTOGUI", True), \
              patch.object(action, "_queue_send", return_value="queued"), \
              patch.object(action.confirm, "request", return_value="[CONFIRMATION_PENDING]") as request:
             action.send_message(self.params, session_memory=scope)
             result = action.send_message(self.params, session_memory=scope)
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        request.assert_called_once()
+
+    def test_explicit_send_with_model_changed_body_falls_back_to_hud(self):
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Send a message to Alex: I will arrive at 18:30.")
+        with patch.object(action, "_PYAUTOGUI", True), \
+             patch.object(action.confirm, "request", return_value="[CONFIRMATION_PENDING]") as request:
+            result = action.send_message(
+                {**self.params, "message_text": "I will be there tomorrow."},
+                session_memory=scope,
+            )
         self.assertIn("[CONFIRMATION_PENDING]", result)
         request.assert_called_once()
 

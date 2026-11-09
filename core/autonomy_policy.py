@@ -164,8 +164,10 @@ def requires_checkbox_confirmation(label: str, desired: bool,
     return True
 
 
-def consume_explicit_send_authorization(session_memory, receiver: str) -> bool:
-    """Consume one direct, recipient-scoped send request from the current user turn."""
+def consume_explicit_send_authorization(session_memory, receiver: str,
+                                        message_text: str) -> bool:
+    """Consume one direct, recipient- and exact-content-scoped send request."""
+
     if not isinstance(session_memory, dict):
         return False
     with _SCOPE_LOCK:
@@ -177,6 +179,13 @@ def consume_explicit_send_authorization(session_memory, receiver: str) -> bool:
         receiver_tokens = _tokens(receiver)
         request_tokens = _tokens(request)
         if not receiver_tokens or not receiver_tokens.issubset(request_tokens):
+            return False
+        # Do not let the model invent message content under a recipient-only
+        # authorization. The exact text (ignoring case and repeated whitespace)
+        # must be present in the user's current request.
+        body = " ".join(str(message_text or "").casefold().split())
+        request_text = " ".join(request.casefold().split())
+        if not body or body not in request_text:
             return False
         session_memory["direct_send_used"] = True
         return True
