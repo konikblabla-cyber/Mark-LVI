@@ -19,6 +19,7 @@ MAX_BUILD_ATTEMPTS = 3
 # fallback ladder. Writing a model name here is what left this file hanging
 # forever whenever that one alias was unwell.
 from core import gemini
+from core import confirm as confirm_gate
 
 
 def _get_api_key() -> str:
@@ -555,6 +556,22 @@ def code_helper(
     if action == "auto":
         action = _detect_intent(description, file_path, code)
         print(f"[Code] 🤖 Auto-detected: {action}")
+
+    from core.execution_policy import requires_code_helper_confirmation
+    if requires_code_helper_confirmation(action):
+        if action == "run":
+            return confirm_gate.request(
+                key="code_helper.run",
+                title="Run code file",
+                detail=f"This executes {file_path or 'the selected code file'} with your user permissions.",
+                run=lambda: _run_action(file_path, args, timeout, player),
+            )
+        return confirm_gate.request(
+            key="code_helper.build",
+            title="Build and run generated code",
+            detail="This writes a code file and executes it with your user permissions.",
+            run=lambda: _build(description, language, output_path, args, timeout, speak, player),
+        )
 
     if action == "write":
         return _write_action(description, language, output_path, player)

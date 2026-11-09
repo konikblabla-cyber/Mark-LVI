@@ -1547,8 +1547,23 @@ class JarvisLive:
                     args["mode"] = "improve"
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": self._turn_authorization}
-                r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
-                result = r or "Done."
+                if name == "dev_agent":
+                    from core.execution_policy import requires_dev_agent_confirmation
+                    if requires_dev_agent_confirmation(args):
+                        result = confirm_gate.request(
+                            key="dev_agent.execute",
+                            title="Run the coding agent",
+                            detail=("This writes project files, may install dependencies, and executes generated code. "
+                                    "Continue only if you trust this project and want it run."),
+                            run=lambda: self._action_registry.run(name, args, _ctx),
+                        )
+                    else:
+                        result = await loop.run_in_executor(
+                            None, lambda: self._action_registry.run(name, args, _ctx))
+                else:
+                    result = await loop.run_in_executor(
+                        None, lambda: self._action_registry.run(name, args, _ctx))
+                result = result or "Done."
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
                         and not r.startswith("No results")
