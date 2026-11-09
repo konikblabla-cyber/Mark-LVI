@@ -381,7 +381,7 @@ def _native_tree_item_handle(label: str) -> int:
             ("cChildren", ctypes.c_int), ("lParam", ctypes.c_ssize_t),
         ]
     # TVM_GETNEXTITEM / TVGN_ROOT retrieves the root item handle.
-    root = _user32.SendMessageW(tree, 0x110A, 0, 0)
+    root = _user32.SendMessageW(tree, 0x110A, 5, 0)  # TVGN_ROOT
     if not root:
         raise AssertionError("native tree fixture has no root item")
     return int(root)
@@ -476,6 +476,10 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         _user32.SendMessageW(
             self.hwnd, 0x0111, _RESET_BUTTON_ID, 0,
         )
+        tree = _user32.GetDlgItem(self.hwnd, _TREE_ID)
+        if tree:
+            root = _native_tree_item_handle("Projects")
+            _user32.SendMessageW(tree, 0x1102, 1, root)  # TVM_EXPAND / TVE_COLLAPSE
         time.sleep(0.05)
 
     def test_real_native_button_without_expected_change_is_not_reported_done(self):
