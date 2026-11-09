@@ -22,6 +22,7 @@ from actions.ui_interaction import (
     _matching_controls,
     _snapshot,
 )
+from actions.ui_sequence import run_ui_sequence
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -29,6 +30,8 @@ _WINDOW_TITLE = "MARK UIA Integration Test"
 _BUTTON_ID = 101
 _NOOP_BUTTON_ID = 102
 _RESET_BUTTON_ID = 103
+_OPEN_PANEL_BUTTON_ID = 104
+_FINISH_WORKFLOW_BUTTON_ID = 105
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -65,6 +68,8 @@ if sys.platform == "win32":
     ]
     _user32.SetWindowTextW.restype = wintypes.BOOL
     _user32.SetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+    _user32.SetForegroundWindow.restype = wintypes.BOOL
+    _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     _user32.PostMessageW.restype = wintypes.BOOL
     _user32.PostMessageW.argtypes = [
         wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t,
@@ -100,6 +105,7 @@ def _serve_native_window() -> int:
 
     hinstance = _kernel32.GetModuleHandleW(None)
     status_hwnd = [None]
+    workflow_stage = ["idle"]
 
     @_WNDPROC
     def wnd_proc(hwnd, message, wparam, lparam):
@@ -108,7 +114,17 @@ def _serve_native_window() -> int:
             _user32.SetWindowTextW(status_hwnd[0], "Saved")
             return 0
         if message == 0x0111 and command_id == _RESET_BUTTON_ID:
+            workflow_stage[0] = "idle"
             _user32.SetWindowTextW(status_hwnd[0], "Not saved")
+            return 0
+        if message == 0x0111 and command_id == _OPEN_PANEL_BUTTON_ID:
+            workflow_stage[0] = "panel"
+            _user32.SetWindowTextW(status_hwnd[0], "Panel ready")
+            return 0
+        if message == 0x0111 and command_id == _FINISH_WORKFLOW_BUTTON_ID:
+            if workflow_stage[0] == "panel":
+                workflow_stage[0] = "complete"
+                _user32.SetWindowTextW(status_hwnd[0], "Workflow complete")
             return 0
         if message == 0x0002:  # WM_DESTROY
             _user32.PostQuitMessage(0)
@@ -127,7 +143,7 @@ def _serve_native_window() -> int:
             raise ctypes.WinError(error)
 
     hwnd = _user32.CreateWindowExW(
-        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 420, 230,
+        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 300,
         None, None, hinstance, None,
     )
     if not hwnd:
@@ -150,11 +166,21 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Restore baseline", 0x50000000,
         20, 120, 160, 34, hwnd, ctypes.c_void_p(_RESET_BUTTON_ID), hinstance, None,
     )
-    if not status_hwnd[0] or not button_hwnd or not noop_button_hwnd or not reset_button_hwnd:
+    open_panel_hwnd = _user32.CreateWindowExW(
+        0, "BUTTON", "Open panel", 0x50000000,
+        20, 170, 140, 34, hwnd, ctypes.c_void_p(_OPEN_PANEL_BUTTON_ID), hinstance, None,
+    )
+    finish_workflow_hwnd = _user32.CreateWindowExW(
+        0, "BUTTON", "Finish workflow", 0x50000000,
+        190, 170, 160, 34, hwnd, ctypes.c_void_p(_FINISH_WORKFLOW_BUTTON_ID), hinstance, None,
+    )
+    if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
+                open_panel_hwnd, finish_workflow_hwnd)):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
     _user32.UpdateWindow(hwnd)
+    _user32.SetForegroundWindow(hwnd)
     message = wintypes.MSG()
     while True:
         result = _user32.GetMessageW(ctypes.byref(message), None, 0, 0)
@@ -322,6 +348,43 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             result.startswith("status=failed action=click_and_verify "),
             result,
         )
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Not saved" for item in after["records"]),
+            after["records"],
+        )
+
+
+    def test_two_step_ui_sequence_verifies_each_real_native_transition(self):
+        result = run_ui_sequence({
+            "steps": [
+                {"button_label": "Open panel", "expected_result": "Panel ready"},
+                {"button_label": "Finish workflow", "expected_result": "Workflow complete"},
+            ],
+        })
+        self.assertTrue(
+            result.startswith("status=done action=run_ui_sequence "),
+            result,
+        )
+        self.assertIn("steps_completed=2", result)
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Workflow complete" for item in after["records"]),
+            after["records"],
+        )
+
+    def test_ui_sequence_stops_after_real_noop_and_does_not_click_next_button(self):
+        result = run_ui_sequence({
+            "steps": [
+                {"button_label": "No change", "expected_result": "Should not appear"},
+                {"button_label": "Finish workflow", "expected_result": "Workflow complete"},
+            ],
+        })
+        self.assertTrue(
+            result.startswith("status=unverified action=run_ui_sequence "),
+            result,
+        )
+        self.assertIn("failed_step=1", result)
         after = _snapshot(int(self.hwnd))
         self.assertTrue(
             any(item["name"] == "Not saved" for item in after["records"]),
