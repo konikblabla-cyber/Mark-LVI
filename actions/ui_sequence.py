@@ -155,7 +155,18 @@ def _stop_with_step_result(state: dict, index: int, result: str) -> str:
 
 def _continue_sequence(state: dict, start_index: int) -> str:
     try:
+        from core import confirm
         for index in range(start_index, len(state["steps"])):
+            pending = confirm.pending_title()
+            if pending:
+                return _stop_with_step_result(
+                    state, index,
+                    outcome.ask(
+                        "run_ui_sequence",
+                        "another action is waiting for HUD confirmation; this sequence paused without clicking",
+                        pending_title=pending,
+                    ),
+                )
             if time.monotonic() - state["started_at"] > _MAX_SEQUENCE_SECONDS:
                 _release_sequence(state["id"])
                 return outcome.unverified(
@@ -172,7 +183,6 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 return _stop_with_step_result(state, index, problem)
 
             if prepared["requires_confirmation"]:
-                from core import confirm
                 pending = confirm.pending_title()
                 if pending:
                     return _stop_with_step_result(
