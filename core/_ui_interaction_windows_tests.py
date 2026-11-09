@@ -786,28 +786,28 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         })
         self.assertIn("status=done", first, first)
         self.assertIn("expanded=true", first)
-        self.assertTrue(_native_tree_item_expanded(tree, root))
+        self.assertTrue(_native_tree_item_expanded(int(self.hwnd), "Projects"))
 
         second = ui_tree.set_tree_item_expanded({
             "item_label": "Projects", "expanded": True,
         })
         self.assertIn("status=done", second, second)
         self.assertIn("changed=false", second)
-        self.assertTrue(_native_tree_item_expanded(tree, root))
+        self.assertTrue(_native_tree_item_expanded(int(self.hwnd), "Projects"))
 
         collapsed = ui_tree.set_tree_item_expanded({
             "item_label": "Projects", "expanded": False,
         })
         self.assertIn("status=done", collapsed, collapsed)
         self.assertIn("expanded=false", collapsed)
-        self.assertFalse(_native_tree_item_expanded(tree, root))
+        self.assertFalse(_native_tree_item_expanded(int(self.hwnd), "Projects"))
 
         again = ui_tree.set_tree_item_expanded({
             "item_label": "Projects", "expanded": False,
         })
         self.assertIn("status=done", again, again)
         self.assertIn("changed=false", again)
-        self.assertFalse(_native_tree_item_expanded(tree, root))
+        self.assertFalse(_native_tree_item_expanded(int(self.hwnd), "Projects"))
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
