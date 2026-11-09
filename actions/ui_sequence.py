@@ -88,7 +88,28 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
-        return None, f"step {index} action must be click or fill_text"
+        if action == "set_checkbox":
+            allowed = {"action", "checkbox_label", "checked"}
+            if set(raw) != allowed:
+                return None, (
+                    f"set_checkbox step {index} must contain only action, checkbox_label and checked"
+                )
+            label = raw.get("checkbox_label")
+            checked = raw.get("checked")
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong checkbox_label"
+            if not isinstance(checked, bool):
+                return None, f"step {index} checked must be a boolean true or false"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a credential-related checkbox, which is not supported"
+            validated.append({
+                "action": "set_checkbox",
+                "checkbox_label": " ".join(label.split()),
+                "checked": checked,
+            })
+            continue
+
+        return None, f"step {index} action must be click, fill_text or set_checkbox"
 
     return validated, ""
 
@@ -137,6 +158,34 @@ def _prepare_step(step: dict, snapshot: dict) -> tuple[dict | None, str]:
         "requires_confirmation": ui._requires_confirmation(
             label, expected, context_text,
         ),
+    }, ""
+
+
+def _prepare_checkbox_step(step: dict, state: dict) -> tuple[dict | None, str]:
+    label = step["checkbox_label"]
+    desired = step["checked"]
+    status, current, signature, reason = ui._inspect_checkbox(
+        label, state["window_handle"], state["process_id"],
+    )
+    if status != "found":
+        if status == "ambiguous_checkbox":
+            return None, outcome.ask(
+                "run_ui_sequence", reason, checkbox=label,
+            )
+        if status == "timeout":
+            return None, outcome.unverified(
+                "run_ui_sequence", reason, checkbox=label,
+            )
+        return None, outcome.failed(
+            "run_ui_sequence", reason or status, checkbox=label,
+        )
+    return {
+        "label": label,
+        "desired": desired,
+        "current": current,
+        "signature": signature,
+        "handle": state["window_handle"],
+        "process_id": state["process_id"],
     }, ""
 
 
@@ -199,6 +248,36 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            if step["action"] == "set_checkbox":
+                prepared, problem = _prepare_checkbox_step(step, state)
+                if prepared is None:
+                    return _stop_with_step_result(state, index, problem)
+                if prepared["current"] == prepared["desired"]:
+                    state["completed"] += 1
+                    state["completed_labels"].append(prepared["label"])
+                    if index == 0:
+                        state.pop("initial_snapshot", None)
+                    continue
+
+                # Every checkbox state change requires a human HUD approval.
+                # This intentionally covers consent, subscription and privacy
+                # switches even when a label-specific heuristic misses them.
+                label = prepared["label"]
+                desired_text = "checked" if prepared["desired"] else "unchecked"
+                return confirm.request(
+                    key="run_ui_sequence",
+                    title=f"Confirm checkbox: {label}",
+                    detail=(
+                        f"This is step {index + 1} of {len(state['steps'])}. "
+                        f"MARK will set the '{label}' checkbox to {desired_text} "
+                        "in the original application window, then verify its "
+                        "TogglePattern state. No other steps run unless this "
+                        "change is confirmed and verified."
+                    ),
+                    run=lambda: _resume_after_checkbox(state, index, prepared),
+                    on_cancel=lambda: _release_sequence(state["id"]),
+                )
+
             if step["action"] == "fill_text":
                 # Filling uses the exact original HWND/PID directly and does
                 # not enumerate or return editable-field contents.
@@ -321,6 +400,32 @@ def _resume_after_confirmation(state: dict, index: int,
         )
 
 
+def _resume_after_checkbox(state: dict, index: int,
+                               prepared: dict) -> str:
+    """Apply one approved checkbox state and continue only after readback."""
+    try:
+        result = ui._set_checkbox_and_verify(
+            prepared["label"], prepared["desired"],
+            prepared["handle"], prepared["process_id"],
+            prepared["signature"],
+        )
+        if not result.startswith("status=done "):
+            return _stop_with_step_result(state, index, result)
+        state["completed"] += 1
+        state["completed_labels"].append(prepared["label"])
+        return _continue_sequence(state, index + 1)
+    except Exception as exc:
+        _release_sequence(state["id"])
+        return outcome.failed(
+            "run_ui_sequence",
+            f"the approved checkbox step failed internally ({type(exc).__name__}); later steps were not started",
+            sequence_id=state["id"],
+            steps_completed=state["completed"],
+            total_steps=len(state["steps"]),
+            failed_step=index + 1,
+        )
+
+
 def _capture_active_window() -> dict:
     return ui._snapshot()
 
@@ -373,7 +478,7 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Fill safe labelled fields and click exact controls in a verified 2–8 step Windows UI workflow.",
+    "brief": "Fill safe fields, set confirmed checkboxes and click verified controls in a 2–8 step Windows UI workflow.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
@@ -384,6 +489,9 @@ TOOL = {
         "the literal text to enter; MARK verifies it locally with UI Automation "
         "ValuePattern without returning the field value to the model. Never "
         "fill credentials, verification codes, payment details, keys or tokens. "
+        "A set_checkbox step must name one exact accessible CheckBox and desired "
+        "boolean state; every state change pauses for human HUD approval, then "
+        "MARK re-reads TogglePattern locally to verify the requested state. "
         "Do not invent labels or expected results; inspect the UI first when "
         "needed. The sequence "
         "captures the active application window once and remains pinned to "
@@ -409,14 +517,14 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered steps. Use click with button_label and expected_result, or fill_text with field_label and literal text.",
+                "description": "Two to eight ordered steps. Use click, fill_text or set_checkbox with the exact fields required for that action.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "enum": ["click", "fill_text"],
-                            "description": "Use click for a verified button press or fill_text for one safe text field.",
+                            "enum": ["click", "fill_text", "set_checkbox"],
+                            "description": "Use click for a verified button press, fill_text for one safe text field, or set_checkbox for a human-confirmed checkbox state change.",
                         },
                         "button_label": {
                             "type": "STRING",
@@ -433,6 +541,14 @@ TOOL = {
                         "text": {
                             "type": "STRING",
                             "description": "For fill_text: literal non-secret text to enter; never use for credentials or payment details.",
+                        },
+                        "checkbox_label": {
+                            "type": "STRING",
+                            "description": "For set_checkbox: exact accessible label of one visible CheckBox.",
+                        },
+                        "checked": {
+                            "type": "BOOLEAN",
+                            "description": "For set_checkbox: desired checked state; every change requires HUD confirmation.",
                         },
                     },
                     "required": ["action"],

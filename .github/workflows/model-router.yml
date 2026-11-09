@@ -41,6 +41,7 @@ on:
       - "feature/verified-ui-actions"
       - "feature/verified-ui-sequences"
       - "feature/verified-ui-forms"
+      - "feature/verified-ui-checkboxes"
 
 jobs:
   router:

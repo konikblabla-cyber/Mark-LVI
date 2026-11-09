@@ -11,6 +11,8 @@ from core.action_loader import _validate
 
 from actions.ui_interaction import (
     _fill_text_and_verify,
+    _inspect_checkbox,
+    _set_checkbox_and_verify,
     _has_exact_expected_text,
     _is_sensitive_input_label,
     _looks_like_secret_payload,
@@ -38,6 +40,39 @@ class UIInteractionTests(unittest.TestCase):
             if self.fail_set:
                 raise RuntimeError("provider error")
             self.CurrentValue = self.readback if self.readback is not None else value
+
+    def test_checkbox_inspection_returns_only_a_plain_checked_state(self):
+        signature = {
+            "role": "CheckBox", "automation_id": "agree",
+            "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40),
+        }
+        with patch.object(
+            ui_interaction, "_run_uia",
+            return_value=(True, ("found", True, signature, ""), None),
+        ):
+            result = _inspect_checkbox("Agree", 100, 1234)
+        self.assertEqual(result, ("found", True, signature, ""))
+
+    def test_checkbox_set_result_never_contains_field_or_control_contents(self):
+        def fake_run(callback, timeout, exclusive_lock=None, pass_cancel_event=False):
+            return True, ("toggled", ""), None
+        with patch.object(ui_interaction, "_run_uia", side_effect=fake_run):
+            result = _set_checkbox_and_verify(
+                "Enable notifications", True, 100, 1234,
+                {"role": "CheckBox", "automation_id": "notifications",
+                 "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)},
+            )
+        self.assertTrue(result.startswith("status=done action=set_checkbox_and_verify "), result)
+        self.assertIn("checked=true", result)
+        self.assertNotIn("secret contents", result)
+
+    def test_checkbox_set_rejects_non_boolean_desired_state(self):
+        with patch.object(ui_interaction, "_run_uia") as run:
+            result = _set_checkbox_and_verify(
+                "Enable notifications", "true", 100, 1234, {},
+            )
+        self.assertIn("status=failed", result)
+        run.assert_not_called()
 
     def test_secret_field_labels_are_rejected_but_ordinary_fields_are_allowed(self):
         for label in (
