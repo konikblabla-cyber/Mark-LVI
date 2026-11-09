@@ -5,6 +5,7 @@ from core.mission_evidence import (
     activate_step,
     clear_step,
     record_tool_result,
+    seed_step_evidence,
     verified_evidence,
     verification_summary,
 )
@@ -24,6 +25,35 @@ class MissionEvidenceTests(unittest.TestCase):
         self.assertIsNotNone(evidence)
         self.assertEqual(evidence["tool_name"], "click_and_verify")
         self.assertIn("status=done", verification_summary(evidence))
+
+    def test_done_without_verified_true_is_rejected_and_clears_previous_receipt(self):
+        activate_step(self.scope, "M-1", "S01")
+        self.assertTrue(record_tool_result(
+            self.scope, "click_and_verify",
+            "status=done action=click_and_verify verified=true",
+        ))
+        for result in (
+            "status=done action=click_and_verify",
+            "status=done action=click_and_verify verified=false",
+            "status=done action=click_and_verify verified=True",
+            "status=done action=click_and_verify verified=false reason=no_change",
+        ):
+            with self.subTest(result=result):
+                self.assertFalse(record_tool_result(self.scope, "click_and_verify", result))
+                self.assertIsNone(verified_evidence(self.scope, "M-1", "S01"))
+
+    def test_seed_rejects_receipts_without_verified_true(self):
+        activate_step(self.scope, "M-1", "S01")
+        invalid = {
+            "status": "done",
+            "tool_name": "click_and_verify",
+            "action": "click_and_verify",
+            "result_sha256": "0" * 64,
+        }
+        self.assertFalse(seed_step_evidence(
+            self.scope, "M-1", "S01", invalid,
+        ))
+        self.assertIsNone(verified_evidence(self.scope, "M-1", "S01"))
 
     def test_model_only_text_cannot_create_evidence(self):
         activate_step(self.scope, "M-1", "S01")

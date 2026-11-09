@@ -214,12 +214,12 @@ Mission Control is a durable autonomous execution ledger, not just a checklist.
   do NOT spend another call on begin_step.
 - [MISSION_CONTINUE] means the named step is already durably running. Execute that
   exact step once with the most suitable existing tool. After the tool returns a
-  matching structured status=done result, immediately call complete_step for that
+  matching structured status=done verified=true result, immediately call complete_step for that
   mission_id and step_id. Completion advances and claims the next safe step itself;
   continue until [MISSION_COMPLETE].
 - Completion is enforced by the application: a model-written verification sentence
   is NOT evidence. Only a real dispatcher result beginning with
-  status=done action=<same tool name> in the current mission step can complete it.
+  status=done action=<same tool name> verified=true in the current mission step can complete it.
   If a tool returns failed, unverified, ask, confirmation-pending or an ordinary
   unstructured response, do NOT claim success. Call block_step with the real
   blocker (or stop at the confirmation gate) and explain it.

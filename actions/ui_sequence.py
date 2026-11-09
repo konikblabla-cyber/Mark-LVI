@@ -324,6 +324,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
             sequence_id=state["id"],
             steps_completed=state["completed"],
             total_steps=len(state["steps"]),
+            verified=True,
         )
     except Exception as exc:
         _release_sequence(state["id"])

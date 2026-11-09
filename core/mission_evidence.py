@@ -2,8 +2,8 @@
 
 A model-provided verification sentence is not proof that a tool ran. This
 module binds one mission step to the real result returned by the dispatcher.
-Only a matching status=done action=<tool name> result can authorize
-complete_step. Evidence lives only for the current user turn and is never
+Only a matching status=done action=<tool name> verified=true result can
+authorize complete_step. Evidence lives only for the current user turn and is never
 restored after a restart.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import re
 
 _SCOPE_KEY = "_mission_execution"
 _DONE_RESULT = re.compile(
-    r"^status=done action=([A-Za-z_][A-Za-z0-9_]*)\b"
+    r"^status=done action=([A-Za-z_][A-Za-z0-9_]*)\b(?=[^\r\n]*\bverified=true(?:\s|$))"
 )
 
 
@@ -75,6 +75,7 @@ def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
         "status": "done",
         "tool_name": name[:80],
         "action": action,
+        "verified": True,
         "result_sha256": hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest(),
     }
     return True
@@ -88,6 +89,7 @@ def seed_step_evidence(session_memory, mission_id: str, step_id: str,
     if (evidence.get("status") != "done"
             or not isinstance(evidence.get("tool_name"), str)
             or evidence.get("action") != evidence.get("tool_name")
+            or evidence.get("verified") is not True
             or not isinstance(evidence.get("result_sha256"), str)
             or not re.fullmatch(r"[0-9a-f]{64}", evidence["result_sha256"])):
         return False
@@ -111,7 +113,8 @@ def verified_evidence(session_memory, mission_id: str, step_id: str) -> dict | N
             or current.get("step_id") != str(step_id or "")):
         return None
     evidence = current.get("last_result")
-    if not isinstance(evidence, dict) or evidence.get("status") != "done":
+    if (not isinstance(evidence, dict) or evidence.get("status") != "done"
+            or evidence.get("verified") is not True):
         return None
     tool_name = evidence.get("tool_name")
     if not isinstance(tool_name, str) or evidence.get("action") != tool_name:
@@ -126,7 +129,7 @@ def verification_summary(evidence: dict) -> str:
     """A safe factual receipt; do not persist raw tool output or user data."""
     tool = str(evidence.get("tool_name") or "tool")[:80]
     digest = str(evidence.get("result_sha256") or "")[:16]
-    return f"Application verified {tool} returned status=done (receipt {digest})"
+    return f"Application verified {tool} returned status=done verified=true (receipt {digest})"
 
 
 __all__ = [

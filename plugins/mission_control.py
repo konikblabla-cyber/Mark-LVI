@@ -108,7 +108,7 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
     if step.get("status") == "running" and recovery:
         if step.get("tool_evidence"):
             return ("\n[MISSION_RECOVERY] The previous session has a persisted receipt from "
-                    "a tool that returned status=done. Do NOT repeat the action. Call "
+                    "a tool that returned status=done verified=true. Do NOT repeat the action. Call "
                     "complete_step for this exact step; the application will accept it only "
                     "if the persisted receipt still matches the running mission step.")
         if step.get("ui_action"):
@@ -124,7 +124,7 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
     return ("\n[MISSION_CONTINUE] The current step is already durably marked running. "
             "Execute exactly this step once using the existing tools; do NOT call begin_step "
             f"again. MISSION_ID={mission['id']} STEP_ID={step['id']}. "
-            f"Step: {step['title']}. After a real tool returns matching status=done, "
+            f"Step: {step['title']}. After a real tool returns matching status=done verified=true, "
             "immediately call complete_step for this mission and step. If the tool fails, "
             "is ambiguous, unverified or waits for confirmation, do not claim success; "
             "block the step or stop at the confirmation gate.")
