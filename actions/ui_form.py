@@ -18,9 +18,11 @@ _MAX_TOTAL_TEXT = 6000
 _FILL_TIMEOUT_SECONDS = 15.0
 
 _SENSITIVE_LABELS = (
-    "password", "passcode", "one time code", "one-time code", "otp",
-    "security code", "recovery code", "secret key", "api key", "access token",
-    "credit card", "card number", "cvv", "cvc", "iban", "bank account",
+    "password", "passcode", "pin", "one time code", "one-time code", "otp",
+    "security code", "verification code", "authentication code",
+    "recovery code", "recovery phrase", "backup code", "security answer",
+    "secret key", "api key", "access token", "social security",
+    "national id", "tax id", "    "credit card", "card number", "cvv", "cvc", "iban", "bank account",
     "pesel", "pin code", "haslo", "hasło", "kod jednorazowy",
     "kod zabezpieczajacy", "kod zabezpieczający", "numer karty",
     "konto bankowe", "klucz api", "token dostepowy", "token dostępowy",
@@ -252,26 +254,49 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
                         fields_filled=filled, fields_already_correct=already_correct,
                         total_fields=len(planned),
                     )
+                # Once SetValue is called, an exception or missing read-back is
+                # ambiguous: the application may have accepted the value. Never
+                # label that state as a clean failure or retry it automatically.
+                attempted = True
                 pattern.SetValue(item["text"])
-                if str(pattern.CurrentValue) != item["text"]:
-                    status = outcome.failed if filled == 0 else outcome.unverified
-                    return status(
+                verified = False
+                for _ in range(4):
+                    if str(pattern.CurrentValue) == item["text"]:
+                        verified = True
+                        break
+                    if cancelled.is_set():
+                        break
+                    time.sleep(0.1)
+                if not verified:
+                    return outcome.unverified(
                         "fill_ui_fields",
-                        "the field value did not match the requested text after SetValue; remaining fields were not touched",
+                        "SetValue was sent but the exact field value could not be confirmed; inspect the field before retrying",
                         field=item["label"], fields_filled=filled,
+                        fields_attempted=filled + 1,
                         fields_already_correct=already_correct,
                         total_fields=len(planned),
                     )
                 filled += 1
             except Exception as exc:
+                if locals().get("attempted", False):
+                    return outcome.unverified(
+                        "fill_ui_fields",
+                        f"the field may have changed but local verification failed ({type(exc).__name__}); inspect it before retrying",
+                        field=item["label"], fields_filled=filled,
+                        fields_attempted=filled + 1,
+                        fields_already_correct=already_correct,
+                        total_fields=len(planned),
+                    )
                 status = outcome.failed if filled == 0 else outcome.unverified
                 return status(
                     "fill_ui_fields",
-                    f"the field could not be set and locally verified ({type(exc).__name__}); remaining fields were not touched",
+                    f"the field could not be accessed safely ({type(exc).__name__}); remaining fields were not touched",
                     field=item["label"], fields_filled=filled,
                     fields_already_correct=already_correct,
                     total_fields=len(planned),
                 )
+            finally:
+                attempted = False
 
         return outcome.done(
             "fill_ui_fields",
@@ -345,11 +370,6 @@ def fill_ui_fields(parameters: dict, player=None, session_memory=None) -> str:
     requested_labels = [item["field_label"] for item in fields]
     context = " ".join(ui._safe_name(item.get("name")) for item in snapshot["context"])
     requires_confirmation = ui._requires_confirmation(*requested_labels, context)
-    def run(cancelled):
-        return _fill_worker(
-            snapshot["handle"], snapshot["process_id"], fields, cancelled,
-        )
-
     if requires_confirmation:
         from core import confirm
         return confirm.request(
