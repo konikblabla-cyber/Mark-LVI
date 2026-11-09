@@ -189,6 +189,7 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
         window = _window_for_handle(desktop, handle, process_id)
         controls = _editable_controls(window, include_wrappers=True)
         planned = []
+        planned_identities = set()
         for field in fields:
             label = field["field_label"]
             matches = [
@@ -208,6 +209,25 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
                     field=label, matches=len(matches), fields_filled=0,
                 )
             target = matches[0]
+            signature = {
+                "role": target["role"],
+                "automation_id": target.get("automation_id", ""),
+                "runtime_id": target.get("runtime_id", ()),
+                "rect": target.get("rect"),
+            }
+            if signature["automation_id"]:
+                identity = ("automation_id", signature["automation_id"])
+            elif signature["runtime_id"]:
+                identity = ("runtime_id", tuple(signature["runtime_id"]))
+            else:
+                identity = ("rect", tuple(signature.get("rect") or ()))
+            if identity in planned_identities:
+                return outcome.failed(
+                    "fill_ui_fields",
+                    "two requested labels resolve to the same field; nothing was entered",
+                    field=label, fields_filled=0,
+                )
+            planned_identities.add(identity)
             try:
                 pattern = target["control"].iface_value
                 if bool(pattern.CurrentIsReadOnly):
@@ -227,17 +247,13 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
             planned.append({
                 "label": label,
                 "text": field["text"],
-                "signature": {
-                    "role": target["role"],
-                    "automation_id": target.get("automation_id", ""),
-                    "runtime_id": target.get("runtime_id", ()),
-                    "rect": target.get("rect"),
-                },
+                "signature": signature,
             })
 
         filled = 0
         already_correct = 0
         for item in planned:
+            attempted = False
             if cancelled.is_set():
                 return outcome.unverified(
                     "fill_ui_fields",
@@ -300,7 +316,7 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
                     )
                 filled += 1
             except Exception as exc:
-                if locals().get("attempted", False):
+                if attempted:
                     return outcome.unverified(
                         "fill_ui_fields",
                         f"the field may have changed but local verification failed ({type(exc).__name__}); inspect it before retrying",
@@ -317,9 +333,6 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
                     fields_already_correct=already_correct,
                     total_fields=len(planned),
                 )
-            finally:
-                attempted = False
-
         return outcome.done(
             "fill_ui_fields",
             fields_filled=filled,
