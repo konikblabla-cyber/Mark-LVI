@@ -97,7 +97,7 @@ class SliderTests(unittest.TestCase):
         self.assertEqual(pattern.set_calls, [])
 
     def test_target_outside_live_range_is_rejected(self):
-        pattern = FakeRangePattern(minimum=10, maximum=90)
+        pattern = FakeRangePattern(current=40, minimum=10, maximum=90)
         for value in (Decimal("9"), Decimal("91")):
             with self.subTest(value=value):
                 status, _ = ui_slider._set_and_verify(pattern, value, threading.Event())
