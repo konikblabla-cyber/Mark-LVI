@@ -51,6 +51,26 @@ if sys.platform == "win32":
             ("lpszClassName", wintypes.LPCWSTR),
         ]
 
+    _user32.RegisterClassW.restype = wintypes.ATOM
+    _user32.RegisterClassW.argtypes = [ctypes.POINTER(_WNDCLASSW)]
+    _user32.LoadCursorW.restype = wintypes.HANDLE
+    _user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+    _user32.DefWindowProcW.restype = ctypes.c_ssize_t
+    _user32.DefWindowProcW.argtypes = [
+        wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t,
+    ]
+    _user32.SetWindowTextW.restype = wintypes.BOOL
+    _user32.SetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+    _user32.PostMessageW.restype = wintypes.BOOL
+    _user32.PostMessageW.argtypes = [
+        wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t,
+    ]
+    _user32.ShowWindow.restype = wintypes.BOOL
+    _user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.UpdateWindow.restype = wintypes.BOOL
+    _user32.UpdateWindow.argtypes = [wintypes.HWND]
+    _user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    _user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
     _user32.CreateWindowExW.restype = wintypes.HWND
     _user32.CreateWindowExW.argtypes = [
         wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
@@ -59,10 +79,12 @@ if sys.platform == "win32":
     ]
     _user32.FindWindowW.restype = wintypes.HWND
     _user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    _user32.GetMessageW.restype = ctypes.c_int
     _user32.GetMessageW.argtypes = [
         ctypes.POINTER(wintypes.MSG), wintypes.HWND,
         wintypes.UINT, wintypes.UINT,
     ]
+    _user32.PostQuitMessage.argtypes = [ctypes.c_int]
     _kernel32.GetModuleHandleW.restype = wintypes.HINSTANCE
     _kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 
