@@ -478,7 +478,7 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Fill safe labelled fields and click exact controls in a verified 2–8 step Windows UI workflow.",
+    "brief": "Fill safe fields, set confirmed checkboxes and click verified controls in a 2–8 step Windows UI workflow.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
