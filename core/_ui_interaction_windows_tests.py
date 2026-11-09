@@ -96,6 +96,8 @@ if sys.platform == "win32":
     _user32.GetDlgItem.argtypes = [wintypes.HWND, ctypes.c_int]
     _user32.GetWindowTextW.restype = ctypes.c_int
     _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    _user32.GetWindowTextLengthW.restype = ctypes.c_int
+    _user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
     _user32.GetMessageW.restype = ctypes.c_int
     _user32.GetMessageW.argtypes = [
         ctypes.POINTER(wintypes.MSG), wintypes.HWND,
@@ -455,7 +457,14 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertNotIn(entered, result)
         buffer = ctypes.create_unicode_buffer(256)
         edit_hwnd = _user32.GetDlgItem(self.hwnd, _SEARCH_EDIT_ID)
-        self.assertGreater(_user32.GetWindowTextW(edit_hwnd, buffer, 256), 0)
+        self.assertTrue(edit_hwnd, "GetDlgItem could not find the native Edit control")
+        length = _user32.GetWindowTextLengthW(edit_hwnd)
+        copied = _user32.GetWindowTextW(edit_hwnd, buffer, 256)
+        self.assertGreater(
+            length, 0,
+            f"native edit HWND={edit_hwnd!r}, copied={copied}, "
+            f"UIA fields={text_entry._snapshot()['fields']!r}",
+        )
         self.assertEqual(buffer.value, entered)
 
     def test_password_edit_is_never_enumerated_or_filled(self):
