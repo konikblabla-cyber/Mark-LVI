@@ -629,6 +629,27 @@ def _to_openai_messages(contents, config) -> tuple[list[dict], Optional[float]]:
     return messages, temperature
 
 
+def _guard_provider_fallback(provider_id: str, contents) -> int:
+    """Fail closed before any legacy provider fallback can build a client.
+
+    The task router is opt-in for compatibility, but the zero-cost promise is
+    not: every configured provider call must be explicitly acknowledged,
+    match the same local/$0 allowlist, and reserve the local daily budget.
+    The main router has its own equivalent checks; this protects the older
+    Gemini model-ladder path when that router is disabled.
+    """
+    from core import model_router
+
+    settings = model_router._settings()
+    if not settings.get("zero_cost_confirmed"):
+        raise model_router.RouterError(
+            "provider fallback blocked: first confirm that every selected "
+            "provider is on a $0 plan with no payment method"
+        )
+    model_router._assert_zero_cost_provider(provider_id)
+    return model_router._reserve(contents, settings)
+
+
 def _provider_call(model: str, contents, config, timeout_ms: int):
     """One generation through a configured provider. Raises like every other
     rung, so the loop's error classification applies to it unchanged."""
@@ -637,6 +658,10 @@ def _provider_call(model: str, contents, config, timeout_ms: int):
 
     pid = model[len(PROVIDER_PREFIX):]
     cfg = get_provider_config(pid)
+    # This legacy ladder remains available when the opt-in task router is
+    # disabled. Do not let that compatibility path bypass the $0 allowlist
+    # or the local usage budget.
+    _guard_provider_fallback(pid, contents)
     missing = registry.missing_fields(pid, cfg)
     if missing:
         raise RuntimeError(f"404 not configured: {', '.join(missing)}")
