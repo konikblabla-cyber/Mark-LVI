@@ -172,11 +172,34 @@ def resolve(accepted: bool) -> None:
                      name=f"confirm-{p.key}").start()
 
 
-def pending_title() -> str:
-    """'' when nothing is waiting. Lets an action avoid stacking two banners."""
+def _expire_pending(p: _Pending) -> bool:
+    """Atomically discard an expired prompt and release its action-owned state."""
+    global _pending
     with _lock:
-        if _pending is None:
+        if _pending is not p or time.monotonic() - p.at <= TIMEOUT_SECONDS:
+            return False
+        _pending = None
+
+    if _hide_cb:
+        try:
+            _hide_cb()
+        except Exception:
+            pass
+    _log(f"SYS: Confirmation expired — {p.title}")
+    _cancel_callback(p.on_cancel, p.title, "expired confirmation")
+    return True
+
+
+def pending_title() -> str:
+    """'' when nothing is waiting. Also expires stale prompts and cleans them up."""
+    with _lock:
+        pending = _pending
+    if pending is None:
+        return ""
+    if _expire_pending(pending):
+        return ""
+    with _lock:
+        # The pending request may have been resolved while the expiry check ran.
+        if _pending is not pending:
             return ""
-        if time.monotonic() - _pending.at > TIMEOUT_SECONDS:
-            return ""
-        return _pending.title
+        return pending.title
