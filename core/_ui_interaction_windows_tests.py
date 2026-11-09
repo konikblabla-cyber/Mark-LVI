@@ -54,7 +54,9 @@ if sys.platform == "win32":
     _user32.RegisterClassW.restype = wintypes.ATOM
     _user32.RegisterClassW.argtypes = [ctypes.POINTER(_WNDCLASSW)]
     _user32.LoadCursorW.restype = wintypes.HANDLE
-    _user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+    # The second argument accepts MAKEINTRESOURCE(IDC_ARROW), an integer
+    # resource cast to a pointer rather than a real wide string.
+    _user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, wintypes.LPVOID]
     _user32.DefWindowProcW.restype = ctypes.c_ssize_t
     _user32.DefWindowProcW.argtypes = [
         wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t,
