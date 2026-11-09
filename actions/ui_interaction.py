@@ -345,7 +345,8 @@ def _snapshot(window_handle=None, expected_process_id=None) -> dict:
 
 
 def _invoke_on_window(window_handle: int, expected_process_id: int,
-                      label: str, original_signature: dict,
+                      label: str, expected_result: str,
+                      original_signature: dict,
                       cancelled: threading.Event) -> tuple[str, str]:
     """Re-find and invoke the same control inside the target window."""
     from pywinauto import Desktop
@@ -358,9 +359,17 @@ def _invoke_on_window(window_handle: int, expected_process_id: int,
     if not _valid_window_process_id(process_id, expected_process_id):
         return "changed_window", "the window handle now belongs to another process"
 
-    _records, clickables = _collect_accessible_controls(
+    records, clickables = _collect_accessible_controls(
         window, include_wrappers=True,
     )
+    # A UI transition may complete between the caller's snapshot and this
+    # invocation. Never click again if the requested postcondition has already
+    # appeared in the original window during that gap.
+    if _has_exact_expected_text(records, expected_result):
+        return (
+            "already_satisfied",
+            "the exact expected result appeared before invocation; no click was sent",
+        )
     matches = _matching_controls(clickables, label)
     if not matches:
         return "missing_control", "the original control is no longer available"
@@ -465,7 +474,7 @@ def _click_and_verify(button_label: str, expected_result: str,
 
     completed, invocation, error = _run_uia(
         lambda cancelled: _invoke_on_window(
-            expected_window_handle, expected_process_id, label,
+            expected_window_handle, expected_process_id, label, expected,
             original_signature, cancelled,
         ),
         _INVOKE_TIMEOUT_SECONDS,
@@ -491,6 +500,12 @@ def _click_and_verify(button_label: str, expected_result: str,
             "click_and_verify",
             reason + "; this click was not started",
             button=label,
+        )
+    if status == "already_satisfied":
+        return outcome.unverified(
+            "click_and_verify",
+            reason + "; the result may have been produced by another event, so this click was not sent",
+            button=label, expected=expected,
         )
     if status == "unsupported_pattern":
         return outcome.failed(
