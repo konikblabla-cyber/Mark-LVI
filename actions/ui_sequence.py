@@ -65,17 +65,9 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
     return validated, ""
 
 
-def _prepare_step(step: dict) -> tuple[dict | None, str]:
+def _prepare_step(step: dict, snapshot: dict) -> tuple[dict | None, str]:
     label = step["button_label"]
     expected = step["expected_result"]
-    try:
-        snapshot = ui._snapshot()
-    except Exception as exc:
-        return None, outcome.failed(
-            "run_ui_sequence",
-            f"could not inspect the active application before this step ({type(exc).__name__})",
-            button=label,
-        )
 
     if ui._has_exact_expected_text(snapshot["records"], expected):
         return None, outcome.failed(
@@ -179,7 +171,25 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
-            prepared, problem = _prepare_step(step)
+            if index == 0 and state.get("initial_snapshot") is not None:
+                snapshot = state.pop("initial_snapshot")
+            else:
+                try:
+                    # Keep the sequence pinned to the application window
+                    # captured at start. A foreground change must not redirect
+                    # the remaining clicks into another application.
+                    snapshot = ui._snapshot(
+                        state["window_handle"], state["process_id"],
+                    )
+                except Exception as exc:
+                    return _stop_with_step_result(
+                        state, index,
+                        outcome.failed(
+                            "run_ui_sequence",
+                            f"the original application window could not be inspected ({type(exc).__name__})",
+                        ),
+                    )
+            prepared, problem = _prepare_step(step, snapshot)
             if prepared is None:
                 return _stop_with_step_result(state, index, problem)
 
@@ -268,6 +278,30 @@ def _resume_after_confirmation(state: dict, index: int,
         )
 
 
+def _capture_active_window() -> dict:
+    return ui._snapshot()
+
+
+def _start_sequence(steps: list[dict], initial_snapshot: dict) -> str:
+    token = _claim_sequence()
+    if token is None:
+        return outcome.ask(
+            "run_ui_sequence",
+            "another UI sequence is already running or waiting for confirmation; wait for it to finish",
+        )
+    state = {
+        "id": token,
+        "steps": steps,
+        "started_at": time.monotonic(),
+        "completed": 0,
+        "completed_labels": [],
+        "initial_snapshot": initial_snapshot,
+        "window_handle": initial_snapshot["handle"],
+        "process_id": initial_snapshot["process_id"],
+    }
+    return _continue_sequence(state, 0)
+
+
 def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
     params = parameters or {}
     steps, error = _validate_steps(params.get("steps"))
@@ -283,21 +317,14 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
             pending_title=pending,
         )
 
-    token = _claim_sequence()
-    if token is None:
-        return outcome.ask(
+    try:
+        snapshot = _capture_active_window()
+    except Exception as exc:
+        return outcome.failed(
             "run_ui_sequence",
-            "another UI sequence is already running or waiting for confirmation; wait for it to finish",
+            f"could not identify the active application window ({type(exc).__name__})",
         )
-
-    state = {
-        "id": token,
-        "steps": steps,
-        "started_at": time.monotonic(),
-        "completed": 0,
-        "completed_labels": [],
-    }
-    return _continue_sequence(state, 0)
+    return _start_sequence(steps, snapshot)
 
 
 TOOL = {
@@ -311,8 +338,9 @@ TOOL = {
         "or MenuItem label and the exact distinctive accessible element text "
         "that should newly appear after that click. Do not invent labels or "
         "expected results; inspect the UI first when needed. The sequence "
-        "re-inspects the active application before every step, invokes one "
-        "unique control using local Windows UI Automation, and verifies that "
+        "captures the active application window once and remains pinned to "
+        "that same window and process for every step, invokes one unique "
+        "control using local Windows UI Automation, and verifies that "
         "step's exact postcondition before starting the next. It stops on the "
         "first failed, ambiguous, unverified or unobservable step; it never "
         "blindly continues. Potentially high-impact steps pause for the human "
