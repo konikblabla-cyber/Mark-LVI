@@ -4,13 +4,15 @@ Checks DDG news once per day per topic; alerts JARVIS when a new headline appear
 No crypto, no finance, no uninvited tracking.
 """
 import hashlib
-import json
 import re
 from datetime import datetime
-from pathlib import Path
 
 
 # ── Blocked categories (never monitor regardless of what user says) ────────────
+
+MAX_MONITORS = 20
+MAX_TOPIC_LENGTH = 120
+
 
 _BLOCKED = {
     # Brand / asset names — spelled the same in every language
@@ -22,14 +24,19 @@ _BLOCKED = {
 }
 
 def _is_blocked(topic: str) -> bool:
-    t = topic.lower()
+    t = str(topic or "").lower()
     return any(word in t for word in _BLOCKED)
 
 
 # ── Slug / hash helpers ────────────────────────────────────────────────────────
 
 def _slug(topic: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", topic.lower().strip())[:40].strip("_")
+    slug = re.sub(r"[^a-z0-9]+", "_", topic.lower().strip())[:40].strip("_")
+    if slug:
+        return slug
+    # Keep non-Latin topic names distinct instead of mapping all of them to "".
+    return "topic_" + hashlib.sha256(topic.encode("utf-8")).hexdigest()[:12]
+
 
 def _title_hash(title: str) -> str:
     return hashlib.md5(title.encode("utf-8", errors="ignore")).hexdigest()[:12]
@@ -43,34 +50,35 @@ def _load() -> dict:
     return data if isinstance(data, dict) else {}
 
 def _save(monitors: dict) -> None:
-    from memory.memory_manager import load_memory, MEMORY_PATH, _lock
+    # All long-term state shares the same atomic writer and corruption guard.
+    from memory.memory_manager import load_memory, save_memory
     memory = load_memory()
     memory["monitors"] = monitors
-    with _lock:
-        MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        MEMORY_PATH.write_text(
-            json.dumps(memory, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+    save_memory(memory)
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def add_monitor(topic: str) -> str:
-    topic = topic.strip()
+    topic = str(topic or "").strip()
     if not topic:
         return "Please specify a topic to monitor."
+    if len(topic) > MAX_TOPIC_LENGTH:
+        return f"Topic is too long (maximum {MAX_TOPIC_LENGTH} characters)."
     if _is_blocked(topic):
         return "I don't monitor crypto or financial topics."
     monitors = _load()
     slug = _slug(topic)
     if slug in monitors:
-        return f"Already monitoring: {monitors[slug]['topic']}"
+        existing = monitors[slug]
+        return f"Already monitoring: {existing.get('topic', topic)}"
+    if len(monitors) >= MAX_MONITORS:
+        return f"Monitor limit reached ({MAX_MONITORS} topics). Remove one before adding another."
     monitors[slug] = {
-        "topic":      topic,
-        "added":      datetime.now().strftime("%Y-%m-%d"),
+        "topic": topic,
+        "added": datetime.now().strftime("%Y-%m-%d"),
         "last_check": "",
-        "last_hash":  "",
+        "last_hash": "",
     }
     _save(monitors)
     print(f"[Monitor] ➕ Added: {topic}")
