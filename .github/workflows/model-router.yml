@@ -21,6 +21,7 @@ on:
       - "actions/ui_checkbox.py"
       - "actions/ui_radio.py"
       - "actions/ui_tab.py"
+      - "actions/ui_list.py"
       - "core/_ui_dropdown_tests.py"
       - "core/_ui_calendar_tests.py"
       - "core/_ui_time_tests.py"
@@ -29,6 +30,7 @@ on:
       - "core/_ui_checkbox_tests.py"
       - "core/_ui_radio_tests.py"
       - "core/_ui_tab_tests.py"
+      - "core/_ui_list_tests.py"
       - "core/_ui_interaction_tests.py"
       - "core/_ui_interaction_windows_tests.py"
       - "core/confirm.py"
@@ -65,6 +67,7 @@ on:
       - "feature/verified-checkbox-state"
       - "feature/verified-radio-selection"
       - "feature/verified-tab-selection"
+      - "feature/verified-list-selection"
 
 jobs:
   router:
@@ -78,7 +81,7 @@ jobs:
         run: python -m pip install numpy
       - name: Compile changed Python modules
         run: |
-          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
+          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
       - name: Run offline router tests
         run: python -m core._model_router_tests
       - name: Run offline capability tests
@@ -111,6 +114,8 @@ jobs:
         run: python -m core._ui_radio_tests
       - name: Run verified tab tests
         run: python -m core._ui_tab_tests
+      - name: Run verified list tests
+        run: python -m core._ui_list_tests
 
   windows-uia:
     runs-on: windows-latest
@@ -122,6 +127,6 @@ jobs:
       - name: Install Windows UI Automation dependencies
         run: python -m pip install pywinauto pywin32
       - name: Compile UI Automation modules
-        run: python -m py_compile actions/screen_understanding.py actions/ui_interaction.py actions/ui_sequence.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_screen_understanding_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py core/_confirm_tests.py core/_ui_sequence_tests.py
+        run: python -m py_compile actions/screen_understanding.py actions/ui_interaction.py actions/ui_sequence.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py core/confirm.py core/_screen_understanding_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py core/_confirm_tests.py core/_ui_sequence_tests.py
       - name: Run native Windows UI Automation integration tests
         run: python -m core._ui_interaction_windows_tests
