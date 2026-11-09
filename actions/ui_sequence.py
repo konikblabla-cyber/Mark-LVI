@@ -148,19 +148,23 @@ def _stop_with_step_result(state: dict, index: int, result: str) -> str:
         "total_steps": len(state["steps"]),
         "failed_step": index + 1,
         "step_status": result.split(" ", 1)[0],
-        "step_detail": result[:280],
     }
     _release_sequence(state["id"])
     reason = (
         f"step {index + 1} was not verified; all later steps were skipped. "
         "Inspect the application before deciding whether to retry."
     )
-    if result.startswith("status=ask "):
-        return outcome.ask(
+    # An ASK result is only accurate when no earlier step has happened.
+    # Once any prior step was verified, the whole sequence is partial and must
+    # be reported as unverified, never as "nothing was done".
+    if completed:
+        return outcome.unverified(
             "run_ui_sequence",
-            reason,
+            f"the sequence stopped after {completed} verified step(s); {reason}",
             **facts,
         )
+    if result.startswith("status=ask "):
+        return outcome.ask("run_ui_sequence", reason, **facts)
     if result.startswith("status=unverified "):
         return outcome.unverified(
             "run_ui_sequence",
