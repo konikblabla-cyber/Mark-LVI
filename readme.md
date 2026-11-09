@@ -235,35 +235,23 @@ There is also an **output volume slider**, and it belongs to the device chosen t
 
 ### 📱 The phone dashboard
 
-**It is plain HTTP on your local network, and that is a decision rather than an
-oversight.** This release tried making TLS mandatory and it was a mistake worth
-writing down: the certificate has to be self-signed, because no certificate
-authority will vouch for `192.168.1.108`, and a phone treats a self-signed
-certificate as an attack. Chrome shows a full-page interstitial. A QR scanner
-that opens links in its own in-app browser often shows a blank page and offers
-no way through at all, because those views have no "Advanced" button by design.
+**HTTPS is now the default for remote access.** JARVIS generates a machine-specific
+self-signed certificate on first run. Accept it once on the phone when prompted.
+The dashboard listens on the LAN only when TLS is active; if HTTPS is explicitly
+disabled, the certificate cannot be created, or the config cannot be read, it
+binds to `127.0.0.1` instead. Remote control commands and pairing credentials
+are never exposed over plain HTTP on the local network.
 
-A dashboard nobody can reach is not a more secure product than one they can.
-HTTPS is opt-in — `"dashboard_https": true` in `config/api_keys.json`, and the
-certificate is generated for you — and everything else that actually guards the
-door stayed:
+The dashboard keeps its other protections:
 
-* The pairing key is **eight characters through PBKDF2 at 200,000 rounds**,
-  not six through a single round of SHA-256. That was an offline search
-  measured in seconds on a GPU once one encrypted command had been captured;
-  it is now about a hundred thousand times more expensive per guess, for 80 ms
-  paid once at pairing time.
+* The pairing key is **eight characters through PBKDF2 at 200,000 rounds**.
 * `/login` is **rate limited** — six wrong keys and the address waits five
-  minutes. There was no limit at all before.
-* **Tokens expire.** One issued once used to work until the process ended.
-* **"Revoke all devices" now ends the live sessions** it always claimed to. It
-  cleared the remembered devices and left every session those devices had
-  already opened working, which is the one case anybody presses it for.
-* When HTTPS *is* switched on, commands are **AES-256-GCM**, not AES-CBC. CBC
-  concealed a message and did nothing to stop one being changed; an attacker on
-  the same network could flip bits and the assistant would act on whatever fell
-  out. Over plain HTTP there is no `crypto.subtle` and so no encryption at all —
-  the page says `NO ENC` on its own badge rather than pretending otherwise.
+  minutes.
+* **Tokens expire** after twelve hours.
+* **"Revoke all devices" ends their live sessions** as well as remembered
+  device tokens.
+* Over HTTPS, commands use **AES-256-GCM**. The plain-HTTP loopback-only mode
+  is for this computer and does not provide remote phone access.
 
 **And Windows was blocking it, per executable, invisibly.** This produced the
 strangest report of the release: the dashboard worked when JARVIS was started
@@ -543,7 +531,7 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-LVI.git
+git clone https://github.com/konikblabla-cyber/Mark-LVI.git
 cd Mark-LVI
 python setup.py        # installs deps for YOUR OS + the browser automation engine
 python main.py
@@ -657,7 +645,7 @@ Mark LVI/
 │   ├── config_manager.py     # api_keys.json access — key, OS, name, voice, colour, toggles
 │   └── long_term.json        # Persistent store — created on first run
 ├── dashboard/                # Phone control — paired by QR code, one-time key
-│   ├── server.py             # FastAPI + uvicorn; HTTP by default, HTTPS opt-in
+│   ├── server.py             # FastAPI + uvicorn; HTTPS remote access, loopback-only otherwise
 │   └── static/               # The phone page and its login screen
 ├── core/
 │   ├── outcome.py            # What a tool tells the model: done / unverified / failed /
