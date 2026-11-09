@@ -201,10 +201,12 @@ class UIFormTests(unittest.TestCase):
             "context": [{"role": "Text", "name": "Payment details"}],
             "fields": [],
         }
-        with patch.object(ui_form, "_form_snapshot", return_value=snapshot), \\
-             patch.object(ui_form, "_run_fill_with_timeout") as fill, \\
-             patch("core.confirm.pending_title", return_value=""), \\
-             patch("core.confirm.request", return_value="[CONFIRMATION_PENDING]") as request:
+        with (
+            patch.object(ui_form, "_form_snapshot", return_value=snapshot),
+            patch.object(ui_form, "_run_fill_with_timeout") as fill,
+            patch("core.confirm.pending_title", return_value=""),
+            patch("core.confirm.request", return_value="[CONFIRMATION_PENDING]") as request,
+        ):
             result = ui_form.fill_ui_fields({"fields": fields})
         self.assertEqual(result, "[CONFIRMATION_PENDING]")
         request.assert_called_once()
@@ -218,12 +220,14 @@ class UIFormTests(unittest.TestCase):
             "context": [{"role": "Text", "name": "Profile"}],
             "fields": [],
         }
-        with patch.object(ui_form, "_form_snapshot", return_value=snapshot), \\
-             patch.object(
-                 ui_form, "_run_fill_with_timeout",
-                 return_value="status=done action=fill_ui_fields fields_filled=1",
-             ) as fill, \\
-             patch("core.confirm.request") as request:
+        with (
+            patch.object(ui_form, "_form_snapshot", return_value=snapshot),
+            patch.object(
+            ui_form, "_run_fill_with_timeout",
+            return_value="status=done action=fill_ui_fields fields_filled=1",
+            ) as fill,
+            patch("core.confirm.request") as request,
+        ):
             result = ui_form.fill_ui_fields({"fields": fields})
         self.assertIn("status=done", result)
         fill.assert_called_once_with(77, 4242, fields)
