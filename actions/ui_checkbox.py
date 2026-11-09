@@ -1,6 +1,8 @@
 """Set one exact Windows checkbox to a requested state and verify TogglePattern."""
 from __future__ import annotations
 
+import time
+
 from core import outcome
 from actions import ui_interaction as ui
 
@@ -35,13 +37,24 @@ def _set_toggle_state(pattern, desired, cancelled):
         pattern.Toggle()
     except Exception:
         return "uncertain", "the checkbox may have changed but the provider raised an error"
-    try:
-        actual = int(pattern.CurrentToggleState)
-    except Exception:
-        return "uncertain", "the checkbox may have changed but its state could not be verified"
-    if actual == target:
-        return "changed", ""
-    return "unverified", "the checkbox did not report the requested state after toggling"
+    # Some UIA providers publish the new toggle state asynchronously.
+    # Poll the read-only state briefly, but never issue a second Toggle().
+    deadline = time.monotonic() + min(1.5, ui._VERIFY_TIMEOUT_SECONDS)
+    while True:
+        if cancelled.is_set():
+            return "uncertain", "the operation expired after Toggle; inspect before retrying"
+        try:
+            actual = int(pattern.CurrentToggleState)
+        except Exception:
+            return "uncertain", "the checkbox may have changed but its state could not be verified"
+        if actual == target:
+            return "changed", ""
+        if actual not in (0, 1):
+            return "unverified", "the checkbox reported an unknown state after toggling"
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "unverified", "the checkbox did not report the requested state after toggling"
+        time.sleep(min(ui._VERIFY_INTERVAL, remaining))
 
 
 def _set_on_window(window_handle, process_id, checkbox_label, desired, cancelled):
