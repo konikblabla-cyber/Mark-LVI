@@ -51,6 +51,37 @@ class ConfirmationCleanupTests(unittest.TestCase):
         self.assertEqual(first_cleaned, ["first"])
         self.assertEqual(first_run, [])
 
+    def test_concurrent_requests_cannot_overwrite_the_single_hud_slot(self):
+        barrier = threading.Barrier(2)
+        results = {}
+        cleaned = []
+        def request(name):
+            results[name] = confirm.request(
+                name, f"{name} action", "detail",
+                lambda: f"{name} executed",
+                on_cancel=lambda: cleaned.append(name),
+            )
+        with patch.object(
+            confirm, "pending_title",
+            side_effect=lambda: (barrier.wait(timeout=2) and ""),
+        ):
+            threads = [
+                threading.Thread(target=request, args=("first",)),
+                threading.Thread(target=request, args=("second",)),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=3)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        pending = confirm.pending_title()
+        self.assertIn(pending, {"first action", "second action"})
+        self.assertEqual(len(self.shown), 1)
+        self.assertEqual(sum("[CONFIRMATION_PENDING]" in value for value in results.values()), 1)
+        self.assertEqual(sum("[CONFIRMATION_BUSY]" in value for value in results.values()), 1)
+        self.assertEqual(len(cleaned), 1)
+        confirm.resolve(False)
+
     def test_cancel_releases_action_owned_state(self):
         cleaned = []
         result = confirm.request(
