@@ -24,6 +24,10 @@ class UISequenceTests(unittest.TestCase):
         return {"action": "fill_text", "field_label": label, "text": text}
 
     @staticmethod
+    def _tree_step(label, expanded):
+        return {"action": "set_tree_item_expanded", "item_label": label, "expanded": expanded}
+
+    @staticmethod
     def _snapshot(label, role="Button"):
         return {
             "handle": 101,
@@ -56,6 +60,32 @@ class UISequenceTests(unittest.TestCase):
             "text": "Quarterly plan",
         })
         self.assertEqual(steps[1]["action"], "click")
+
+    def test_validation_accepts_tree_expand_and_collapse_steps(self):
+        steps, error = ui_sequence._validate_steps([
+            self._tree_step("Projects", True),
+            self._step("Open panel", "Panel ready"),
+            self._tree_step("Projects", False),
+        ])
+        self.assertEqual(error, "")
+        self.assertEqual(steps[0], self._tree_step("Projects", True))
+        self.assertEqual(steps[2], self._tree_step("Projects", False))
+
+    def test_validation_rejects_malformed_or_sensitive_tree_steps(self):
+        invalid = [
+            {"action": "set_tree_item_expanded", "item_label": "Projects", "expanded": "true"},
+            {"action": "set_tree_item_expanded", "item_label": "", "expanded": True},
+            {"action": "set_tree_item_expanded", "item_label": "PIN", "expanded": True},
+            {"action": "set_tree_item_expanded", "item_label": "Projects", "expanded": True, "extra": 1},
+            {"action": "set_tree_item_expanded", "item_label": "x" * 121, "expanded": False},
+        ]
+        for step in invalid:
+            with self.subTest(step=step):
+                validated, error = ui_sequence._validate_steps([
+                    step, self._step("Open panel", "Panel ready"),
+                ])
+                self.assertIsNone(validated)
+                self.assertTrue(error)
 
     def test_validation_rejects_malformed_fill_text_steps(self):
         invalid = [
@@ -263,6 +293,107 @@ class UISequenceTests(unittest.TestCase):
         self.assertTrue(resumed.startswith("status=done action=run_ui_sequence "), resumed)
         self.assertIn("steps_completed=2", resumed)
         self.assertEqual(click.call_count, 2)
+
+    def test_tree_expand_then_click_runs_in_order_and_uses_pinned_window(self):
+        initial = self._snapshot("Application")
+        click_snapshot = self._snapshot("Open panel")
+        events = []
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=click_snapshot) as snapshot, \
+             patch.object(ui_sequence.ui_tree, "_requires_confirmation", return_value=False), \
+             patch.object(
+                 ui_sequence.ui_tree, "_set_tree_item_expanded_in_window",
+                 side_effect=lambda *args: (
+                     events.append(("tree", args[0], args[1], args[2], args[3]))
+                     or "status=done action=set_tree_item_expanded verified=true expanded=true"
+                 ),
+             ) as expand, \
+             patch.object(
+                 ui_sequence.ui, "_click_and_verify",
+                 side_effect=lambda *args: (
+                     events.append(("click", args[0]))
+                     or "status=done action=click_and_verify verified=true"
+                 ),
+             ) as click, \
+             patch("core.confirm.pending_title", return_value=""):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._tree_step("Projects", True),
+                    self._step("Open panel", "Panel ready"),
+                ],
+            })
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        self.assertIn("steps_completed=2", result)
+        self.assertEqual(events, [
+            ("tree", "Projects", True, 101, 4321),
+            ("click", "Open panel"),
+        ])
+        expand.assert_called_once_with("Projects", True, 101, 4321)
+        click.assert_called_once()
+        snapshot.assert_called_once_with(101, 4321)
+
+    def test_unverified_tree_step_stops_before_click(self):
+        initial = self._snapshot("Application")
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
+             patch.object(ui_sequence.ui_tree, "_requires_confirmation", return_value=False), \
+             patch.object(
+                 ui_sequence.ui_tree, "_set_tree_item_expanded_in_window",
+                 return_value="status=unverified action=set_tree_item_expanded reason=state_not_observed",
+             ) as expand, \
+             patch.object(ui_sequence.ui, "_snapshot") as snapshot, \
+             patch.object(ui_sequence.ui, "_click_and_verify") as click, \
+             patch("core.confirm.pending_title", return_value=""):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._tree_step("Projects", True),
+                    self._step("Open panel", "Panel ready"),
+                ],
+            })
+        self.assertTrue(result.startswith("status=unverified action=run_ui_sequence "), result)
+        self.assertIn("failed_step=1", result)
+        expand.assert_called_once_with("Projects", True, 101, 4321)
+        snapshot.assert_not_called()
+        click.assert_not_called()
+
+    def test_high_impact_tree_step_waits_for_hud_then_resumes(self):
+        from core import confirm
+        initial = self._snapshot("Application")
+        click_snapshot = self._snapshot("Open panel")
+        requests = []
+        def fake_request(**kwargs):
+            requests.append(kwargs)
+            return "[CONFIRMATION_PENDING]"
+
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=click_snapshot), \
+             patch.object(ui_sequence.ui_tree, "_requires_confirmation", return_value=True), \
+             patch.object(
+                 ui_sequence.ui_tree, "_set_tree_item_expanded_in_window",
+                 return_value="status=done action=set_tree_item_expanded verified=true expanded=true",
+             ) as expand, \
+             patch.object(
+                 ui_sequence.ui, "_click_and_verify",
+                 return_value="status=done action=click_and_verify verified=true",
+             ) as click, \
+             patch.object(confirm, "pending_title", return_value=""), \
+             patch.object(confirm, "request", side_effect=fake_request):
+            pending = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._tree_step("Privacy", True),
+                    self._step("Open panel", "Panel ready"),
+                ],
+            })
+            self.assertEqual(pending, "[CONFIRMATION_PENDING]")
+            expand.assert_not_called()
+            click.assert_not_called()
+            self.assertEqual(len(requests), 1)
+            self.assertIn("Privacy", requests[0]["title"])
+            resumed = requests[0]["run"]()
+
+        self.assertTrue(resumed.startswith("status=done action=run_ui_sequence "), resumed)
+        self.assertIn("steps_completed=2", resumed)
+        expand.assert_called_once_with("Privacy", True, 101, 4321)
+        click.assert_called_once()
 
     def test_two_critical_steps_request_two_distinct_hud_confirmations(self):
         from core import confirm
