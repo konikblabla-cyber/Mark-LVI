@@ -381,7 +381,7 @@ def _native_tree_item_handle() -> int:
     # The single known root is the first inserted child of TVI_ROOT.
     tree = _user32.GetDlgItem(_user32.FindWindowW(_CLASS_NAME, _WINDOW_TITLE), _TREE_ID)
     # TVM_GETNEXTITEM / TVGN_ROOT retrieves the root item handle.
-    root = _user32.SendMessageW(tree, 0x110A, 5, 0)  # TVGN_ROOT
+    root = _user32.SendMessageW(tree, 0x110A, 0, 0)  # TVGN_ROOT
     if not root:
         raise AssertionError("native tree fixture has no root item")
     return int(root)
