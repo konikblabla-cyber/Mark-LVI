@@ -105,6 +105,21 @@ def _has_exact_expected_text(records: list[dict], expected: str) -> bool:
     )
 
 
+def _valid_window_process_id(actual, expected=None) -> bool:
+    try:
+        actual_pid = int(actual)
+    except (TypeError, ValueError):
+        return False
+    if actual_pid <= 0:
+        return False
+    if expected is None:
+        return True
+    try:
+        return actual_pid == int(expected)
+    except (TypeError, ValueError):
+        return False
+
+
 def _control_signature(info, rect) -> dict:
     automation_id = ""
     for attr in ("automation_id", "auto_id"):
@@ -269,7 +284,7 @@ def _collect_accessible_controls(window, include_wrappers: bool = False):
     return records, clickables
 
 
-def _read_window_snapshot(window_handle=None) -> dict:
+def _read_window_snapshot(window_handle=None, expected_process_id=None) -> dict:
     """Read one specific window; None means the current active window.
 
     The handle form is intentionally independent of foreground focus so a
@@ -296,18 +311,23 @@ def _read_window_snapshot(window_handle=None) -> dict:
     if window_handle is not None and int(handle) != int(window_handle):
         raise RuntimeError("the target window handle changed")
 
+    process_id = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(process_id, expected_process_id):
+        raise RuntimeError(
+            "the window handle no longer belongs to the original application process"
+        )
     records, clickables = _collect_accessible_controls(window)
     return {
         "handle": int(handle),
-        "process_id": int(getattr(window.element_info, "process_id", 0) or 0),
+        "process_id": int(process_id),
         "records": records,
         "clickables": clickables,
     }
 
 
-def _snapshot(window_handle=None) -> dict:
+def _snapshot(window_handle=None, expected_process_id=None) -> dict:
     completed, value, error = _run_uia(
-        lambda: _read_window_snapshot(window_handle),
+        lambda: _read_window_snapshot(window_handle, expected_process_id),
         _SNAPSHOT_TIMEOUT_SECONDS,
         exclusive_lock=_SNAPSHOT_LOCK,
     )
@@ -324,8 +344,8 @@ def _snapshot(window_handle=None) -> dict:
     return value
 
 
-def _invoke_on_window(window_handle: int, label: str,
-                      original_signature: dict,
+def _invoke_on_window(window_handle: int, expected_process_id: int,
+                      label: str, original_signature: dict,
                       cancelled: threading.Event) -> tuple[str, str]:
     """Re-find and invoke the same control inside the target window."""
     from pywinauto import Desktop
@@ -334,6 +354,9 @@ def _invoke_on_window(window_handle: int, label: str,
     window = desktop.window(handle=int(window_handle)).wrapper_object()
     if not window.is_visible():
         return "missing_window", "the original window is no longer visible"
+    process_id = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(process_id, expected_process_id):
+        return "changed_window", "the window handle now belongs to another process"
 
     _records, clickables = _collect_accessible_controls(
         window, include_wrappers=True,
@@ -391,7 +414,7 @@ def _wait_for_expected_result(expected: str, snapshot_reader,
 
 
 def _click_and_verify(button_label: str, expected_result: str,
-                      expected_window_handle: int,
+                      expected_window_handle: int, expected_process_id: int,
                       original_signature: dict) -> str:
     label = " ".join(str(button_label or "").split())
     expected = " ".join(str(expected_result or "").split())
@@ -405,7 +428,7 @@ def _click_and_verify(button_label: str, expected_result: str,
         )
 
     try:
-        before = _snapshot(expected_window_handle)
+        before = _snapshot(expected_window_handle, expected_process_id)
     except Exception as exc:
         return outcome.failed(
             "click_and_verify",
@@ -442,7 +465,8 @@ def _click_and_verify(button_label: str, expected_result: str,
 
     completed, invocation, error = _run_uia(
         lambda cancelled: _invoke_on_window(
-            expected_window_handle, label, original_signature, cancelled,
+            expected_window_handle, expected_process_id, label,
+            original_signature, cancelled,
         ),
         _INVOKE_TIMEOUT_SECONDS,
         exclusive_lock=_INVOKE_LOCK,
@@ -481,7 +505,7 @@ def _click_and_verify(button_label: str, expected_result: str,
 
     verified = _wait_for_expected_result(
         expected,
-        lambda: _snapshot(expected_window_handle),
+        lambda: _snapshot(expected_window_handle, expected_process_id),
     )
     if verified:
         return outcome.done(
@@ -533,6 +557,7 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
         )
 
     handle = snapshot["handle"]
+    process_id = snapshot["process_id"]
     signature = {
         "role": matches[0]["role"],
         "automation_id": matches[0].get("automation_id", ""),
@@ -558,10 +583,12 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
                 f"identified before this prompt, then look for the exact text: "
                 f"{expected}. Confirm only if this is the intended action."
             ),
-            run=lambda: _click_and_verify(label, expected, handle, signature),
+            run=lambda: _click_and_verify(
+                label, expected, handle, process_id, signature,
+            ),
         )
 
-    return _click_and_verify(label, expected, handle, signature)
+    return _click_and_verify(label, expected, handle, process_id, signature)
 
 
 TOOL = {
