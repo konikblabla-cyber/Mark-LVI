@@ -346,7 +346,7 @@ def _serve_native_window() -> int:
         child_item = _TVINSERTSTRUCTW()
         child_item.hParent = ctypes.c_void_p(int(root_handle))
         child_item.hInsertAfter = tvi_last
-        child_item.item.mask = 0x0001 | 0x0040
+        child_item.itemex.mask = 0x0001 | 0x0040
         child_item.itemex.pszText = "Reports"
         child_item.itemex.cChildren = 0
         child_handle = _user32.SendMessageW(
