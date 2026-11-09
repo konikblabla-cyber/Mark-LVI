@@ -52,6 +52,14 @@ _VERIFY_TIMEOUT_SECONDS = 6.0
 _VERIFY_ATTEMPTS = 8
 _VERIFY_INTERVAL = 0.25
 _RECT_TOLERANCE = 8
+_MAX_INPUT_CHARS = 4000
+_SENSITIVE_INPUT_MARKERS = (
+    "password", "passwd", "passcode", "pin code", "security code",
+    "one-time code", "otp", "recovery code", "verification code",
+    "authentication code", "credit card", "card number", "cvv", "cvc",
+    "iban", "bank account", "routing number", "private key", "api key",
+    "access token", "secret key", "security token",
+)
 _COMTYPES_IMPORT_LOCK = threading.Lock()
 _SNAPSHOT_LOCK = threading.Lock()
 _INVOKE_LOCK = threading.Lock()
@@ -396,6 +404,199 @@ def _invoke_on_window(window_handle: int, expected_process_id: int,
         return "cancelled", "the operation expired before invoking the control"
     invoke_pattern.Invoke()
     return "invoked", ""
+
+
+
+def _is_sensitive_input_label(label: str) -> bool:
+    normal = _normalise(label)
+    if not normal:
+        return True
+    words = set(re.findall(r"[\w-]+", normal))
+    if "pin" in words or "otp" in words:
+        return True
+    return any(marker in normal for marker in _SENSITIVE_INPUT_MARKERS)
+
+
+def _looks_like_secret_payload(value: str) -> bool:
+    text = value.strip()
+    upper = text.upper()
+    if "-----BEGIN " in upper and "PRIVATE KEY-----" in upper:
+        return True
+    compact = not any(ch.isspace() for ch in text)
+    if compact and len(text) >= 40 and re.fullmatch(r"[A-Za-z0-9_+/=-]+", text):
+        return True
+    return bool(re.match(
+        r"(?i)^(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{16,}|"
+        r"github_pat_[A-Za-z0-9_]{16,}|xox[baprs]-[A-Za-z0-9-]{16,})$",
+        text,
+    ))
+
+
+def _set_and_verify_value_pattern(pattern, text: str,
+                                  cancelled: threading.Event) -> tuple[str, str]:
+    """Set one already-identified ValuePattern and compare its value locally."""
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before changing the field"
+    try:
+        if bool(pattern.CurrentIsReadOnly):
+            return "readonly", "the target field is read-only"
+        current_value = str(pattern.CurrentValue or "")
+    except Exception:
+        return "unsupported_value_pattern", "the field did not expose a readable ValuePattern"
+    if current_value == text:
+        return "already_set", ""
+    if _looks_like_secret_payload(current_value):
+        return (
+            "sensitive_existing_value",
+            "the existing field content resembles a credential or opaque token; it was not changed",
+        )
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before changing the field"
+    try:
+        pattern.SetValue(text)
+    except Exception:
+        # SetValue may have reached the application before the provider failed.
+        return "invoke_uncertain", "the field setter raised an error; its result is unknown"
+    try:
+        actual_value = str(pattern.CurrentValue or "")
+    except Exception:
+        return "invoke_uncertain", "the field was changed but its value could not be verified"
+    if actual_value == text:
+        return "filled", ""
+    return "verification_mismatch", "the field value did not match the requested text after setting"
+
+
+def _fill_text_on_window(window_handle: int, expected_process_id: int,
+                         field_label: str, text: str,
+                         cancelled: threading.Event) -> tuple[str, str]:
+    """Find one accessible non-sensitive Edit field and fill it locally."""
+    from pywinauto import Desktop
+
+    desktop = Desktop(backend="uia")
+    window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if not window.is_visible():
+        return "missing_window", "the original window is no longer visible"
+    process_id = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(process_id, expected_process_id):
+        return "changed_window", "the window handle now belongs to another process"
+
+    wanted = _normalise(field_label)
+    matches = []
+    for scanned, control in enumerate(window.descendants()):
+        if scanned >= _MAX_SCANNED_CONTROLS:
+            break
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != "Edit":
+                continue
+            if bool(getattr(info, "is_password", False)):
+                continue
+            if bool(getattr(info, "is_offscreen", False)):
+                continue
+            name = str(getattr(info, "name", "") or "")
+            if _is_sensitive_input_label(name):
+                continue
+            if _normalise(name) != wanted:
+                continue
+            rect = control.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0:
+                continue
+            if not control.is_enabled():
+                continue
+            matches.append(control)
+        except Exception:
+            continue
+
+    if not matches:
+        return "missing_field", "no visible, enabled, non-sensitive Edit field has that exact accessible label"
+    if len(matches) != 1:
+        return "ambiguous_field", "more than one Edit field has that exact accessible label"
+
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before changing the field"
+    try:
+        value_pattern = matches[0].iface_value
+    except Exception:
+        return "unsupported_value_pattern", "the field does not expose UI Automation ValuePattern"
+    return _set_and_verify_value_pattern(value_pattern, text, cancelled)
+
+
+def _fill_text_and_verify(field_label: str, text: str,
+                          expected_window_handle: int,
+                          expected_process_id: int,
+                          action_name: str = "fill_text_and_verify") -> str:
+    """Fill one exact safe Edit field; the typed value never leaves this function."""
+    label = " ".join(str(field_label or "").split())
+    value = str(text) if isinstance(text, str) else ""
+    if not label or len(label) > 120:
+        return outcome.failed(
+            action_name, "field_label is missing or too long",
+        )
+    if _is_sensitive_input_label(label):
+        return outcome.failed(
+            action_name,
+            "credential, verification-code and payment fields are not supported",
+            field=label,
+        )
+    if not value or len(value) > _MAX_INPUT_CHARS or "\x00" in value:
+        return outcome.failed(
+            action_name,
+            f"text must contain 1 to {_MAX_INPUT_CHARS} characters and no NUL bytes",
+            field=label,
+        )
+    if _looks_like_secret_payload(value):
+        return outcome.failed(
+            action_name,
+            "the text resembles a credential, key or opaque access token; it was not entered",
+            field=label,
+        )
+
+    completed, result, error = _run_uia(
+        lambda cancelled: _fill_text_on_window(
+            expected_window_handle, expected_process_id,
+            label, value, cancelled,
+        ),
+        _INVOKE_TIMEOUT_SECONDS,
+        exclusive_lock=_INVOKE_LOCK,
+        pass_cancel_event=True,
+    )
+    if not completed:
+        return outcome.unverified(
+            action_name,
+            "UI Automation did not return within 4 seconds; the field may have changed. Do not retry blindly.",
+            field=label, timed_out=True,
+        )
+    if error is not None:
+        return outcome.unverified(
+            action_name,
+            f"UI Automation raised {type(error).__name__}; whether the field changed is unknown. Do not retry blindly.",
+            field=label,
+        )
+
+    status, reason = result
+    if status == "filled":
+        return outcome.done(
+            action_name, field=label, verified=True, changed=True,
+        )
+    if status == "already_set":
+        return outcome.done(
+            action_name, field=label, verified=True, changed=False,
+        )
+    if status in {"invoke_uncertain", "verification_mismatch"}:
+        return outcome.unverified(
+            action_name, reason, field=label,
+        )
+    if status == "ambiguous_field":
+        return outcome.ask(
+            action_name, reason, field=label,
+        )
+    if status == "sensitive_existing_value":
+        return outcome.failed(
+            action_name, reason, field=label,
+        )
+    return outcome.failed(
+        action_name, reason or status, field=label,
+    )
 
 
 def _wait_for_expected_result(expected: str, snapshot_reader,

@@ -47,21 +47,49 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
     for index, raw in enumerate(raw_steps, start=1):
         if not isinstance(raw, dict):
             return None, f"step {index} must be an object"
-        if set(raw) != {"button_label", "expected_result"}:
-            return None, (
-                f"step {index} must contain only button_label and expected_result"
-            )
-        label = raw.get("button_label")
-        expected = raw.get("expected_result")
-        if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
-            return None, f"step {index} has a missing or overlong button_label"
-        if (not isinstance(expected, str) or not expected.strip()
-                or len(expected.strip()) > 160):
-            return None, f"step {index} has a missing or overlong expected_result"
-        validated.append({
-            "button_label": " ".join(label.split()),
-            "expected_result": " ".join(expected.split()),
-        })
+
+        action = raw.get("action", "click")
+        if action == "click":
+            allowed = {"button_label", "expected_result"}
+            if set(raw) not in (allowed, allowed | {"action"}):
+                return None, (
+                    f"click step {index} must contain only button_label and expected_result"
+                )
+            label = raw.get("button_label")
+            expected = raw.get("expected_result")
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong button_label"
+            if (not isinstance(expected, str) or not expected.strip()
+                    or len(expected.strip()) > 160):
+                return None, f"step {index} has a missing or overlong expected_result"
+            validated.append({
+                "action": "click",
+                "button_label": " ".join(label.split()),
+                "expected_result": " ".join(expected.split()),
+            })
+            continue
+
+        if action == "fill_text":
+            allowed = {"action", "field_label", "text"}
+            if set(raw) != allowed:
+                return None, (
+                    f"fill_text step {index} must contain only action, field_label and text"
+                )
+            label = raw.get("field_label")
+            value = raw.get("text")
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong field_label"
+            if not isinstance(value, str) or not value or len(value) > 4000 or "\x00" in value:
+                return None, f"step {index} text must contain 1 to 4000 characters and no NUL bytes"
+            validated.append({
+                "action": "fill_text",
+                "field_label": " ".join(label.split()),
+                "text": value,
+            })
+            continue
+
+        return None, f"step {index} action must be click or fill_text"
+
     return validated, ""
 
 
@@ -126,9 +154,9 @@ def _stop_with_step_result(state: dict, index: int, result: str) -> str:
         f"step {index + 1} was not verified; all later steps were skipped. "
         "Inspect the application before deciding whether to retry."
     )
-    # ASK means no work has happened yet. Once earlier steps completed, using
-    # that status would falsely imply the sequence did nothing. Report partial
-    # progress as unverified and spell out exactly how many steps were done.
+    # An ASK result is only accurate when no earlier step has happened.
+    # Once any prior step was verified, the whole sequence is partial and must
+    # be reported as unverified, never as "nothing was done".
     if completed:
         return outcome.unverified(
             "run_ui_sequence",
@@ -175,6 +203,21 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            if step["action"] == "fill_text":
+                # Filling uses the exact original HWND/PID directly and does
+                # not enumerate or return editable-field contents.
+                result = ui._fill_text_and_verify(
+                    step["field_label"], step["text"],
+                    state["window_handle"], state["process_id"],
+                )
+                if not result.startswith("status=done "):
+                    return _stop_with_step_result(state, index, result)
+                state["completed"] += 1
+                state["completed_labels"].append(step["field_label"])
+                if index == 0:
+                    state.pop("initial_snapshot", None)
+                continue
+
             if index == 0 and state.get("initial_snapshot") is not None:
                 snapshot = state.pop("initial_snapshot")
             else:
@@ -334,14 +377,19 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Run 2–8 exact UI clicks sequentially, verifying each before continuing.",
+    "brief": "Fill safe labelled fields and click exact controls in a verified 2–8 step Windows UI workflow.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
-        "ordered steps. Each step must name one exact visible Button, Hyperlink "
-        "or MenuItem label and the exact distinctive accessible element text "
-        "that should newly appear after that click. Do not invent labels or "
-        "expected results; inspect the UI first when needed. The sequence "
+        "ordered steps. A click step must name one exact visible Button, "
+        "Hyperlink or MenuItem label and the exact distinctive accessible "
+        "element text that should newly appear after that click. A fill_text "
+        "step must name one exact accessible, non-sensitive Edit field and "
+        "the literal text to enter; MARK verifies it locally with UI Automation "
+        "ValuePattern without returning the field value to the model. Never "
+        "fill credentials, verification codes, payment details, keys or tokens. "
+        "Do not invent labels or expected results; inspect the UI first when "
+        "needed. The sequence "
         "captures the active application window once and remains pinned to "
         "that same window and process for every step, invokes one unique "
         "control using local Windows UI Automation, and verifies that "
@@ -350,8 +398,10 @@ TOOL = {
         "blindly continues. Potentially high-impact steps pause for the human "
         "HUD confirmation, and remaining steps resume only after that step is "
         "verified. Cancellation or expired confirmation releases the sequence. "
-        "This action does not type text, read editable fields, use screenshots, "
-        "coordinates, clipboard, scripts, background polling or extra model/API "
+        "Text entry is limited to explicitly requested non-sensitive Edit "
+        "fields; it does not read or return existing field contents. It never "
+        "uses screenshots, coordinates, clipboard, scripts, background polling "
+        "or extra model/API "
         "calls. Only progress/status is returned to the conversation; the UIA "
         "tree remains local. Progress is held in memory only and is not resumed "
         "after MARK restarts. Never use for payments, purchases, account deletion "
@@ -363,20 +413,33 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered button-click steps; every step requires an exact label and a newly appearing exact result.",
+                "description": "Two to eight ordered steps. Use click with button_label and expected_result, or fill_text with field_label and literal text.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
+                        "action": {
+                            "type": "STRING",
+                            "enum": ["click", "fill_text"],
+                            "description": "Use click for a verified button press or fill_text for one safe text field.",
+                        },
                         "button_label": {
                             "type": "STRING",
-                            "description": "Exact accessible label of one visible button, link or menu item.",
+                            "description": "For click: exact accessible label of one visible button, link or menu item.",
                         },
                         "expected_result": {
                             "type": "STRING",
-                            "description": "Exact accessible name of a distinctive UI element that should newly appear after this click.",
+                            "description": "For click: exact accessible name of a distinctive UI element that should newly appear after the click.",
+                        },
+                        "field_label": {
+                            "type": "STRING",
+                            "description": "For fill_text: exact accessible label of one visible, non-sensitive Edit field.",
+                        },
+                        "text": {
+                            "type": "STRING",
+                            "description": "For fill_text: literal non-secret text to enter; never use for credentials or payment details.",
                         },
                     },
-                    "required": ["button_label", "expected_result"],
+                    "required": ["action"],
                 },
             },
         },
