@@ -36,7 +36,7 @@ _PATTERNS = (
 def _normalise_sensitive_text(value):
     text = " ".join(str(value or "").split())
     # Split common camelCase AutomationIds so "apiKeyField" is filtered too.
-    text = re.sub(r"([a-z0-9])([A-Z])", r"\\1 \\2", text).casefold()
+    text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text).casefold()
     return text
 
 
@@ -97,7 +97,7 @@ def format_picker_diagnostics(records, limit=_MAX_ITEMS):
             break
         lines.append(f"- {role}: {label}{suffix}; patterns: {detail}")
 
-    return "\\n".join(lines) if lines else (
+    return "\n".join(lines) if lines else (
         "No safe visible date/time picker controls were exposed by Windows UI Automation."
     )
 
