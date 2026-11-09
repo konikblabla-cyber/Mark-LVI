@@ -206,7 +206,7 @@ class UISequenceTests(unittest.TestCase):
             requests.append(kwargs)
             return "[CONFIRMATION_PENDING]"
 
-        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \
              patch.object(
                  ui_sequence.ui, "_inspect_checkbox",
                  return_value=(
@@ -214,13 +214,13 @@ class UISequenceTests(unittest.TestCase):
                      {"role": "CheckBox", "automation_id": "notifications",
                       "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, "",
                  ),
-             ), \\
+             ), \
              patch.object(ui_sequence.ui, "_set_checkbox_and_verify",
-                          return_value="status=done action=set_checkbox_and_verify checked=true verified=true changed=true") as set_checkbox, \\
-             patch.object(ui_sequence.ui, "_snapshot", return_value=snapshot), \\
+                          return_value="status=done action=set_checkbox_and_verify checked=true verified=true changed=true") as set_checkbox, \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=snapshot), \
              patch.object(ui_sequence.ui, "_click_and_verify",
-                          return_value="status=done action=click_and_verify verified=true") as click, \\
-             patch.object(confirm, "pending_title", return_value=""), \\
+                          return_value="status=done action=click_and_verify verified=true") as click, \
+             patch.object(confirm, "pending_title", return_value=""), \
              patch.object(confirm, "request", side_effect=fake_request):
             result = ui_sequence.run_ui_sequence({
                 "steps": [
@@ -240,17 +240,17 @@ class UISequenceTests(unittest.TestCase):
 
     def test_checkbox_already_in_requested_state_does_not_toggle_or_prompt(self):
         from core import confirm
-        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \
              patch.object(
                  ui_sequence.ui, "_inspect_checkbox",
                  return_value=("found", True, {"role": "CheckBox", "automation_id": "n",
                   "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, ""),
-             ), \\
-             patch.object(ui_sequence.ui, "_set_checkbox_and_verify") as toggle, \\
-             patch.object(ui_sequence.ui, "_snapshot", return_value=self._snapshot("Save")), \\
+             ), \
+             patch.object(ui_sequence.ui, "_set_checkbox_and_verify") as toggle, \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=self._snapshot("Save")), \
              patch.object(ui_sequence.ui, "_click_and_verify",
-                          return_value="status=done action=click_and_verify verified=true"), \\
-             patch.object(confirm, "pending_title", return_value=""), \\
+                          return_value="status=done action=click_and_verify verified=true"), \
+             patch.object(confirm, "pending_title", return_value=""), \
              patch.object(confirm, "request") as request:
             result = ui_sequence.run_ui_sequence({
                 "steps": [
@@ -265,13 +265,13 @@ class UISequenceTests(unittest.TestCase):
     def test_checkbox_cancel_releases_active_sequence_guard(self):
         from core import confirm
         captured = []
-        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \
              patch.object(
                  ui_sequence.ui, "_inspect_checkbox",
                  return_value=("found", False, {"role": "CheckBox", "automation_id": "n",
                   "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, ""),
-             ), \\
-             patch.object(confirm, "pending_title", return_value=""), \\
+             ), \
+             patch.object(confirm, "pending_title", return_value=""), \
              patch.object(confirm, "request",
                           side_effect=lambda **kwargs: (captured.append(kwargs) or "[CONFIRMATION_PENDING]")):
             result = ui_sequence.run_ui_sequence({
@@ -283,15 +283,15 @@ class UISequenceTests(unittest.TestCase):
             self.assertEqual(result, "[CONFIRMATION_PENDING]")
             captured[0]["on_cancel"]()
 
-        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Application")), \
              patch.object(
                  ui_sequence.ui, "_inspect_checkbox",
                  return_value=("found", True, {"role": "CheckBox", "automation_id": "n",
                   "runtime_id": (1, 2, 3), "rect": (10, 10, 100, 40)}, ""),
-             ), \\
-             patch.object(ui_sequence.ui, "_snapshot", return_value=self._snapshot("Save")), \\
+             ), \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=self._snapshot("Save")), \
              patch.object(ui_sequence.ui, "_click_and_verify",
-                          return_value="status=done action=click_and_verify verified=true"), \\
+                          return_value="status=done action=click_and_verify verified=true"), \
              patch.object(confirm, "pending_title", return_value=""):
             next_result = ui_sequence.run_ui_sequence({
                 "steps": [
