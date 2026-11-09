@@ -186,9 +186,10 @@ class UIInteractionTests(unittest.TestCase):
         self.assertEqual(value[0], "busy")
         self.assertEqual(called, [])
 
-    def test_timed_out_call_is_not_retried(self):
+    def test_timed_out_call_sets_cancellation_flag_and_is_not_retried(self):
         started = threading.Event()
         release = threading.Event()
+        cancelled = threading.Event()
         calls = []
 
         def slow():
@@ -197,10 +198,13 @@ class UIInteractionTests(unittest.TestCase):
             release.wait(1)
             return "late"
 
-        completed, value, error = _run_bounded(slow, 0.03)
+        completed, value, error = _run_bounded(
+            slow, 0.03, cancel_event=cancelled,
+        )
         self.assertFalse(completed)
         self.assertIsNone(value)
         self.assertIsNone(error)
+        self.assertTrue(cancelled.is_set())
         self.assertTrue(started.wait(0.5))
         self.assertEqual(calls, ["called"])
         release.set()
