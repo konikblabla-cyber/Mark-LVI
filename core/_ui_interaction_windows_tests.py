@@ -356,6 +356,14 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
 
 
     def test_two_step_ui_sequence_verifies_each_real_native_transition(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        active = _snapshot()
+        self.assertEqual(active["handle"], int(self.hwnd), active)
+        self.assertTrue(
+            any(item["name"] == "Open panel" for item in active["clickables"]),
+            active["clickables"],
+        )
         result = run_ui_sequence({
             "steps": [
                 {"button_label": "Open panel", "expected_result": "Panel ready"},
@@ -374,6 +382,14 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         )
 
     def test_ui_sequence_stops_after_real_noop_and_does_not_click_next_button(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        active = _snapshot()
+        self.assertEqual(active["handle"], int(self.hwnd), active)
+        self.assertTrue(
+            any(item["name"] == "No change" for item in active["clickables"]),
+            active["clickables"],
+        )
         result = run_ui_sequence({
             "steps": [
                 {"button_label": "No change", "expected_result": "Should not appear"},
