@@ -27,10 +27,11 @@ _HIGH_IMPACT_WORDS = (
     "revoke", "cancel", "confirm", "upload", "share", "grant", "erase",
     "destroy", "wipe", "reset", "format", "authorize", "sign", "deleted",
     "removed", "sent", "submitted", "published", "transferred", "purchased",
-    "paid", "uploaded", "shared", "usuń", "usun", "wyślij", "wyslij",
-    "opublikuj", "kup", "zapłać", "zaplac", "zamów", "zamow", "przelew",
-    "anuluj", "potwierdź", "potwierdz", "usunięto", "usunieto", "wysłano",
-    "wyslano", "opublikowano", "przelano",
+    "paid", "payment", "uploaded", "shared", "granted", "posted",
+    "created", "closed", "cancelled", "canceled", "usuń", "usun", "wyślij",
+    "wyslij", "opublikuj", "kup", "zapłać", "zaplac", "zamów", "zamow",
+    "przelew", "anuluj", "potwierdź", "potwierdz", "usunięto", "usunieto",
+    "wysłano", "wyslano", "opublikowano", "przelano",
 )
 _MAX_CONTROLS = 240
 _VERIFY_ATTEMPTS = 10
@@ -68,7 +69,9 @@ def _matching_controls(controls: list[dict], label: str) -> list[dict]:
 
 def _format_snapshot(records: list[dict]) -> str:
     from actions.screen_understanding import format_accessible_elements
-    return format_accessible_elements(records)
+    return format_accessible_elements(
+        records, max_elements=_MAX_CONTROLS, max_chars=20_000,
+    )
 
 
 def _active_window_snapshot():
