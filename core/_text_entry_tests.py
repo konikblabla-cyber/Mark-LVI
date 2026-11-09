@@ -18,6 +18,7 @@ class StandaloneTextEntryTests(unittest.TestCase):
             {},
             {"field_label": "Search"},
             {"text": "hello"},
+            {"field_label": 123, "text": "hello"},
             {"field_label": "Password", "text": "not entered"},
             {"field_label": "Search", "text": "A" * 48},
             {"field_label": "Search", "text": "bad\x00text"},
