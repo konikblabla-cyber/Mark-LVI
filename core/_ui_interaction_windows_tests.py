@@ -509,8 +509,8 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             requests.append(kwargs)
             return "[CONFIRMATION_PENDING]"
 
-        with patch.object(ui_sequence, "_capture_active_window", return_value=active), \\
-             patch.object(confirm, "pending_title", return_value=""), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=active), \
+             patch.object(confirm, "pending_title", return_value=""), \
              patch.object(confirm, "request", side_effect=capture_request):
             pending = ui_sequence.run_ui_sequence({
                 "steps": [
