@@ -506,6 +506,106 @@ class UISequenceTests(unittest.TestCase):
             })
         self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
 
+    def test_radio_step_validation_rejects_extra_or_sensitive_fields(self):
+        valid = ui_sequence._validate_steps([
+            {"action": "select_radio", "radio_label": "Mode: Advanced"},
+            self._step("Finish", "Completed"),
+        ])
+        self.assertIsNotNone(valid[0], valid[1])
+        self.assertIsNone(ui_sequence._validate_steps([
+            {"action": "select_radio", "radio_label": "Mode", "selected": True},
+            self._step("Finish", "Completed"),
+        ])[0])
+        self.assertIsNone(ui_sequence._validate_steps([
+            {"action": "select_radio", "radio_label": "Password"},
+            self._step("Finish", "Completed"),
+        ])[0])
+
+    def test_radio_selection_waits_for_hud_and_resumes_only_after_verified_state(self):
+        from core import confirm
+        initial = self._snapshot("Mode: Advanced")
+        after = self._snapshot("Finish")
+        requests = []
+        def capture_request(**kwargs):
+            requests.append(kwargs)
+            return "[CONFIRMATION_PENDING]"
+
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \\
+             patch.object(ui_sequence.ui, "_inspect_radio", return_value=(
+                 "found", False,
+                 {"role": "RadioButton", "automation_id": "advanced",
+                  "runtime_id": (4, 5), "rect": (10, 10, 100, 40)}, "",
+             )), \\
+             patch.object(ui_sequence.ui, "_select_radio_and_verify", return_value=(
+                 "status=done action=select_radio_and_verify verified=true"
+             )) as select_radio, \\
+             patch.object(ui_sequence.ui, "_snapshot", return_value=after), \\
+             patch.object(ui_sequence.ui, "_click_and_verify", return_value=(
+                 "status=done action=click_and_verify verified=true"
+             )) as click, \\
+             patch.object(confirm, "pending_title", return_value=""), \\
+             patch.object(confirm, "request", side_effect=capture_request):
+            pending = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {"action": "select_radio", "radio_label": "Mode: Advanced"},
+                    self._step("Finish", "Completed"),
+                ],
+            })
+            self.assertEqual(pending, "[CONFIRMATION_PENDING]")
+            select_radio.assert_not_called()
+            click.assert_not_called()
+            self.assertIn("Confirm radio option", requests[0]["title"])
+            result = requests[0]["run"]()
+
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        self.assertIn("steps_completed=2", result)
+        select_radio.assert_called_once()
+        click.assert_called_once()
+
+    def test_already_selected_radio_is_a_verified_noop_without_confirmation(self):
+        from core import confirm
+        initial = self._snapshot("Mode: Standard")
+        after = self._snapshot("Finish")
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \\
+             patch.object(ui_sequence.ui, "_inspect_radio", return_value=(
+                 "found", True,
+                 {"role": "RadioButton", "automation_id": "standard",
+                  "runtime_id": (4, 4), "rect": (10, 10, 100, 40)}, "",
+             )), \\
+             patch.object(ui_sequence.ui, "_select_radio_and_verify") as select_radio, \\
+             patch.object(ui_sequence.ui, "_snapshot", return_value=after), \\
+             patch.object(ui_sequence.ui, "_click_and_verify", return_value=(
+                 "status=done action=click_and_verify verified=true"
+             )), \\
+             patch.object(confirm, "pending_title", return_value=""), \\
+             patch.object(confirm, "request") as request:
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {"action": "select_radio", "radio_label": "Mode: Standard"},
+                    self._step("Finish", "Completed"),
+                ],
+            })
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        select_radio.assert_not_called()
+        request.assert_not_called()
+
+    def test_ambiguous_radio_option_stops_without_selection(self):
+        from core import confirm
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Mode")), \\
+             patch.object(ui_sequence.ui, "_inspect_radio", return_value=(
+                 "ambiguous_radio", None, None, "duplicate radio labels",
+             )), \\
+             patch.object(ui_sequence.ui, "_select_radio_and_verify") as select_radio, \\
+             patch.object(confirm, "pending_title", return_value=""):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {"action": "select_radio", "radio_label": "Mode"},
+                    self._step("Finish", "Completed"),
+                ],
+            })
+        self.assertTrue(result.startswith("status=ask action=run_ui_sequence "), result)
+        select_radio.assert_not_called()
+
     def test_second_sequence_is_refused_while_first_waits_for_confirmation(self):
         from core import confirm
         with patch.object(ui_sequence.ui, "_snapshot", return_value=self._snapshot("Delete")), \
