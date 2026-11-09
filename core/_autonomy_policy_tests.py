@@ -12,7 +12,8 @@ from core.autonomy_policy import (
 class AutonomyPolicyTests(unittest.TestCase):
     def test_routine_and_reversible_controls_never_prompt(self):
         for target in ("Save", "Created", "Confirm", "Closed", "Remove filter",
-                       "Open settings", "Expand folder", "Remember this device"):
+                       "Open settings", "Expand folder", "Remember this device",
+                       "Reset filter"):
             with self.subTest(target=target):
                 self.assertFalse(requires_ui_confirmation(target))
 
@@ -46,6 +47,11 @@ class AutonomyPolicyTests(unittest.TestCase):
             ("Purchase", "Purchase this item"),
             ("Transfer funds", "Transfer funds"),
             ("Delete account", "Delete account"),
+            ("Delete", "Permanently delete the selected file"),
+            ("Submit", "Submit payment"),
+            ("Save", "Change security settings"),
+            ("Reset", "Factory reset this PC"),
+            ("Sign", "Sign the contract"),
             ("Permanently erase", "Permanently erase these files"),
             ("Factory reset", "Factory reset this PC"),
             ("Zamknij konto", "Zamknij konto"),

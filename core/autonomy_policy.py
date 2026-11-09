@@ -39,17 +39,27 @@ _EXTERNAL_ACTION = re.compile(
     re.IGNORECASE,
 )
 _CRITICAL_ACTION = re.compile(
-    r"\b(?:pay|payment|purchase|buy|checkout|transfer|wire|withdraw|refund|"
-    r"destroy|wipe|format|factory|reset|revoke|authorize|sign)\b|"
-    r"\b(?:permanent|permanently|irreversible)\b|"
-    r"(?:delete|close|terminate|remove)[\s_-]+(?:account|profile|membership)|"
-    r"(?:account|profile|membership)[\s_-]+(?:deleted|closed)|"
-    r"(?:deleted|closed)[\s_-]+(?:account|profile|membership)|"
-    r"\b(?:zapłać|zaplac|płatność|platnosc|kup|zakup|przelew|usuń|usun|"
-    r"skasuj|zniszcz|sformatuj|resetuj|wyczyść|wyczysc)\b|"
-    r"(?:usuń\w*|usun\w*|zamknij)[\s_-]+(?:konto|profil)",
+    r"\\b(?:pay|payment|purchase|buy|checkout|transfer|wire|withdraw|refund|"
+    r"destroy|wipe|format|factory|revoke|authorize|security|authentication|"
+    r"credential|password|passcode|otp|2fa)\\b|"
+    r"\\b(?:permanent|permanently|irreversible)\\b|"
+    r"factory[\\s_-]+reset|reset[\\s_-]+(?:pc|computer|system|password|account|security)|"
+    r"sign[\\s_-]+(?:contract|document|agreement)|"
+    r"change[\\s_-]+(?:password|security)|"
+    r"(?:delete|close|terminate|remove)[\\s_-]+(?:account|profile|membership)|"
+    r"(?:account|profile|membership)[\\s_-]+(?:deleted|closed)|"
+    r"(?:deleted|closed)[\\s_-]+(?:account|profile|membership)|"
+    r"clear[\\s_-]+(?:all[\\s_-]+)?(?:data|files)|"
+    r"\\b(?:zapłać|zaplac|płatność|platnosc|kup|zakup|przelew|usuń|usun|"
+    r"skasuj|zniszcz|sformatuj|wyczyść|wyczysc|password|hasło|haslo)\\b|"
+    r"(?:usuń\\w*|usun\\w*|zamknij)[\\s_-]+(?:konto|profil)|"
+    r"resetuj[\\s_-]+(?:komputer|system|hasło|haslo|konto|zabezpieczenia)|"
+    r"zmień[\\s_-]+hasło|zmien[\\s_-]+haslo|"
+    r"podpisz[\\s_-]+(?:umowę|umowe|dokument)|"
+    r"bezpieczeństw\\w*|bezpieczenstw\\w*|uwierzyteln\\w*",
     re.IGNORECASE,
 )
+
 _SETTING_VERB = re.compile(
     r"\b(?:enable|disable|turn|switch|allow|deny|check|uncheck|tick|untick|"
     r"accept|agree|consent|subscribe|share|activate|deactivate|"
@@ -122,7 +132,7 @@ def explicitly_requested_target_action(user_request: str, target: str) -> bool:
     if not request or _NEGATED_ACTION.search(request):
         return False
     has_action_verb = bool(re.search(
-        r"\b(?:click|press|select|choose|submit|send|publish|share|upload|delete|remove|erase|"
+        r"\b(?:click|press|select|choose|submit|send|publish|share|upload|delete|remove|erase|sign|"
         r"wybierz|kliknij|naciśnij|nacisnij|zatwierdź|zatwierdz|usuń|usun|kasuj|"
         r"wyślij|wyslij|opublikuj|udostępnij|udostepnij)\b",
         request, re.IGNORECASE,
