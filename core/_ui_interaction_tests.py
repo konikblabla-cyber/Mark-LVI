@@ -1,7 +1,10 @@
 """Offline tests for safe, exact local UI Automation interactions."""
+import sys
 import threading
 import time
+import types
 import unittest
+from unittest.mock import patch
 
 from actions.ui_interaction import (
     _has_exact_expected_text,
@@ -9,6 +12,7 @@ from actions.ui_interaction import (
     _normalise,
     _requires_confirmation,
     _run_bounded,
+    _run_uia,
     _same_control_identity,
     _wait_for_expected_result,
 )
@@ -153,6 +157,34 @@ class UIInteractionTests(unittest.TestCase):
         self.assertTrue(completed)
         self.assertIsNone(value)
         self.assertIsInstance(error, RuntimeError)
+
+    def test_uia_worker_initializes_and_uninitializes_com_when_module_is_loaded(self):
+        calls = []
+        fake_comtypes = types.ModuleType("comtypes")
+        fake_comtypes.CoInitialize = lambda: calls.append("init")
+        fake_comtypes.CoUninitialize = lambda: calls.append("uninit")
+
+        with patch.dict(sys.modules, {"comtypes": fake_comtypes}):
+            completed, value, error = _run_uia(lambda: "ui", 1)
+
+        self.assertTrue(completed)
+        self.assertEqual(value, "ui")
+        self.assertIsNone(error)
+        self.assertEqual(calls, ["init", "uninit"])
+
+    def test_exclusive_uia_lock_refuses_a_second_invoke(self):
+        lock = threading.Lock()
+        self.assertTrue(lock.acquire(blocking=False))
+        called = []
+        try:
+            completed, value, error = _run_uia(
+                lambda: called.append("invoked"), 1, exclusive_lock=lock,
+            )
+        finally:
+            lock.release()
+        self.assertTrue(completed)
+        self.assertEqual(value[0], "busy")
+        self.assertEqual(called, [])
 
     def test_timed_out_call_is_not_retried(self):
         started = threading.Event()
