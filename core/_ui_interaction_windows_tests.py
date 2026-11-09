@@ -23,7 +23,7 @@ from actions.ui_interaction import (
     _matching_controls,
     _snapshot,
 )
-from actions import ui_sequence
+from actions import ui_sequence, ui_form
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -33,6 +33,7 @@ _NOOP_BUTTON_ID = 102
 _RESET_BUTTON_ID = 103
 _OPEN_PANEL_BUTTON_ID = 104
 _FINISH_WORKFLOW_BUTTON_ID = 105
+_FORM_EDIT_ID = 106
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -175,8 +176,12 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Finish workflow", 0x50000000,
         190, 170, 160, 34, hwnd, ctypes.c_void_p(_FINISH_WORKFLOW_BUTTON_ID), hinstance, None,
     )
+    form_edit_hwnd = _user32.CreateWindowExW(
+        0, "EDIT", "Initial value", 0x50010080,
+        20, 230, 250, 28, hwnd, ctypes.c_void_p(_FORM_EDIT_ID), hinstance, None,
+    )
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
-                open_panel_hwnd, finish_workflow_hwnd)):
+                open_panel_hwnd, finish_workflow_hwnd, form_edit_hwnd)):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -355,6 +360,41 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             after["records"],
         )
 
+
+    def test_native_edit_valuepattern_fills_and_verifies_without_returning_value(self):
+        snapshot = ui_form._form_snapshot(int(self.hwnd))
+        candidates = [
+            item for item in snapshot["fields"]
+            if item.get("automation_id") == str(_FORM_EDIT_ID)
+        ]
+        self.assertEqual(len(candidates), 1, snapshot["fields"])
+        result = ui_form._run_fill_with_timeout(
+            snapshot["handle"], snapshot["process_id"],
+            [{"field_label": f"AutomationId:{_FORM_EDIT_ID}", "text": "MARK verified entry"}],
+        )
+        self.assertTrue(
+            result.startswith("status=done action=fill_ui_fields "),
+            result,
+        )
+        self.assertNotIn("MARK verified entry", result)
+
+        def read_value():
+            from pywinauto import Desktop
+            window = Desktop(backend="uia").window(
+                handle=int(self.hwnd),
+            ).wrapper_object()
+            for control in window.descendants():
+                info = control.element_info
+                if str(getattr(info, "automation_id", "") or "") == str(_FORM_EDIT_ID):
+                    return str(control.iface_value.CurrentValue)
+            return None
+
+        completed, value, error = ui_form.ui._run_uia(
+            read_value, 4.0, exclusive_lock=ui_form.ui._SNAPSHOT_LOCK,
+        )
+        self.assertTrue(completed)
+        self.assertIsNone(error)
+        self.assertEqual(value, "MARK verified entry")
 
     def test_two_step_ui_sequence_verifies_each_real_native_transition(self):
         self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
