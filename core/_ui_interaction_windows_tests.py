@@ -449,17 +449,12 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             result,
         )
         self.assertNotIn(entered, result)
-        buffer = ctypes.create_unicode_buffer(256)
-        edit_hwnd = _user32.GetDlgItem(self.hwnd, _SEARCH_EDIT_ID)
-        self.assertTrue(edit_hwnd, "GetDlgItem could not find the native Edit control")
-        length = _user32.GetWindowTextLengthW(edit_hwnd)
-        copied = _user32.GetWindowTextW(edit_hwnd, buffer, 256)
-        self.assertGreater(
-            length, 0,
-            f"native edit HWND={edit_hwnd!r}, copied={copied}, "
-            f"UIA fields={text_entry._snapshot()['fields']!r}",
-        )
-        self.assertEqual(buffer.value, entered)
+        from pywinauto import Desktop
+        window = Desktop(backend="uia").window(handle=int(self.hwnd)).wrapper_object()
+        fields = text_entry._collect_edit_controls(window, include_wrappers=True)
+        matches = text_entry._matching_fields(fields, "Search query")
+        self.assertEqual(len(matches), 1, fields)
+        self.assertEqual(matches[0]["control"].iface_value.CurrentValue, entered)
 
     def test_password_edit_is_never_enumerated_or_filled(self):
         self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
