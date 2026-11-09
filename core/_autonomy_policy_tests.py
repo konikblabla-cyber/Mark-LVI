@@ -115,6 +115,20 @@ class AutonomyPolicyTests(unittest.TestCase):
                 self.assertFalse(explicitly_requested_target_action(request, "send Alex"))
                 self.assertTrue(requires_ui_confirmation("Send", user_request=request))
 
+    def test_indirect_negative_external_actions_never_authorize_side_effects(self):
+        cases = (
+            ("I don't want you to publish the release notes", "Publish", "release notes"),
+            ("I do not want you to delete report.txt", "Delete", "report.txt"),
+            ("Nie chcę, żebyś opublikował informacje", "Publish", "informacje"),
+            ("Nie chcę żebyś usunął report.txt", "Delete", "report.txt"),
+        )
+        for request, action, target in cases:
+            with self.subTest(request=request):
+                self.assertFalse(explicitly_requested_target_action(request, target))
+                self.assertTrue(requires_ui_confirmation(
+                    action + " " + target, user_request=request,
+                ))
+
     def test_opt_out_is_always_allowed_without_confirmation(self):
         for label in ("Allow tracking", "Share location", "Accept cookies",
                       "Allow notifications"):
