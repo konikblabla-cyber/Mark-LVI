@@ -358,7 +358,7 @@ class MissionControlTests(unittest.TestCase):
                     "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
                     "verification": "Forged success",
                 }, session_memory=scope)
-                self.assertIn("Call begin_step", refused_before_start)
+                self.assertIn("currently running step", refused_before_start)
                 mission.run(
                     {"action": "start", "mission_id": mission_id},
                     session_memory=scope,
