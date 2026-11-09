@@ -196,6 +196,32 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(mission["steps"][0]["status"], "done")
         self.assertEqual(mission["status"], "completed")
 
+    def test_recovery_rejects_and_clears_legacy_receipt_without_verified_true(self):
+        mission_id = self.plan("Do a step once")
+        self.start(mission_id)
+        data = mission_control._read()
+        step = data["missions"][0]["steps"][0]
+        step["tool_evidence"] = {
+            "status": "done",
+            "tool_name": "verified_test_action",
+            "action": "verified_test_action",
+            "result_sha256": "0" * 64,
+        }
+        mission_control._write(data)
+
+        self.scope = {"user_request": "Continue the mission"}
+        recovery = self.start(mission_id)
+        self.assertIn("[MISSION_RECOVERY]", recovery)
+        self.assertIn("Do NOT repeat", recovery)
+        self.assertNotIn("persisted receipt", recovery)
+        self.assertNotIn(
+            "tool_evidence",
+            mission_control._read()["missions"][0]["steps"][0],
+        )
+        self.assertIsNone(
+            self.scope["_mission_execution"]["last_result"],
+        )
+
     def test_failed_dispatcher_result_removes_previously_persisted_receipt(self):
         mission_id = self.plan("Do a step once")
         self.start(mission_id)

@@ -99,6 +99,22 @@ def _next_open_step(mission: dict):
                  if step.get("status") in {"pending", "running"}), None)
 
 
+def _has_valid_persisted_tool_evidence(step: dict) -> bool:
+    """Trust only complete application receipts, never legacy or malformed rows."""
+    evidence = step.get("tool_evidence") if isinstance(step, dict) else None
+    if not isinstance(evidence, dict) or evidence.get("status") != "done":
+        return False
+    if evidence.get("verified") is not True:
+        return False
+    tool_name = evidence.get("tool_name")
+    if not isinstance(tool_name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tool_name):
+        return False
+    if evidence.get("action") != tool_name:
+        return False
+    digest = evidence.get("result_sha256")
+    return isinstance(digest, str) and bool(re.fullmatch(r"[0-9a-f]{64}", digest))
+
+
 def _continue_instruction(mission: dict, recovery: bool = False) -> str:
     """Hand off the already-claimed step, or recover without replaying it."""
     step = _next_open_step(mission)
@@ -106,7 +122,7 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
         return ("\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
                 "Report the completed result to the user; do not invent extra work.")
     if step.get("status") == "running" and recovery:
-        if step.get("tool_evidence"):
+        if _has_valid_persisted_tool_evidence(step):
             return ("\n[MISSION_RECOVERY] The previous session has a persisted receipt from "
                     "a tool that returned status=done verified=true. Do NOT repeat the action. Call "
                     "complete_step for this exact step; the application will accept it only "
@@ -335,10 +351,12 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 elif next_step and next_step.get("status") == "running":
                     from core.mission_evidence import activate_step, seed_step_evidence
                     activate_step(session_memory, mission_id, next_step["id"])
-                    seed_step_evidence(
+                    restored = seed_step_evidence(
                         session_memory, mission_id, next_step["id"],
                         next_step.get("tool_evidence"),
                     )
+                    if not restored:
+                        next_step.pop("tool_evidence", None)
                 _write(data)
                 result = _format(mission) + _continue_instruction(
                     mission, recovery=was_running,
@@ -452,7 +470,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                         "No matching verified tool result is recorded for this mission step. "
                         "The step remains running. Do not invent a verification sentence. "
                         "Run one appropriate existing tool and complete the step only after "
-                        "it returns status=done for that same tool."
+                        "it returns status=done verified=true for that same tool."
                     )
                 step["status"] = "done"
                 step["verification"] = verification_summary(evidence)
