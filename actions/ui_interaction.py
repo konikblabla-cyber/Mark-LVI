@@ -402,7 +402,7 @@ def _is_sensitive_input_label(label: str) -> bool:
     normal = _normalise(label)
     if not normal:
         return True
-    words = set(re.findall(r"[\\w-]+", normal))
+    words = set(re.findall(r"[\w-]+", normal))
     if "pin" in words or "otp" in words:
         return True
     return any(marker in normal for marker in _SENSITIVE_INPUT_MARKERS)
@@ -523,7 +523,7 @@ def _fill_text_and_verify(field_label: str, text: str,
             "credential, verification-code and payment fields are not supported",
             field=label,
         )
-    if not value or len(value) > _MAX_INPUT_CHARS or "\\x00" in value:
+    if not value or len(value) > _MAX_INPUT_CHARS or "\x00" in value:
         return outcome.failed(
             "fill_text_and_verify",
             f"text must contain 1 to {_MAX_INPUT_CHARS} characters and no NUL bytes",
