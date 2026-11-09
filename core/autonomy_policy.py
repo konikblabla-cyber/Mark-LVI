@@ -174,7 +174,7 @@ def consume_explicit_send_authorization(session_memory, receiver: str,
         if session_memory.get("direct_send_used"):
             return False
         request = scope_request(session_memory)
-        if not request or _NEGATED_SEND.search(request) or not _SEND_INTENT.search(request):
+        if not request or _NEGATED_ACTION.search(request) or not _SEND_INTENT.search(request):
             return False
         receiver_tokens = _tokens(receiver)
         request_tokens = _tokens(request)

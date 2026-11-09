@@ -83,7 +83,9 @@ class AutonomyPolicyTests(unittest.TestCase):
         ):
             with self.subTest(request=request):
                 scope = new_turn_authorization(request)
-                self.assertFalse(consume_explicit_send_authorization(scope, "Alex"))
+                self.assertFalse(consume_explicit_send_authorization(
+                    scope, "Alex", "Send a message to Alex"
+                ))
 
     def test_opt_out_is_always_allowed_without_confirmation(self):
         for label in ("Allow tracking", "Share location", "Accept cookies",
