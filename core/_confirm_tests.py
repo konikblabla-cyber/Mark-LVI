@@ -47,6 +47,29 @@ class ConfirmationCleanupTests(unittest.TestCase):
         confirm.resolve(False)
         self.assertEqual(confirm.pending_title(), "")
 
+    def test_second_request_cannot_replace_existing_hud_prompt(self):
+        first_cleaned = []
+        second_cleaned = []
+        first_run = []
+        first = confirm.request(
+            "first", "Original action", "original detail",
+            lambda: first_run.append("ran"),
+            on_cancel=lambda: first_cleaned.append("first"),
+        )
+        second = confirm.request(
+            "second", "Competing action", "competing detail",
+            lambda: self.fail("competing action must never run"),
+            on_cancel=lambda: second_cleaned.append("second"),
+        )
+        self.assertIn("[CONFIRMATION_PENDING]", first)
+        self.assertIn("[CONFIRMATION_BUSY]", second)
+        self.assertEqual(confirm.pending_title(), "Original action")
+        self.assertEqual(len(self.shown), 1)
+        self.assertEqual(second_cleaned, ["second"])
+        confirm.resolve(False)
+        self.assertEqual(first_cleaned, ["first"])
+        self.assertEqual(first_run, [])
+
     def test_cancel_releases_action_owned_state(self):
         cleaned = []
         result = confirm.request(
