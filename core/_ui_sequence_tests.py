@@ -188,6 +188,33 @@ class UISequenceTests(unittest.TestCase):
         self.assertIn("failed_step=1", result)
         self.assertEqual(click.call_count, 1)
 
+    def test_ambiguous_later_step_reports_partial_progress_without_false_ask(self):
+        first = self._snapshot("Open panel")
+        second = self._snapshot("Continue")
+        second["clickables"].append(dict(second["clickables"][0]))
+        with patch.object(
+            ui_sequence.ui, "_snapshot", side_effect=[first, second],
+        ), patch.object(
+            ui_sequence.ui, "_click_and_verify",
+            return_value="status=done action=click_and_verify verified=true",
+        ) as click, patch(
+            "core.confirm.pending_title", return_value="",
+        ):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    self._step("Open panel", "Panel ready"),
+                    self._step("Continue", "Page loaded"),
+                ],
+            })
+        self.assertTrue(
+            result.startswith("status=unverified action=run_ui_sequence "),
+            result,
+        )
+        self.assertIn("steps_completed=1", result)
+        self.assertIn("failed_step=2", result)
+        self.assertNotIn("NOTHING was done yet", result)
+        click.assert_called_once()
+
     def test_duplicate_target_stops_before_any_click(self):
         snapshot = self._snapshot("Continue")
         snapshot["clickables"].append(dict(snapshot["clickables"][0]))
