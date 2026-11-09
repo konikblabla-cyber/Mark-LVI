@@ -43,7 +43,7 @@ class UIInteractionTests(unittest.TestCase):
         for label in (
             "Password", "Security code", "OTP", "Account PIN",
             "Credit card number", "CVV", "Bank account IBAN",
-            "API key", "Access token", "Recovery code",
+            "API key", "Access token", "Recovery code", "Authentication code",
         ):
             with self.subTest(label=label):
                 self.assertTrue(_is_sensitive_input_label(label))
