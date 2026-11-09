@@ -13,7 +13,12 @@ def _needs_confirmation(label):
         "agree", "consent", "permission", "allow", "authorize",
         "authorization", "subscribe", "subscription", "marketing",
         "privacy", "terms", "policy", "location", "notifications",
-        "tracking", "personalization", "share",
+        "tracking", "personalization", "share", "zgoda", "zgadzam",
+        "akceptuję", "akceptuje", "zaakceptuj", "regulamin",
+        "prywatność", "prywatnosc", "powiadomienia", "lokalizacja",
+        "udostępnianie", "udostepnianie", "udostępnij", "udostepnij",
+        "pozwól", "pozwol", "zezwól", "zezwol", "subskrypcja",
+        "subskrybuj", "śledzenie", "sledzenie", "dane", "trenowanie",
     }
     return ui._requires_confirmation(label) or bool(words.intersection(consent_terms))
 
