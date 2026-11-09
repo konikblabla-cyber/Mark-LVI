@@ -177,5 +177,129 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertFalse(list(self.store.parent.glob(".missions-*.tmp")))
 
 
+    def _running_mission(self, steps="Open Privacy tab"):
+        mission_id = self.plan(steps)
+        self.start(mission_id)
+        self.begin(mission_id)
+        return mission_id
+
+    def test_ui_plan_requires_current_running_autonomous_step(self):
+        mission_id = self.plan("Open Privacy tab")
+        self.start(mission_id)
+        result = mission_control.run({
+            "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+        })
+        self.assertIn("begin_step", result)
+        self.begin(mission_id)
+        result = mission_control.run({
+            "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+        })
+        self.assertIn("[MISSION_UI_PLAN]", result)
+
+    def test_ui_plan_uses_fresh_snapshot_and_persists_one_action_without_executing(self):
+        mission_id = self._running_mission()
+        snapshot = [{
+            "role": "TabItem", "name": "Privacy",
+            "visible": True, "enabled": True,
+        }]
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot) as inspect_ui:
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+        inspect_ui.assert_called_once_with()
+        payload = json.loads(result.split("[MISSION_UI_PLAN] ", 1)[1])
+        self.assertEqual(payload["status"], "planned")
+        self.assertEqual(payload["execution"], "not_started")
+        self.assertEqual(len(payload["steps"]), 1)
+        self.assertEqual(payload["steps"][0]["tool"], "select_tab_item")
+        self.assertEqual(payload["steps"][0]["parameters"], {"tab_label": "Privacy"})
+        mission = mission_control._read()["missions"][0]
+        self.assertEqual(mission["steps"][0]["status"], "running")
+        self.assertEqual(mission["steps"][0]["ui_action"]["tool"], "select_tab_item")
+        self.assertTrue(mission["steps"][0]["ui_action_planned_at"])
+
+    def test_ui_plan_clarification_does_not_persist_or_execute_an_action(self):
+        mission_id = self._running_mission("Open Privacy")
+        snapshot = [
+            {"role": "TabItem", "name": "Privacy", "visible": True, "enabled": True,
+             "parent_name": "Account"},
+            {"role": "TabItem", "name": "Privacy", "visible": True, "enabled": True,
+             "parent_name": "Network"},
+        ]
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+        payload = json.loads(result.split("[MISSION_UI_PLAN] ", 1)[1])
+        self.assertEqual(payload["status"], "needs_clarification")
+        self.assertEqual(payload["steps"], [])
+        self.assertNotIn("ui_action", mission_control._read()["missions"][0]["steps"][0])
+
+    def test_persisted_ui_plan_is_never_reissued_after_interruption(self):
+        mission_id = self._running_mission()
+        snapshot = [{
+            "role": "TabItem", "name": "Privacy",
+            "visible": True, "enabled": True,
+        }]
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot) as inspect_ui:
+            first = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+            second = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+        self.assertIn("[MISSION_UI_PLAN]", first)
+        self.assertIn("[MISSION_UI_RECOVERY]", second)
+        self.assertEqual(inspect_ui.call_count, 1)
+        self.assertNotIn('"tool"', second)
+
+    def test_ui_plan_rejects_unknown_tool_before_persisting_it(self):
+        mission_id = self._running_mission()
+        fake_plan = {
+            "status": "planned",
+            "steps": [{
+                "tool": "delete_everything", "parameters": {},
+                "risk": "low", "requires_confirmation": False,
+            }],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=[]), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=fake_plan):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+        payload = json.loads(result.split("[MISSION_UI_PLAN] ", 1)[1])
+        self.assertEqual(payload["status"], "blocked")
+        self.assertNotIn("ui_action", mission_control._read()["missions"][0]["steps"][0])
+
+
+
+    def test_long_ui_plan_keeps_its_machine_readable_handoff(self):
+        mission_id = self._running_mission("Click Save and verify a new confirmation label")
+        fake_plan = {
+            "status": "planned",
+            "steps": [{
+                "tool": "click_and_verify",
+                "parameters": {
+                    "button_label": "S" * 160,
+                    "expected_result": "C" * 160,
+                },
+                "risk": "low",
+                "requires_confirmation": False,
+                "reason": "R" * 240,
+                "expected_result": "E" * 320,
+            }],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=[]), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=fake_plan):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+        self.assertIn("[MISSION_UI_PLAN]", result)
+        payload = json.loads(result.split("[MISSION_UI_PLAN] ", 1)[1])
+        self.assertEqual(payload["steps"][0]["tool"], "click_and_verify")
+        self.assertEqual(payload["steps"][0]["expected_result"], "E" * 320)
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
