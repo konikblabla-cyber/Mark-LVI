@@ -642,7 +642,7 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertTrue(listbox)
         self.assertEqual(_user32.SendMessageW(listbox, 0x0188, 0, 0), 0)  # LB_GETCURSEL
         first = ui_list.select_list_item({"item_label": "Invoices"})
-        self.assertIn("status=done", first, first)
+        self.assertIn("status=done", first, f"{first}; controls={_snapshot(int(self.hwnd))['records']}")
         self.assertIn("selected=true", first)
         self.assertEqual(_user32.SendMessageW(listbox, 0x0188, 0, 0), 1)
         second = ui_list.select_list_item({"item_label": "Invoices"})
