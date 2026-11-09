@@ -88,6 +88,23 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
+        if action == "select_radio":
+            allowed = {"action", "radio_label"}
+            if set(raw) != allowed:
+                return None, (
+                    f"select_radio step {index} must contain only action and radio_label"
+                )
+            label = raw.get("radio_label")
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong radio_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a credential-related RadioButton, which is not supported"
+            validated.append({
+                "action": "select_radio",
+                "radio_label": " ".join(label.split()),
+            })
+            continue
+
         if action == "set_checkbox":
             allowed = {"action", "checkbox_label", "checked"}
             if set(raw) != allowed:
@@ -109,7 +126,7 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
-        return None, f"step {index} action must be click, fill_text or set_checkbox"
+        return None, f"step {index} action must be click, fill_text, set_checkbox or select_radio"
 
     return validated, ""
 
@@ -189,6 +206,26 @@ def _prepare_checkbox_step(step: dict, state: dict) -> tuple[dict | None, str]:
     }, ""
 
 
+def _prepare_radio_step(step: dict, state: dict) -> tuple[dict | None, str]:
+    label = step["radio_label"]
+    status, current, signature, reason = ui._inspect_radio(
+        label, state["window_handle"], state["process_id"],
+    )
+    if status != "found":
+        if status == "ambiguous_radio":
+            return None, outcome.ask("run_ui_sequence", reason, radio=label)
+        if status == "timeout":
+            return None, outcome.unverified("run_ui_sequence", reason, radio=label)
+        return None, outcome.failed("run_ui_sequence", reason or status, radio=label)
+    return {
+        "label": label,
+        "current": current,
+        "signature": signature,
+        "handle": state["window_handle"],
+        "process_id": state["process_id"],
+    }, ""
+
+
 def _stop_with_step_result(state: dict, index: int, result: str) -> str:
     completed = state["completed"]
     facts = {
@@ -197,7 +234,6 @@ def _stop_with_step_result(state: dict, index: int, result: str) -> str:
         "total_steps": len(state["steps"]),
         "failed_step": index + 1,
         "step_status": result.split(" ", 1)[0],
-        "step_detail": result[:280],
     }
     _release_sequence(state["id"])
     reason = (
@@ -248,6 +284,32 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            if step["action"] == "select_radio":
+                prepared, problem = _prepare_radio_step(step, state)
+                if prepared is None:
+                    return _stop_with_step_result(state, index, problem)
+                if prepared["current"]:
+                    state["completed"] += 1
+                    state["completed_labels"].append(prepared["label"])
+                    if index == 0:
+                        state.pop("initial_snapshot", None)
+                    continue
+
+                label = prepared["label"]
+                return confirm.request(
+                    key="run_ui_sequence",
+                    title=f"Confirm radio option: {label}",
+                    detail=(
+                        f"This is step {index + 1} of {len(state['steps'])}. "
+                        f"MARK will select the '{label}' radio option in the "
+                        "original application window and verify its "
+                        "SelectionItemPattern state. No later steps run unless "
+                        "this selection is confirmed and verified."
+                    ),
+                    run=lambda: _resume_after_radio(state, index, prepared),
+                    on_cancel=lambda: _release_sequence(state["id"]),
+                )
+
             if step["action"] == "set_checkbox":
                 prepared, problem = _prepare_checkbox_step(step, state)
                 if prepared is None:
@@ -426,6 +488,31 @@ def _resume_after_checkbox(state: dict, index: int,
         )
 
 
+def _resume_after_radio(state: dict, index: int,
+                           prepared: dict) -> str:
+    """Select one approved RadioButton and continue only after readback."""
+    try:
+        result = ui._select_radio_and_verify(
+            prepared["label"], prepared["handle"],
+            prepared["process_id"], prepared["signature"],
+        )
+        if not result.startswith("status=done "):
+            return _stop_with_step_result(state, index, result)
+        state["completed"] += 1
+        state["completed_labels"].append(prepared["label"])
+        return _continue_sequence(state, index + 1)
+    except Exception as exc:
+        _release_sequence(state["id"])
+        return outcome.failed(
+            "run_ui_sequence",
+            f"the approved radio step failed internally ({type(exc).__name__}); later steps were not started",
+            sequence_id=state["id"],
+            steps_completed=state["completed"],
+            total_steps=len(state["steps"]),
+            failed_step=index + 1,
+        )
+
+
 def _capture_active_window() -> dict:
     return ui._snapshot()
 
@@ -492,6 +579,9 @@ TOOL = {
         "A set_checkbox step must name one exact accessible CheckBox and desired "
         "boolean state; every state change pauses for human HUD approval, then "
         "MARK re-reads TogglePattern locally to verify the requested state. "
+        "A select_radio step must name one exact accessible RadioButton; "
+        "every selection change pauses for human HUD approval, then MARK "
+        "re-reads SelectionItemPattern locally to verify the selected option. "
         "Do not invent labels or expected results; inspect the UI first when "
         "needed. The sequence "
         "captures the active application window once and remains pinned to "
@@ -517,14 +607,14 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered steps. Use click, fill_text or set_checkbox with the exact fields required for that action.",
+                "description": "Two to eight ordered steps. Use click, fill_text, set_checkbox or select_radio with the exact fields required for that action.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "enum": ["click", "fill_text", "set_checkbox"],
-                            "description": "Use click for a verified button press, fill_text for one safe text field, or set_checkbox for a human-confirmed checkbox state change.",
+                            "enum": ["click", "fill_text", "set_checkbox", "select_radio"],
+                            "description": "Use click for a verified button press, fill_text for one safe text field, set_checkbox for a human-confirmed checkbox change, or select_radio for a human-confirmed radio option.",
                         },
                         "button_label": {
                             "type": "STRING",
@@ -545,6 +635,10 @@ TOOL = {
                         "checkbox_label": {
                             "type": "STRING",
                             "description": "For set_checkbox: exact accessible label of one visible CheckBox.",
+                        },
+                        "radio_label": {
+                            "type": "STRING",
+                            "description": "For select_radio: exact accessible label of one visible RadioButton option.",
                         },
                         "checked": {
                             "type": "BOOLEAN",
