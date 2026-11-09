@@ -623,6 +623,208 @@ def _set_checkbox_and_verify(label: str, desired: bool,
     )
 
 
+def _read_radio_on_window(window_handle: int, expected_process_id: int,
+                           label: str) -> tuple[str, bool | None, dict | None, str]:
+    """Read one exact accessible RadioButton selection state without changing it."""
+    from pywinauto import Desktop
+
+    desktop = Desktop(backend="uia")
+    window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if not window.is_visible():
+        return "missing_window", None, None, "the original window is no longer visible"
+    process_id = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(process_id, expected_process_id):
+        return "changed_window", None, None, "the window handle now belongs to another process"
+
+    wanted = _normalise(label)
+    matches = []
+    for scanned, control in enumerate(window.descendants()):
+        if scanned >= _MAX_SCANNED_CONTROLS:
+            break
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != "RadioButton":
+                continue
+            if bool(getattr(info, "is_password", False)) or bool(getattr(info, "is_offscreen", False)):
+                continue
+            name = str(getattr(info, "name", "") or "")
+            if _is_sensitive_input_label(name) or _normalise(name) != wanted:
+                continue
+            rect = control.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0 or not control.is_enabled():
+                continue
+            signature = _control_signature(info, rect)
+            matches.append((control, signature))
+        except Exception:
+            continue
+
+    if not matches:
+        return "missing_radio", None, None, "no visible, enabled, non-sensitive RadioButton has that exact label"
+    if len(matches) != 1:
+        return "ambiguous_radio", None, None, "more than one RadioButton has that exact accessible label"
+
+    control, signature = matches[0]
+    try:
+        pattern = control.iface_selection_item
+        selected = bool(pattern.CurrentIsSelected)
+    except Exception:
+        return "unsupported_selection_pattern", None, None, "the RadioButton does not expose UI Automation SelectionItemPattern"
+    plain_signature = {
+        "role": "RadioButton",
+        "automation_id": signature["automation_id"],
+        "runtime_id": signature["runtime_id"],
+        "rect": signature["rect"],
+    }
+    return "found", selected, plain_signature, ""
+
+
+def _inspect_radio(label: str, window_handle: int,
+                   expected_process_id: int) -> tuple[str, bool | None, dict | None, str]:
+    """Inspect a RadioButton in a bounded worker; return only state and identity."""
+    completed, result, error = _run_uia(
+        lambda: _read_radio_on_window(window_handle, expected_process_id, label),
+        _SNAPSHOT_TIMEOUT_SECONDS,
+        exclusive_lock=_SNAPSHOT_LOCK,
+    )
+    if not completed:
+        return "timeout", None, None, "UI Automation did not inspect the RadioButton within 4 seconds"
+    if error is not None:
+        return "error", None, None, f"UI Automation could not inspect the RadioButton ({type(error).__name__})"
+    if not isinstance(result, tuple) or len(result) != 4:
+        return "error", None, None, "UI Automation returned an invalid RadioButton state"
+    return result
+
+
+def _select_radio_on_window(window_handle: int, expected_process_id: int,
+                            label: str, signature: dict,
+                            cancelled: threading.Event) -> tuple[str, str]:
+    """Select the exact same RadioButton once and verify SelectionItem state."""
+    from pywinauto import Desktop
+
+    desktop = Desktop(backend="uia")
+    window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if not window.is_visible():
+        return "missing_window", "the original window is no longer visible"
+    process_id = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(process_id, expected_process_id):
+        return "changed_window", "the window handle now belongs to another process"
+
+    wanted = _normalise(label)
+    matches = []
+    for scanned, control in enumerate(window.descendants()):
+        if scanned >= _MAX_SCANNED_CONTROLS:
+            break
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != "RadioButton":
+                continue
+            if bool(getattr(info, "is_password", False)) or bool(getattr(info, "is_offscreen", False)):
+                continue
+            name = str(getattr(info, "name", "") or "")
+            if _is_sensitive_input_label(name) or _normalise(name) != wanted:
+                continue
+            rect = control.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0 or not control.is_enabled():
+                continue
+            candidate_signature = _control_signature(info, rect)
+            candidate = {
+                "role": "RadioButton",
+                "automation_id": candidate_signature["automation_id"],
+                "runtime_id": candidate_signature["runtime_id"],
+                "rect": candidate_signature["rect"],
+            }
+            matches.append((control, candidate))
+        except Exception:
+            continue
+
+    if not matches:
+        return "missing_radio", "the original RadioButton is no longer available"
+    if len(matches) != 1:
+        return "ambiguous_radio", "the RadioButton label is no longer unique"
+    control, candidate = matches[0]
+    if not _same_control_identity(candidate, signature):
+        return "changed_radio", "the RadioButton is no longer the one originally identified"
+
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before selecting the RadioButton"
+    try:
+        pattern = control.iface_selection_item
+        if bool(pattern.CurrentIsSelected):
+            return "already_selected", ""
+    except Exception:
+        return "unsupported_selection_pattern", "the RadioButton no longer exposes SelectionItemPattern"
+
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before selecting the RadioButton"
+    try:
+        pattern.Select()
+    except Exception:
+        return "invoke_uncertain", "SelectionItemPattern.Select raised an error; the selected option is unknown"
+
+    deadline = time.monotonic() + 1.5
+    while True:
+        try:
+            selected = bool(pattern.CurrentIsSelected)
+        except Exception:
+            return "invoke_uncertain", "the RadioButton was selected but its state could not be verified"
+        if selected:
+            return "selected", ""
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+    return "verification_mismatch", "the RadioButton did not report selected after SelectionItemPattern.Select"
+
+
+def _select_radio_and_verify(label: str, window_handle: int,
+                             expected_process_id: int,
+                             signature: dict) -> str:
+    if _is_sensitive_input_label(label):
+        return outcome.failed(
+            "select_radio_and_verify",
+            "credential-related RadioButtons are not supported",
+            radio=label,
+        )
+
+    completed, result, error = _run_uia(
+        lambda cancelled: _select_radio_on_window(
+            window_handle, expected_process_id, label, signature, cancelled,
+        ),
+        _INVOKE_TIMEOUT_SECONDS,
+        exclusive_lock=_INVOKE_LOCK,
+        pass_cancel_event=True,
+    )
+    if not completed:
+        return outcome.unverified(
+            "select_radio_and_verify",
+            "UI Automation did not return within 4 seconds; the selection may have changed. Do not retry blindly.",
+            radio=label, timed_out=True,
+        )
+    if error is not None:
+        return outcome.unverified(
+            "select_radio_and_verify",
+            f"UI Automation raised {type(error).__name__}; the selected option is unknown. Do not retry blindly.",
+            radio=label,
+        )
+
+    status, reason = result
+    if status in {"selected", "already_selected"}:
+        return outcome.done(
+            "select_radio_and_verify", radio=label,
+            selected=True, verified=True, changed=(status == "selected"),
+        )
+    if status in {"invoke_uncertain", "verification_mismatch"}:
+        return outcome.unverified(
+            "select_radio_and_verify", reason, radio=label,
+        )
+    if status == "ambiguous_radio":
+        return outcome.ask(
+            "select_radio_and_verify", reason, radio=label,
+        )
+    return outcome.failed(
+        "select_radio_and_verify", reason or status, radio=label,
+    )
+
+
 def _is_sensitive_input_label(label: str) -> bool:
     normal = _normalise(label)
     if not normal:
