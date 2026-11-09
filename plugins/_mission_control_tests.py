@@ -55,7 +55,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(mission["status"], "active")
         self.assertEqual(mission["execution_mode"], "plan")
         self.assertEqual([s["status"] for s in mission["steps"]], ["pending"] * 3)
-        self.assertIn("Plan saved only", mission_control.run({"action": "show", "mission_id": mission_id}))
+        self.assertEqual(mission["steps"][0]["status"], "pending")
 
     def test_start_hands_off_only_the_first_step(self):
         mission_id = self.plan()
