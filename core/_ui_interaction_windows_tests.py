@@ -313,11 +313,19 @@ def _serve_native_window() -> int:
                 ("cChildren", ctypes.c_int),
                 ("lParam", ctypes.c_ssize_t),
             ]
+        class _TVITEMEXW(ctypes.Structure):
+            _fields_ = _TVITEMW._fields_ + [
+                ("iIntegral", ctypes.c_int),
+                ("uStateEx", wintypes.UINT),
+                ("hwnd", wintypes.HWND),
+                ("iExpandedImage", ctypes.c_int),
+                ("iReserved", ctypes.c_int),
+            ]
         class _TVINSERTSTRUCTW(ctypes.Structure):
             _fields_ = [
                 ("hParent", wintypes.HANDLE),
                 ("hInsertAfter", wintypes.HANDLE),
-                ("item", _TVITEMW),
+                ("itemex", _TVITEMEXW),
             ]
         pointer_mask = (1 << (ctypes.sizeof(ctypes.c_void_p) * 8)) - 1
         tvi_root = ctypes.c_void_p((-0x10000) & pointer_mask)
@@ -326,9 +334,9 @@ def _serve_native_window() -> int:
         root_item = _TVINSERTSTRUCTW()
         root_item.hParent = tvi_root
         root_item.hInsertAfter = tvi_last
-        root_item.item.mask = 0x0001 | 0x0040  # TVIF_TEXT | TVIF_CHILDREN
-        root_item.item.pszText = "Projects"
-        root_item.item.cChildren = 1
+        root_item.itemex.mask = 0x0001 | 0x0040  # TVIF_TEXT | TVIF_CHILDREN
+        root_item.itemex.pszText = "Projects"
+        root_item.itemex.cChildren = 1
         root_handle = _user32.SendMessageW(
             tree_hwnd[0], 0x1132, 0, ctypes.addressof(root_item),
         )  # TVM_INSERTITEMW
@@ -339,8 +347,8 @@ def _serve_native_window() -> int:
         child_item.hParent = ctypes.c_void_p(int(root_handle))
         child_item.hInsertAfter = tvi_last
         child_item.item.mask = 0x0001 | 0x0040
-        child_item.item.pszText = "Reports"
-        child_item.item.cChildren = 0
+        child_item.itemex.pszText = "Reports"
+        child_item.itemex.cChildren = 0
         child_handle = _user32.SendMessageW(
             tree_hwnd[0], 0x1132, 0, ctypes.addressof(child_item),
         )  # TVM_INSERTITEMW
@@ -368,18 +376,10 @@ def _serve_native_window() -> int:
     return 0
 
 
-def _native_tree_item_handle(label: str) -> int:
+def _native_tree_item_handle() -> int:
     # The fixture server records the native HTREEITEM values in its own process.
     # The single known root is the first inserted child of TVI_ROOT.
     tree = _user32.GetDlgItem(_user32.FindWindowW(_CLASS_NAME, _WINDOW_TITLE), _TREE_ID)
-    class _TVITEMW(ctypes.Structure):
-        _fields_ = [
-            ("mask", wintypes.UINT), ("hItem", wintypes.HANDLE),
-            ("state", wintypes.UINT), ("stateMask", wintypes.UINT),
-            ("pszText", wintypes.LPWSTR), ("cchTextMax", ctypes.c_int),
-            ("iImage", ctypes.c_int), ("iSelectedImage", ctypes.c_int),
-            ("cChildren", ctypes.c_int), ("lParam", ctypes.c_ssize_t),
-        ]
     # TVM_GETNEXTITEM / TVGN_ROOT retrieves the root item handle.
     root = _user32.SendMessageW(tree, 0x110A, 5, 0)  # TVGN_ROOT
     if not root:
@@ -478,7 +478,7 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         )
         tree = _user32.GetDlgItem(self.hwnd, _TREE_ID)
         if tree:
-            root = _native_tree_item_handle("Projects")
+            root = _native_tree_item_handle()
             _user32.SendMessageW(tree, 0x1102, 1, root)  # TVM_EXPAND / TVE_COLLAPSE
         time.sleep(0.05)
 
