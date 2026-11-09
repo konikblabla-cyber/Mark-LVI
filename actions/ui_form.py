@@ -117,6 +117,24 @@ def _editable_controls(window, include_wrappers=False) -> list[dict]:
                 continue
             signature = ui._control_signature(info, rect)
             automation_id = signature["automation_id"]
+            value_pattern = None
+            supports_value_pattern = False
+            read_only = None
+            current_value = None
+            try:
+                value_pattern = control.iface_value
+                supports_value_pattern = True
+                read_only = bool(value_pattern.CurrentIsReadOnly)
+                # Some native providers expose the current Edit contents as
+                # the element Name. Compare locally and never return that as
+                # a field label.
+                current_value = str(value_pattern.CurrentValue)
+            except Exception:
+                pass
+            if name and current_value is not None and (
+                _normalise_label(name) == _normalise_label(current_value)
+            ):
+                name = ""
             if _is_sensitive_label(name) or _is_sensitive_label(automation_id):
                 continue
             label = name or (
@@ -130,6 +148,8 @@ def _editable_controls(window, include_wrappers=False) -> list[dict]:
                 "automation_id": automation_id,
                 "runtime_id": signature["runtime_id"],
                 "rect": signature["rect"],
+                "supports_value_pattern": supports_value_pattern,
+                "read_only": read_only,
             }
             if include_wrappers:
                 item["control"] = control
@@ -397,6 +417,66 @@ def _run_fill_with_timeout(handle: int, process_id: int,
         "the UI Automation worker returned no verifiable result",
         total_fields=len(fields),
     )
+
+
+def inspect_form_fields(parameters: dict | None = None,
+                        player=None, session_memory=None) -> str:
+    """List safe field labels only; never return existing field values."""
+    try:
+        snapshot = _form_snapshot()
+    except Exception as exc:
+        return outcome.failed(
+            "inspect_form_fields",
+            f"could not inspect the active application form ({type(exc).__name__})",
+        )
+
+    labels = []
+    for item in snapshot["fields"]:
+        if not item.get("supports_value_pattern") or item.get("read_only") is not False:
+            continue
+        label = str(item.get("name") or "").strip()
+        if not label or _is_sensitive_label(label):
+            continue
+        automation_id = str(item.get("automation_id") or "").strip()
+        if automation_id:
+            labels.append(f"{label} [AutomationId:{automation_id}]")
+        else:
+            labels.append(label)
+    if not labels:
+        return outcome.done(
+            "inspect_form_fields",
+            field_count=0,
+            fields="none",
+            note="no safe writable Edit fields with readable labels were found",
+        )
+    return outcome.done(
+        "inspect_form_fields",
+        field_count=len(labels),
+        fields="; ".join(labels),
+        values_returned=False,
+    )
+
+
+INSPECT_TOOL = {
+    "name": "inspect_form_fields",
+    "tier": "core",
+    "brief": "List safe writable field labels in the active app without reading field contents.",
+    "description": (
+        "Use only when the user explicitly asks you to inspect a form or when "
+        "they explicitly asked you to fill fields and the exact field labels "
+        "are not known. Inspect only the active Windows application. Return "
+        "labels and AutomationIds for visible, enabled, non-password Edit "
+        "controls with writable ValuePattern. Never read or return current "
+        "field values; if a native provider exposes a field's current value "
+        "as its Name, suppress it and use AutomationId instead. Passwords, "
+        "PINs, one-time codes, payment-card data, bank identifiers, PESEL, "
+        "API keys and similar sensitive fields are excluded. No screenshot, "
+        "clipboard, keystroke logging, background polling or extra model/API "
+        "call is used. This action does not change any field."
+    ),
+    "parameters": {"type": "OBJECT", "properties": {}},
+    "handler": inspect_form_fields,
+}
 
 
 def fill_ui_fields(parameters: dict, player=None, session_memory=None) -> str:
