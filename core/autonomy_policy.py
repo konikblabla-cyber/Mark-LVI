@@ -9,8 +9,16 @@ from __future__ import annotations
 
 import re
 import threading
+import time
 
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
+_NEGATED_ACTION = re.compile(
+    r"\\b(?:do\\s+not|don't|never|not)\\s+(?:click|press|select|choose|submit|"
+    r"send|text|message|publish|post|share|upload|delete|remove)\\b|"
+    r"\\bnie\\s+(?:klikaj|kliknij|naciskaj|naciskaj|wybieraj|wybierz|"
+    r"wysyłaj|wysylaj|wyślij|wyslij|usuwaj|usun|kasuj|publikuj|opublikuj)\\b",
+    re.IGNORECASE,
+)
 _NEGATED_SEND = re.compile(
     r"\b(?:do\s+not|don't|never|not)\s+(?:send|text|message|email|dm)\b|"
     r"\bnie\s+(?:wysyłaj|wysylaj|wysyłać|wysylac|wyślij|wyslij|przesyłaj|przesylaj)\b",
@@ -64,6 +72,7 @@ _DENY_TERMS = {
     "zablokuj", "wyłączone", "wylaczone", "nie",
 }
 _SCOPE_LOCK = threading.Lock()
+_AUTHORIZATION_TTL_SECONDS = 90.0
 
 
 def new_turn_authorization(user_request: str = "") -> dict:
@@ -71,12 +80,18 @@ def new_turn_authorization(user_request: str = "") -> dict:
     return {
         "user_request": str(user_request or "")[:4000],
         "direct_send_used": False,
+        "expires_at": time.monotonic() + _AUTHORIZATION_TTL_SECONDS,
     }
 
 
 def scope_request(scope) -> str:
     """Read the actual user request from app-owned context, never tool args."""
     if not isinstance(scope, dict):
+        return ""
+    try:
+        if time.monotonic() > float(scope.get("expires_at", 0)):
+            return ""
+    except (TypeError, ValueError):
         return ""
     return str(scope.get("user_request") or "")[:4000]
 
@@ -91,18 +106,15 @@ def _target_mentioned(user_request: str, target: str) -> bool:
     if not request_tokens or not target_tokens:
         return False
     # Match exact words or inflected Polish names/verbs by a short shared stem.
-    return any(
-        req == term or (len(req) >= 4 and len(term) >= 4
-                        and req[:4] == term[:4])
-        for req in request_tokens
-        for term in target_tokens
-    )
+    # Exact token overlap only. A fuzzy name match such as Alex/Alexa must
+    # never authorize an external action to the wrong person.
+    return bool(request_tokens.intersection(target_tokens))
 
 
 def explicitly_requested_target_action(user_request: str, target: str) -> bool:
     """True only when this turn names the target and explicitly asks to act on it."""
     request = str(user_request or "")
-    if not request or _NEGATED_SEND.search(request):
+    if not request or _NEGATED_ACTION.search(request):
         return False
     has_action_verb = bool(re.search(
         r"\b(?:click|press|select|choose|submit|send|publish|share|upload|"
@@ -136,7 +148,11 @@ def requires_checkbox_confirmation(label: str, desired: bool,
         return False
     request = scope_request(session_memory)
     request_words = _tokens(request)
-    if request and _SETTING_VERB.search(request) and words.intersection(request_words):
+    setting_match = any(
+        req == term or (len(req) >= 6 and len(term) >= 6 and req[:6] == term[:6])
+        for req in request_words for term in words
+    )
+    if request and _SETTING_VERB.search(request) and setting_match:
         return False
     # A checkbox labelled as a rejection/opt-out is safe to enable.
     if words.intersection(_DENY_TERMS):
@@ -154,7 +170,9 @@ def consume_explicit_send_authorization(session_memory, receiver: str) -> bool:
         request = scope_request(session_memory)
         if not request or _NEGATED_SEND.search(request) or not _SEND_INTENT.search(request):
             return False
-        if not _target_mentioned(request, receiver):
+        receiver_tokens = _tokens(receiver)
+        request_tokens = _tokens(request)
+        if not receiver_tokens or not receiver_tokens.issubset(request_tokens):
             return False
         session_memory["direct_send_used"] = True
         return True

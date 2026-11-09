@@ -54,10 +54,17 @@ class AutonomyPolicyTests(unittest.TestCase):
                 self.assertTrue(requires_ui_confirmation(target, user_request=request))
 
     def test_direct_send_authorization_is_recipient_scoped_and_one_shot(self):
-        scope = new_turn_authorization("Wyślij wiadomość do Alexa: będę o 18:30")
+        scope = new_turn_authorization("Wyślij wiadomość do Alex: będę o 18:30")
         self.assertTrue(consume_explicit_send_authorization(scope, "Alex"))
         self.assertFalse(consume_explicit_send_authorization(scope, "Alex"))
         self.assertFalse(consume_explicit_send_authorization(scope, "Barbara"))
+
+    def test_turn_authorization_expires(self):
+        from unittest.mock import patch
+        with patch("core.autonomy_policy.time.monotonic", side_effect=[100.0, 191.0]):
+            scope = new_turn_authorization("Send a message to Alex")
+            self.assertEqual(scope["user_request"], "Send a message to Alex")
+            self.assertFalse(consume_explicit_send_authorization(scope, "Alex"))
 
     def test_send_authorization_rejects_negated_or_unspecified_requests(self):
         for request in (
@@ -65,6 +72,8 @@ class AutonomyPolicyTests(unittest.TestCase):
             "Do not send a message to Alex",
             "Open WhatsApp for Alex",
             "Send a message to someone",
+            "Do not click Delete",
+            "Nie klikaj Wyślij",
         ):
             with self.subTest(request=request):
                 scope = new_turn_authorization(request)

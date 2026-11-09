@@ -41,7 +41,7 @@ class OutboundMessageConfirmationTests(unittest.TestCase):
 
     def test_explicit_user_send_to_named_recipient_skips_second_confirmation(self):
         from core.autonomy_policy import new_turn_authorization
-        scope = new_turn_authorization("Wyślij wiadomość do Alexa: będę o 18:30")
+        scope = new_turn_authorization("Wyślij wiadomość do Alex: będę o 18:30")
         with patch.object(action, "_PYAUTOGUI", True), \
              patch.object(action, "_queue_send", return_value="queued") as queue, \
              patch.object(action.confirm, "request") as request:
@@ -52,7 +52,7 @@ class OutboundMessageConfirmationTests(unittest.TestCase):
 
     def test_explicit_send_authorization_is_consumed_once(self):
         from core.autonomy_policy import new_turn_authorization
-        scope = new_turn_authorization("Send Alex a message")
+        scope = new_turn_authorization("Send a message to Alex")
         with patch.object(action, "_PYAUTOGUI", True), \
              patch.object(action, "_queue_send", return_value="queued"), \
              patch.object(action.confirm, "request", return_value="[CONFIRMATION_PENDING]") as request:
