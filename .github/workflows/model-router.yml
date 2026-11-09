@@ -107,6 +107,6 @@ jobs:
       - name: Install Windows UI Automation dependencies
         run: python -m pip install pywinauto pywin32
       - name: Compile UI Automation modules
-        run: python -m py_compile actions/screen_understanding.py actions/ui_interaction.py actions/ui_sequence.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py actions/ui_spinner.py core/_ui_spinner_tests.py core/confirm.py core/_screen_understanding_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py core/_confirm_tests.py core/_ui_sequence_tests.py
+        run: python -m py_compile actions/screen_understanding.py actions/ui_interaction.py actions/ui_sequence.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_screen_understanding_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py core/_confirm_tests.py core/_ui_sequence_tests.py
       - name: Run native Windows UI Automation integration tests
         run: python -m core._ui_interaction_windows_tests

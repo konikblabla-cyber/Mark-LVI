@@ -9,15 +9,16 @@ import re
 
 _MAX_SCANNED = 1200
 _MAX_ITEMS = 60
+_MAX_OUTPUT_CHARS = 6000
 _ALLOWED = {"Calendar", "CalendarItem", "ComboBox", "Spinner", "Edit",
             "Button", "Text", "List", "ListItem", "DatePicker"}
 _SENSITIVE_PHRASES = (
     "password", "passwd", "passcode", "security code", "one-time code",
     "recovery code", "verification code", "authentication code", "credit card",
     "card number", "cvv", "cvc", "iban", "bank account", "routing number",
-    "private key", "api key", "access token", "secret key", "security token",
+    "private key", "api key", "access token", "secret key", "security token", "credential", "bearer token",
 )
-_SENSITIVE_WORDS = {"pin", "otp", "cvv", "cvc", "iban"}
+_SENSITIVE_WORDS = {"pin", "otp", "cvv", "cvc", "iban", "token", "credential", "secret"}
 _PATTERN_NAMES = {
     "value", "range_value", "selection_item", "expand_collapse",
     "invoke", "toggle", "grid",
@@ -43,9 +44,19 @@ def _normalise_sensitive_text(value):
 def _is_sensitive(value):
     text = _normalise_sensitive_text(value)
     words = set(re.findall(r"[a-z0-9]+", text))
-    return bool(words.intersection(_SENSITIVE_WORDS)) or any(
+    if words.intersection(_SENSITIVE_WORDS) or any(
         phrase in text for phrase in _SENSITIVE_PHRASES
-    )
+    ):
+        return True
+    # Avoid exposing personal contact details and opaque identifier payloads
+    # embedded in otherwise innocuous accessible names or AutomationIds.
+    if re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", text, re.I):
+        return True
+    if re.search(r"(?<!\d)(?:\+?\d[\s().-]*){9,}(?!\d)", text):
+        return True
+    if re.fullmatch(r"[a-z0-9_-]{32,}", text):
+        return True
+    return False
 
 
 def _safe_label(value):
@@ -67,7 +78,27 @@ def format_picker_diagnostics(records, limit=_MAX_ITEMS):
 
     lines = []
     seen = set()
-    for item in iterator:
+    output_chars = 0
+
+    def append_line(line, truncation_marker=False):
+        nonlocal output_chars
+        separator = 1 if lines else 0
+        if output_chars + separator + len(line) <= _MAX_OUTPUT_CHARS:
+            lines.append(line)
+            output_chars += separator + len(line)
+            return True
+        marker = "- [output truncated]"
+        marker_separator = 1 if lines else 0
+        if not truncation_marker and output_chars + marker_separator + len(marker) <= _MAX_OUTPUT_CHARS:
+            lines.append(marker)
+            output_chars += marker_separator + len(marker)
+        return False
+
+    visible_items = 0
+    for scanned, item in enumerate(iterator):
+        if scanned >= _MAX_SCANNED:
+            append_line("- [scan limit reached]")
+            break
         if not isinstance(item, dict):
             continue
         role = str(item.get("role") or "")
@@ -91,11 +122,14 @@ def format_picker_diagnostics(records, limit=_MAX_ITEMS):
                 patterns.append(value)
         detail = ", ".join(patterns) if patterns else "no supported action pattern detected"
         suffix = f"; AutomationId={safe_id}" if safe_id else ""
+        line = f"- {role}: {label}{suffix}; patterns: {detail}"
 
-        if len(lines) >= safe_limit:
-            lines.append("- [item limit reached]")
+        if visible_items >= safe_limit:
+            append_line("- [item limit reached]")
             break
-        lines.append(f"- {role}: {label}{suffix}; patterns: {detail}")
+        if not append_line(line):
+            break
+        visible_items += 1
 
     return "\n".join(lines) if lines else (
         "No safe visible date/time picker controls were exposed by Windows UI Automation."
