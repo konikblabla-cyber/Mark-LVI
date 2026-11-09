@@ -10,7 +10,10 @@ _MAX_TEXT_CHARS = 4000
 
 def _validate(parameters: dict) -> tuple[str | None, str | None, str]:
     params = parameters if isinstance(parameters, dict) else {}
-    label = " ".join(str(params.get("field_label") or "").split())
+    raw_label = params.get("field_label")
+    if not isinstance(raw_label, str):
+        return None, None, "field_label must be a string"
+    label = " ".join(raw_label.split())
     value = params.get("text")
     if not label or len(label) > _MAX_FIELD_LABEL_CHARS:
         return None, None, "field_label is required and must be at most 120 characters"
