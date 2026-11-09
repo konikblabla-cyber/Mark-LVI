@@ -20,6 +20,8 @@ on:
       - "actions/ui_spinner.py"
       - "core/_ui_checkbox_tests.py"
       - "actions/ui_checkbox.py"
+      - "core/_ui_radio_tests.py"
+      - "actions/ui_radio.py"
       - "core/_ui_dropdown_tests.py"
       - "core/_ui_calendar_tests.py"
       - "core/_ui_time_tests.py"
@@ -59,6 +61,7 @@ on:
       - "feature/ui-picker-diagnostics"
       - "feature/verified-spinner-value-rebased"
       - "feature/verified-checkbox-state-rebased"
+      - "feature/verified-radio-selection-rebased"
 
 jobs:
   router:
