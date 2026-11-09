@@ -35,14 +35,17 @@ class StandaloneTextEntryTests(unittest.TestCase):
         with patch.object(text_entry.ui, "_snapshot", return_value=snapshot), \
              patch.object(
                  text_entry.ui, "_fill_text_and_verify",
-                 return_value="status=done action=fill_text_and_verify verified=true",
+                 return_value="status=done action=fill_text_field verified=true",
              ) as fill:
             result = text_entry.fill_text_field({
                 "field_label": "Project title",
                 "text": "Quarterly plan",
             })
         self.assertTrue(result.startswith("status=done "), result)
-        fill.assert_called_once_with("Project title", "Quarterly plan", 101, 4321)
+        fill.assert_called_once_with(
+            "Project title", "Quarterly plan", 101, 4321,
+            action_name="fill_text_field",
+        )
 
     def test_entered_text_is_not_echoed_in_failure_or_success(self):
         value = "a private project draft"
@@ -50,7 +53,7 @@ class StandaloneTextEntryTests(unittest.TestCase):
         with patch.object(text_entry.ui, "_snapshot", return_value=snapshot), \
              patch.object(
                  text_entry.ui, "_fill_text_and_verify",
-                 return_value="status=unverified action=fill_text_and_verify reason=readback_mismatch",
+                 return_value="status=unverified action=fill_text_field reason=readback_mismatch",
              ):
             result = text_entry.fill_text_field({
                 "field_label": "Project title", "text": value,
