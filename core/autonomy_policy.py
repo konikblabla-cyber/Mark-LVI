@@ -13,9 +13,9 @@ import time
 
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _NEGATED_ACTION = re.compile(
-    r"\\b(?:do\\s+not|don't|never|not)\\s+(?:click|press|select|choose|submit|"
+    r"\b(?:do\\s+not|don't|never|not)\\s+(?:click|press|select|choose|submit|"
     r"send|text|message|publish|post|share|upload|delete|remove)\\b|"
-    r"\\bnie\\s+(?:klikaj|kliknij|naciskaj|naciskaj|wybieraj|wybierz|"
+    r"\bnie\\s+(?:klikaj|kliknij|naciskaj|naciskaj|wybieraj|wybierz|"
     r"wysyłaj|wysylaj|wyślij|wyslij|usuwaj|usun|kasuj|publikuj|opublikuj)\\b",
     re.IGNORECASE,
 )
@@ -117,8 +117,8 @@ def explicitly_requested_target_action(user_request: str, target: str) -> bool:
     if not request or _NEGATED_ACTION.search(request):
         return False
     has_action_verb = bool(re.search(
-        r"\b(?:click|press|select|choose|submit|send|publish|share|upload|"
-        r"wybierz|kliknij|naciśnij|nacisnij|zatwierdź|zatwierdz|"
+        r"\b(?:click|press|select|choose|submit|send|publish|share|upload|delete|remove|erase|"
+        r"wybierz|kliknij|naciśnij|nacisnij|zatwierdź|zatwierdz|usuń|usun|kasuj|"
         r"wyślij|wyslij|opublikuj|udostępnij|udostepnij)\b",
         request, re.IGNORECASE,
     ))

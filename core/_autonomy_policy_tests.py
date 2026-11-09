@@ -23,7 +23,7 @@ class AutonomyPolicyTests(unittest.TestCase):
 
     def test_explicit_targeted_user_request_authorizes_one_bounded_external_action(self):
         self.assertFalse(requires_ui_confirmation(
-            "Send", user_request="Wyślij wiadomość do Alexa"
+            "Wyślij", user_request="Wyślij wiadomość do Alexa"
         ))
         self.assertFalse(requires_ui_confirmation(
             "Publish", user_request="Publish the release notes"
