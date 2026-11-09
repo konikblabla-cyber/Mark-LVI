@@ -106,6 +106,11 @@ def _continue_instruction(mission: dict) -> str:
         return ("\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
                 "Report the completed result to the user; do not invent extra work.")
     if step.get("status") == "running":
+        if step.get("ui_action"):
+            return ("\n[MISSION_RECOVERY] A UI action plan was already issued for this step before "
+                    "the last session ended. The action may or may not have happened. Do NOT issue "
+                    "or repeat it. First use read-only tools to inspect the real state. If success "
+                    "is verified, call complete_step; if uncertain, call block_step and explain why.")
         return ("\n[MISSION_RECOVERY] This step was started before the last session ended. "
                 "Its action may already have happened. Do NOT repeat side effects. First use "
                 "read-only tools to inspect the real state. If success is verified, call "
@@ -134,6 +139,86 @@ def _format(mission: dict) -> str:
     if pending:
         lines.extend(["", f"NEXT: {pending['id']} — {pending['title']}"])
     return "\n".join(lines)
+
+
+
+_UI_PLAN_PARAMETER_TYPES = {
+    "set_checkbox_state": {"checkbox_label": str, "checked": bool},
+    "select_tab_item": {"tab_label": str},
+    "select_radio_option": {"radio_label": str},
+    "select_list_item": {"item_label": str},
+    "select_dropdown_option": {"combo_label": str, "option_label": str},
+    "set_tree_item_expanded": {"item_label": str, "expanded": bool},
+    "click_and_verify": {"button_label": str, "expected_result": str},
+}
+
+
+def _fresh_ui_plan(goal: str) -> dict:
+    """Take one fresh local UIA snapshot and validate a single read-only plan."""
+    try:
+        from actions import ui_interaction
+        from core.ui_reasoning import plan_ui_task
+
+        snapshot = ui_interaction._snapshot()
+        proposed = plan_ui_task(goal, snapshot)
+    except Exception as exc:
+        return {
+            "status": "blocked",
+            "reason": f"could not inspect the active application ({type(exc).__name__})",
+            "steps": [],
+        }
+
+    if not isinstance(proposed, dict):
+        return {"status": "blocked", "reason": "planner returned an invalid result", "steps": []}
+
+    status = proposed.get("status")
+    if status in {"needs_clarification", "blocked"}:
+        return {
+            "status": status,
+            "reason": str(proposed.get("reason") or "")[:160],
+            "question": str(proposed.get("question") or "")[:320],
+            "steps": [],
+        }
+    if status != "planned":
+        return {"status": "blocked", "reason": "planner returned an unsupported status", "steps": []}
+
+    proposed_steps = proposed.get("steps")
+    if not isinstance(proposed_steps, list) or len(proposed_steps) != 1:
+        return {"status": "blocked", "reason": "planner must return exactly one UI action", "steps": []}
+    item = proposed_steps[0]
+    if not isinstance(item, dict):
+        return {"status": "blocked", "reason": "planner returned an invalid UI action", "steps": []}
+
+    tool_name = item.get("tool")
+    expected_types = _UI_PLAN_PARAMETER_TYPES.get(tool_name)
+    params = item.get("parameters")
+    if not expected_types or not isinstance(params, dict) or set(params) != set(expected_types):
+        return {"status": "blocked", "reason": "planner returned an unsupported UI action shape", "steps": []}
+    for key, expected_type in expected_types.items():
+        value = params.get(key)
+        if expected_type is bool:
+            valid = isinstance(value, bool)
+        else:
+            valid = isinstance(value, str) and bool(value.strip()) and len(value) <= 160
+        if not valid:
+            return {"status": "blocked", "reason": "planner returned invalid UI action parameters", "steps": []}
+
+    risk = item.get("risk")
+    confirmation = item.get("requires_confirmation")
+    if risk not in {"low", "high"} or not isinstance(confirmation, bool):
+        return {"status": "blocked", "reason": "planner returned invalid UI action safety metadata", "steps": []}
+    if confirmation != (risk == "high"):
+        return {"status": "blocked", "reason": "planner confirmation metadata is inconsistent", "steps": []}
+
+    safe_item = {
+        "tool": tool_name,
+        "parameters": dict(params),
+        "risk": risk,
+        "requires_confirmation": confirmation,
+        "reason": str(item.get("reason") or "")[:240],
+        "expected_result": str(item.get("expected_result") or "")[:320],
+    }
+    return {"status": "planned", "execution": "not_started", "steps": [safe_item]}
 
 
 def run(parameters: dict, player=None, session_memory=None) -> str:
@@ -210,6 +295,39 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                         result = f"{state}: {m['title']} ({m['id']}): {step['id']} — {step['title']}"
                 else:
                     result = _format(selected) if selected else "Give me a mission_id to show its details."
+            elif action == "plan_ui_step":
+                mission = next((m for m in missions if m.get("id") == mission_id), None)
+                sid = str(parameters.get("step_id") or "").strip()
+                if mission is None:
+                    return "Give me a valid mission_id."
+                if mission.get("status") != "active" or mission.get("execution_mode") != "autonomous":
+                    return "Start this mission in autonomous mode before planning a UI step."
+                step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
+                if step is None:
+                    return "Give me a valid step_id for that mission."
+                expected = _next_open_step(mission)
+                if expected is None or expected.get("id") != sid or step.get("status") != "running":
+                    return "Call begin_step for the current mission step before planning its UI action."
+                if step.get("ui_action"):
+                    result = (
+                        "[MISSION_UI_RECOVERY] A UI action plan was already issued for this step. "
+                        "Do NOT request or execute it again. Inspect the current application using "
+                        "read-only tools. If the action's success is verified, call complete_step "
+                        "with real evidence; if uncertain, call block_step and stop."
+                    )
+                else:
+                    ui_plan = _fresh_ui_plan(step["title"])
+                    if ui_plan.get("status") == "planned":
+                        step["ui_action"] = ui_plan["steps"][0]
+                        step["ui_action_planned_at"] = _now()
+                        step["updated_at"] = _now()
+                        mission["updated_at"] = _now()
+                        _write(data)
+                    result = "[MISSION_UI_PLAN] " + json.dumps({
+                        "mission_id": mission_id,
+                        "step_id": sid,
+                        **ui_plan,
+                    }, ensure_ascii=False, separators=(",", ":"))
             elif action == "begin_step":
                 sid = str(parameters.get("step_id") or "").strip()
                 mission = next((m for m in missions if m.get("id") == mission_id), None)
@@ -323,7 +441,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if action == "resume" and mission.get("execution_mode") == "autonomous":
                     result += _continue_instruction(mission)
             else:
-                return ("Choose plan, start, list, show, next, begin_step, complete_step, block_step, "
+                return ("Choose plan, start, list, show, next, plan_ui_step, begin_step, complete_step, block_step, "
                         "add_step, pause, resume, complete or archive.")
 
         if player:
@@ -354,16 +472,22 @@ PLUGIN = {
         "action='start' with its mission_id. The [MISSION_CONTINUE] result is an instruction "
         "to execute the next step immediately using the existing tools, record verified "
         "success with complete_step, and continue until [MISSION_COMPLETE] or [MISSION_BLOCKED]. "
-        "Never mark a step done without tool evidence. Stop at [CONFIRMATION_PENDING] and ask "
-        "for the real HUD confirmation. This plugin stores mission state; the live assistant "
-        "executes steps through its existing tools."
+        "For a running desktop-UI step, call plan_ui_step after begin_step. It takes a fresh "
+        "privacy-filtered local UI snapshot and returns at most one exact existing verified action; "
+        "it never executes that action. Execute only that returned tool and parameters once, then "
+        "complete_step only with real verification evidence. A UI plan is persisted before hand-off; "
+        "after interruption never reissue it—inspect read-only and complete or block. If the planner "
+        "asks for clarification or blocks, do not guess. High-impact actions still require the real "
+        "HUD confirmation. Never mark a step done without tool evidence. Stop at "
+        "[CONFIRMATION_PENDING] and ask for the real HUD confirmation. The live assistant executes "
+        "steps through existing verified tools."
     ),
     "tier": "core",
     "brief": "Create and track durable multi-step missions, see next steps and resume paused work.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "plan, start, list, show, next, begin_step, complete_step, block_step, add_step, pause, resume, complete or archive"},
+            "action": {"type": "STRING", "description": "plan, start, list, show, next, plan_ui_step, begin_step, complete_step, block_step, add_step, pause, resume, complete or archive"},
             "title": {"type": "STRING", "description": "Mission title"},
             "goal": {"type": "STRING", "description": "What must be achieved"},
             "steps": {"type": "STRING", "description": "Optional ordered step list, one step per line"},
