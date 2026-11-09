@@ -629,6 +629,27 @@ def _to_openai_messages(contents, config) -> tuple[list[dict], Optional[float]]:
     return messages, temperature
 
 
+def _guard_provider_fallback(provider_id: str, contents) -> None:
+    """Fail closed before a provider fallback can make a network request.
+
+    The generic Gemini ladder predates the opt-in task router. Without this
+    guard, a configured paid provider could be reached after a Gemini outage
+    even when the router's $0 acknowledgement and local usage budget were not
+    enabled. Reuse the router's exact provider allowlist and reserve budget
+    before building or calling the provider.
+    """
+    from core import model_router
+
+    settings = model_router._settings()
+    if not settings.get("zero_cost_confirmed", False):
+        raise model_router.RouterError(
+            "provider fallback blocked: verify the provider is $0 with no payment method "
+            "and enable MARK's zero-cost acknowledgement first"
+        )
+    model_router._assert_zero_cost_provider(provider_id)
+    model_router._reserve(contents, settings)
+
+
 def _provider_call(model: str, contents, config, timeout_ms: int):
     """One generation through a configured provider. Raises like every other
     rung, so the loop's error classification applies to it unchanged."""
@@ -636,6 +657,7 @@ def _provider_call(model: str, contents, config, timeout_ms: int):
     from providers import registry
 
     pid = model[len(PROVIDER_PREFIX):]
+    _guard_provider_fallback(pid, contents)
     cfg = get_provider_config(pid)
     missing = registry.missing_fields(pid, cfg)
     if missing:
