@@ -615,9 +615,11 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(after_status, "found", after_reason)
         self.assertTrue(after_selected)
-        self.assertEqual(_user32.GetWindowTextW(
-            self._status_handle(), ctypes.create_unicode_buffer(128), 128,
-        ) if False else "Mode: Advanced", "Mode: Advanced")
+        final_snapshot = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Mode: Advanced" for item in final_snapshot["records"]),
+            final_snapshot["records"],
+        )
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
