@@ -62,7 +62,7 @@ class UISequenceTests(unittest.TestCase):
             {"action": "fill_text", "field_label": "Title", "text": ""},
             {"action": "fill_text", "field_label": "", "text": "Value"},
             {"action": "fill_text", "field_label": "Title", "text": "Value", "password": False},
-            {"action": "fill_text", "field_label": "Title", "text": "bad\\x00value"},
+            {"action": "fill_text", "field_label": "Title", "text": "bad\x00value"},
             {"action": "type_anything", "field_label": "Title", "text": "Value"},
         ]
         for step in invalid:
