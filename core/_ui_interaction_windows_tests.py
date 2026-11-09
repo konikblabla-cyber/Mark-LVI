@@ -24,6 +24,7 @@ from actions.ui_interaction import (
     _snapshot,
 )
 from actions import ui_sequence
+from actions import text_entry
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -33,6 +34,8 @@ _NOOP_BUTTON_ID = 102
 _RESET_BUTTON_ID = 103
 _OPEN_PANEL_BUTTON_ID = 104
 _FINISH_WORKFLOW_BUTTON_ID = 105
+_SEARCH_EDIT_ID = 106
+_PASSWORD_EDIT_ID = 107
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -89,6 +92,10 @@ if sys.platform == "win32":
     ]
     _user32.FindWindowW.restype = wintypes.HWND
     _user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    _user32.GetDlgItem.restype = wintypes.HWND
+    _user32.GetDlgItem.argtypes = [wintypes.HWND, ctypes.c_int]
+    _user32.GetWindowTextW.restype = ctypes.c_int
+    _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
     _user32.GetMessageW.restype = ctypes.c_int
     _user32.GetMessageW.argtypes = [
         ctypes.POINTER(wintypes.MSG), wintypes.HWND,
@@ -175,8 +182,25 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Finish workflow", 0x50000000,
         190, 170, 160, 34, hwnd, ctypes.c_void_p(_FINISH_WORKFLOW_BUTTON_ID), hinstance, None,
     )
+    search_label_hwnd = _user32.CreateWindowExW(
+        0, "STATIC", "Search query", 0x50000000,
+        20, 220, 100, 26, hwnd, None, hinstance, None,
+    )
+    search_edit_hwnd = _user32.CreateWindowExW(
+        0, "EDIT", "", 0x50810080,
+        130, 220, 240, 28, hwnd, ctypes.c_void_p(_SEARCH_EDIT_ID), hinstance, None,
+    )
+    password_label_hwnd = _user32.CreateWindowExW(
+        0, "STATIC", "Password", 0x50000000,
+        20, 255, 100, 26, hwnd, None, hinstance, None,
+    )
+    password_edit_hwnd = _user32.CreateWindowExW(
+        0, "EDIT", "", 0x508100A0,
+        130, 255, 240, 28, hwnd, ctypes.c_void_p(_PASSWORD_EDIT_ID), hinstance, None,
+    )
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
-                open_panel_hwnd, finish_workflow_hwnd)):
+                open_panel_hwnd, finish_workflow_hwnd, search_label_hwnd,
+                search_edit_hwnd, password_label_hwnd, password_edit_hwnd)):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -257,6 +281,12 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         # Tests share one native window, so restore a known state each time.
+        _user32.SetWindowTextW(
+            _user32.GetDlgItem(self.hwnd, _SEARCH_EDIT_ID), "",
+        )
+        _user32.SetWindowTextW(
+            _user32.GetDlgItem(self.hwnd, _PASSWORD_EDIT_ID), "",
+        )
         snapshot = _snapshot(int(self.hwnd))
         if any(item["name"] == "Not saved" for item in snapshot["records"]):
             return
@@ -409,6 +439,40 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             any(item["name"] == "Not saved" for item in after["records"]),
             after["records"],
         )
+
+    def test_value_pattern_fills_one_labeled_edit_without_returning_text(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        entered = "MARK local integration draft"
+        result = text_entry.fill_text_field({
+            "field_label": "Search query",
+            "text": entered,
+        })
+        self.assertTrue(
+            result.startswith("status=done action=fill_text_field "),
+            result,
+        )
+        self.assertNotIn(entered, result)
+        buffer = ctypes.create_unicode_buffer(256)
+        edit_hwnd = _user32.GetDlgItem(self.hwnd, _SEARCH_EDIT_ID)
+        self.assertGreater(_user32.GetWindowTextW(edit_hwnd, buffer, 256), 0)
+        self.assertEqual(buffer.value, entered)
+
+    def test_password_edit_is_never_enumerated_or_filled(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        snapshot = text_entry._snapshot()
+        self.assertEqual(snapshot["handle"], int(self.hwnd), snapshot)
+        self.assertFalse(
+            any("Password" in item["name"] for item in snapshot["fields"]),
+            snapshot["fields"],
+        )
+        result = text_entry.fill_text_field({
+            "field_label": "Password",
+            "text": "never enter this",
+        })
+        self.assertTrue(result.startswith("status=failed "), result)
+        self.assertNotIn("never enter this", result)
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
