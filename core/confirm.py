@@ -125,8 +125,8 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
     if not claimed:
         _cancel_callback(on_cancel, title, "another confirmation is pending")
         return (
-            f"Another confirmation is already waiting on the HUD: "
-            f"{existing_title}. Nothing was done for '{title}'."
+            f"[CONFIRMATION_BUSY] Another confirmation is already waiting "
+            f"on the HUD: {existing_title}. Nothing was done for '{title}'."
         )
 
     try:
