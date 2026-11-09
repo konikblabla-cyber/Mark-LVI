@@ -129,6 +129,33 @@ class UIFormTests(unittest.TestCase):
         self.assertNotIn("MARK", result)
         self.assertIn("submitted=false", result)
 
+    def test_exact_automation_id_can_target_an_unlabelled_native_field(self):
+        control = _Control("City", "Old")
+        control.element_info.name = ""
+        result = self._with_desktop(
+            [control],
+            lambda _window: ui_form._fill_fields_on_window(
+                77, 4242, self._fields(("AutomationId:city", "New city")),
+                __import__("threading").Event(),
+            ),
+        )
+        self.assertTrue(result.startswith("status=done action=fill_ui_fields "), result)
+        self.assertEqual(control.iface_value.CurrentValue, "New city")
+        self.assertNotIn("New city", result)
+
+    def test_two_aliases_for_same_field_are_rejected_before_any_write(self):
+        control = _Control("City", "Old")
+        result = self._with_desktop(
+            [control],
+            lambda _window: ui_form._fill_fields_on_window(
+                77, 4242, self._fields(
+                    ("City", "First"), ("AutomationId:city", "Second"),
+                ), __import__("threading").Event(),
+            ),
+        )
+        self.assertTrue(result.startswith("status=failed action=fill_ui_fields "), result)
+        self.assertEqual(control.iface_value.CurrentValue, "Old")
+
     def test_duplicate_exact_labels_are_not_ranked(self):
         first, second = _Control("City"), _Control("City")
         result = self._with_desktop(
