@@ -15,6 +15,7 @@ on:
   push:
     branches:
       - "feature/multi-model-task-router"
+      - "feature/free-only-provider-fallback-guard"
 
 jobs:
   router:
