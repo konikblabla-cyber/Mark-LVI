@@ -18,6 +18,8 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.path_patch.start()
         mission_control._LOCK.acquire()
         mission_control._LOCK.release()
+        from core.autonomy_policy import new_turn_authorization
+        self.scope = new_turn_authorization("Run the test mission")
 
     def tearDown(self):
         self.path_patch.stop()
@@ -35,18 +37,27 @@ class MissionControlReliabilityTests(unittest.TestCase):
         return data["missions"][0]["id"]
 
     def start(self, mission_id):
-        return mission_control.run({"action": "start", "mission_id": mission_id})
+        return mission_control.run({
+            "action": "start", "mission_id": mission_id,
+        }, session_memory=self.scope)
 
     def begin(self, mission_id, step_id="S01"):
         return mission_control.run({
             "action": "begin_step", "mission_id": mission_id, "step_id": step_id,
-        })
+        }, session_memory=self.scope)
 
-    def complete(self, mission_id, step_id="S01", verification="Verified by tool result"):
+    def record_verified_tool(self, tool_name="verified_test_action"):
+        result = f"status=done action={tool_name} verified=true"
+        self.assertTrue(mission_control.record_tool_result(
+            self.scope, tool_name, result,
+        ))
+        return result
+
+    def complete(self, mission_id, step_id="S01", verification="Model-supplied text is not evidence"):
         return mission_control.run({
             "action": "complete_step", "mission_id": mission_id,
             "step_id": step_id, "verification": verification,
-        })
+        }, session_memory=self.scope)
 
     def test_plan_is_persisted_without_starting_execution(self):
         mission_id = self.plan()
@@ -62,52 +73,53 @@ class MissionControlReliabilityTests(unittest.TestCase):
         result = self.start(mission_id)
         self.assertIn("[MISSION_CONTINUE]", result)
         self.assertIn("STEP_ID=S01", result)
+        self.assertIn("do NOT call begin_step", result)
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["execution_mode"], "autonomous")
-        self.assertEqual([s["status"] for s in mission["steps"]], ["pending"] * 3)
+        self.assertEqual([s["status"] for s in mission["steps"]],
+                         ["running", "pending", "pending"])
+        self.assertEqual(self.scope["_mission_execution"]["step_id"], "S01")
 
-    def test_step_must_be_started_before_completion(self):
+    def test_step_must_be_claimed_before_completion(self):
         mission_id = self.plan()
-        self.start(mission_id)
         result = self.complete(mission_id)
-        self.assertIn("Call begin_step", result)
+        self.assertIn("currently running step", result)
         self.assertEqual(mission_control._read()["missions"][0]["steps"][0]["status"], "pending")
 
-    def test_completion_requires_verification_evidence(self):
+    def test_completion_requires_dispatcher_evidence_not_model_text(self):
         mission_id = self.plan()
         self.start(mission_id)
-        self.begin(mission_id)
-        result = self.complete(mission_id, verification="")
-        self.assertIn("verified result", result)
+        result = self.complete(mission_id, verification="I personally verified this.")
+        self.assertIn("No matching verified tool result", result)
         self.assertEqual(mission_control._read()["missions"][0]["steps"][0]["status"], "running")
 
-    def test_verified_completion_advances_to_next_step(self):
+    def test_verified_completion_auto_claims_next_step(self):
         mission_id = self.plan()
         self.start(mission_id)
-        self.begin(mission_id)
+        self.record_verified_tool()
         result = self.complete(mission_id)
         self.assertIn("[MISSION_CONTINUE]", result)
         self.assertIn("STEP_ID=S02", result)
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["steps"][0]["status"], "done")
-        self.assertEqual(mission["steps"][0]["verification"], "Verified by tool result")
-        self.assertEqual(mission["steps"][1]["status"], "pending")
+        self.assertIn("Application verified verified_test_action", mission["steps"][0]["verification"])
+        self.assertEqual(mission["steps"][1]["status"], "running")
+        self.assertEqual(self.scope["_mission_execution"]["step_id"], "S02")
 
     def test_interrupted_running_step_is_never_automatically_repeated(self):
         mission_id = self.plan()
         self.start(mission_id)
-        self.begin(mission_id)
+        self.scope = {"user_request": "Continue the mission"}
         recovery = self.start(mission_id)
-        self.assertIn("[MISSION_RECOVERY]", recovery)
-        self.assertIn("Do NOT repeat side effects", recovery)
+        self.assertIn("[MISSION_RECOVERY_REQUIRED]", recovery)
+        self.assertIn("Do NOT repeat", recovery)
         self.assertNotIn("[MISSION_CONTINUE]", recovery)
         mission = mission_control._read()["missions"][0]
-        self.assertEqual(mission["steps"][0]["status"], "running")
+        self.assertEqual(mission["steps"][0]["status"], "blocked")
 
     def test_begin_step_is_idempotently_refused_for_running_step(self):
         mission_id = self.plan()
         self.start(mission_id)
-        self.begin(mission_id)
         result = self.begin(mission_id)
         self.assertIn("already started", result)
         self.assertEqual(mission_control._read()["missions"][0]["steps"][0]["status"], "running")
@@ -119,79 +131,61 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertIn("Only the next pending step", begin_result)
         complete_result = self.complete(mission_id, "S02")
         self.assertIn("Out-of-order completion refused", complete_result)
-        self.assertIn("next pending step is S01", complete_result)
         self.assertEqual(
             [s["status"] for s in mission_control._read()["missions"][0]["steps"]],
-            ["pending", "pending", "pending"],
+            ["running", "pending", "pending"],
         )
 
-    def test_blocked_step_cannot_be_retried_until_read_only_recovery(self):
-        mission_id = self.plan()
+    def test_blocked_step_requires_actual_read_only_inspection_before_resolution(self):
+        mission_id = self.plan("Do one task")
         self.start(mission_id)
-        self.begin(mission_id)
         blocked = mission_control.run({
             "action": "block_step", "mission_id": mission_id,
-            "step_id": "S01", "reason": "The target control is unavailable",
-        })
+            "step_id": "S01", "reason": "Execution outcome is uncertain",
+        }, session_memory=self.scope)
         self.assertIn("[MISSION_BLOCKED]", blocked)
-        mission = mission_control._read()["missions"][0]
-        self.assertEqual(mission["status"], "paused")
-        self.assertEqual(mission["steps"][0]["status"], "blocked")
-        self.assertTrue(mission["steps"][0]["outcome_uncertain"])
-
-        resumed = mission_control.run({"action": "resume", "mission_id": mission_id})
+        resumed = mission_control.run({"action": "resume", "mission_id": mission_id},
+                                      session_memory=self.scope)
         self.assertIn("[MISSION_RECOVERY_REQUIRED]", resumed)
-        mission = mission_control._read()["missions"][0]
-        self.assertEqual(mission["status"], "paused")
-        self.assertEqual(mission["steps"][0]["status"], "blocked")
-
+        refused = mission_control.run({
+            "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
+            "resolution": "retry_safe", "verification": "I checked that nothing happened.",
+        }, session_memory=self.scope)
+        self.assertIn("actual read-only inspection", refused)
+        mission_control.record_tool_result(
+            self.scope, "inspect_active_window", "- Button: Save", {},
+        )
         recovered = mission_control.run({
             "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
-            "resolution": "retry_safe",
-            "verification": "Read-only inspection proved the target remains unchanged.",
-        })
+            "resolution": "retry_safe", "verification": "The expected state is not visible.",
+        }, session_memory=self.scope)
         self.assertIn("[MISSION_CONTINUE]", recovered)
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["status"], "active")
-        self.assertEqual(mission["steps"][0]["status"], "pending")
-        self.assertIn("Read-only inspection", mission["steps"][0]["recovery_verification"])
-        self.assertEqual(mission["steps"][0]["attempts"], 1)
+        self.assertEqual(mission["steps"][0]["status"], "running")
+        self.assertEqual(mission["steps"][0]["attempts"], 2)
 
-    def test_recovery_requires_read_only_evidence(self):
-        mission_id = self.plan("One step")
+    def test_recovery_can_complete_only_after_a_read_only_inspection(self):
+        mission_id = self.plan("Confirm an existing state")
         self.start(mission_id)
-        self.begin(mission_id)
         mission_control.run({
             "action": "block_step", "mission_id": mission_id,
-            "step_id": "S01", "reason": "Tool result was ambiguous",
-        })
-        result = mission_control.run({
+            "step_id": "S01", "reason": "The previous result was lost",
+        }, session_memory=self.scope)
+        mission_control.run({"action": "resume", "mission_id": mission_id},
+                            session_memory=self.scope)
+        mission_control.record_tool_result(
+            self.scope, "file_controller", "report.txt contains requested line",
+            {"action": "read", "path": "downloads", "name": "report.txt"},
+        )
+        resolved = mission_control.run({
             "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
-            "resolution": "retry_safe", "verification": "",
-        })
-        self.assertIn("read-only inspection", result)
+            "resolution": "completed", "verification": "The file contains the requested line.",
+        }, session_memory=self.scope)
+        self.assertIn("[MISSION_COMPLETE]", resolved)
         mission = mission_control._read()["missions"][0]
-        self.assertEqual(mission["steps"][0]["status"], "blocked")
-        self.assertEqual(mission["status"], "paused")
-
-    def test_recovery_can_mark_already_completed_step_without_reexecution(self):
-        mission_id = self.plan("One step")
-        self.start(mission_id)
-        self.begin(mission_id)
-        mission_control.run({
-            "action": "block_step", "mission_id": mission_id,
-            "step_id": "S01", "reason": "The tool result was lost",
-        })
-        result = mission_control.run({
-            "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
-            "resolution": "completed",
-            "verification": "Read-only inspection confirmed the requested state is already present.",
-        })
-        self.assertIn("[MISSION_COMPLETE]", result)
-        mission = mission_control._read()["missions"][0]
-        self.assertEqual(mission["status"], "completed")
         self.assertEqual(mission["steps"][0]["status"], "done")
-        self.assertEqual(mission["steps"][0]["attempts"], 1)
+        self.assertIn("file_controller/read", mission["steps"][0]["verification"])
 
     def test_mission_cannot_be_completed_with_open_steps(self):
         mission_id = self.plan()
@@ -202,13 +196,74 @@ class MissionControlReliabilityTests(unittest.TestCase):
     def test_all_steps_verified_marks_mission_complete(self):
         mission_id = self.plan("First\nSecond")
         self.start(mission_id)
-        for step_id in ("S01", "S02"):
-            self.begin(mission_id, step_id)
-            result = self.complete(mission_id, step_id, f"{step_id} verified")
+        for _step_id in ("S01", "S02"):
+            self.record_verified_tool()
+            result = self.complete(mission_id, _step_id, "ignored model summary")
         self.assertIn("[MISSION_COMPLETE]", result)
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["status"], "completed")
         self.assertTrue(all(step["status"] == "done" for step in mission["steps"]))
+        self.assertNotIn("_mission_execution", self.scope)
+
+    def test_verified_receipt_survives_new_turn_without_repeating_action(self):
+        mission_id = self.plan("Do a step once")
+        self.start(mission_id)
+        self.record_verified_tool()
+        saved = mission_control._read()["missions"][0]["steps"][0]["tool_evidence"]
+        self.assertEqual(saved["status"], "done")
+        self.assertEqual(saved["tool_name"], "verified_test_action")
+
+        # A later user turn gets a fresh scope; the mission reattaches only
+        # the app-persisted receipt belonging to its currently running step.
+        self.scope = {"user_request": "Continue the mission"}
+        recovery = self.start(mission_id)
+        self.assertIn("[MISSION_RECOVERY]", recovery)
+        self.assertIn("persisted verified receipt", recovery)
+        self.assertIn("_mission_execution", self.scope)
+        completed = self.complete(mission_id)
+        self.assertIn("[MISSION_COMPLETE]", completed)
+        mission = mission_control._read()["missions"][0]
+        self.assertEqual(mission["steps"][0]["status"], "done")
+        self.assertEqual(mission["status"], "completed")
+
+    def test_recovery_rejects_and_clears_legacy_receipt_without_verified_true(self):
+        mission_id = self.plan("Do a step once")
+        self.start(mission_id)
+        data = mission_control._read()
+        step = data["missions"][0]["steps"][0]
+        step["tool_evidence"] = {
+            "status": "done",
+            "tool_name": "verified_test_action",
+            "action": "verified_test_action",
+            "result_sha256": "0" * 64,
+        }
+        mission_control._write(data)
+
+        self.scope = {"user_request": "Continue the mission"}
+        recovery = self.start(mission_id)
+        self.assertIn("[MISSION_RECOVERY_REQUIRED]", recovery)
+        self.assertIn("Do NOT repeat", recovery)
+        self.assertNotIn("persisted receipt", recovery)
+        self.assertNotIn(
+            "tool_evidence",
+            mission_control._read()["missions"][0]["steps"][0],
+        )
+        self.assertIsNone(
+            self.scope["_mission_execution"]["last_result"],
+        )
+
+    def test_failed_dispatcher_result_removes_previously_persisted_receipt(self):
+        mission_id = self.plan("Do a step once")
+        self.start(mission_id)
+        self.record_verified_tool()
+        self.assertIn("tool_evidence", mission_control._read()["missions"][0]["steps"][0])
+        cleared = mission_control.record_tool_result(
+            self.scope, "verified_test_action",
+            "status=unverified action=verified_test_action reason=timeout",
+        )
+        self.assertFalse(cleared)
+        self.assertNotIn("tool_evidence",
+                         mission_control._read()["missions"][0]["steps"][0])
 
     def test_corrupt_store_is_not_silently_overwritten(self):
         self.store.write_text("{ definitely not valid json", encoding="utf-8")
@@ -230,20 +285,17 @@ class MissionControlReliabilityTests(unittest.TestCase):
     def _running_mission(self, steps="Open Privacy tab"):
         mission_id = self.plan(steps)
         self.start(mission_id)
-        self.begin(mission_id)
         return mission_id
 
-    def test_ui_plan_requires_current_running_autonomous_step(self):
+    def test_ui_plan_accepts_the_step_claimed_by_start(self):
         mission_id = self.plan("Open Privacy tab")
         self.start(mission_id)
-        result = mission_control.run({
-            "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
-        })
-        self.assertIn("begin_step", result)
-        self.begin(mission_id)
-        result = mission_control.run({
-            "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
-        })
+        with patch("actions.ui_interaction._snapshot", return_value=[
+            {"role": "TabItem", "name": "Privacy", "visible": True, "enabled": True},
+        ]):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
         self.assertIn("[MISSION_UI_PLAN]", result)
 
     def test_ui_plan_uses_fresh_snapshot_and_persists_one_action_without_executing(self):

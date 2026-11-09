@@ -58,4 +58,7 @@ config/model_router_usage.json.tmp
 memory/conversation_history.jsonl
 memory/conversation_history.jsonl.tmp
 memory/missions.json
-memory/missions.json.tmp\n.history-*.tmp\n.missions-*.tmp\n**/.jarvis-*.tmp
+memory/missions.json.tmp
+.history-*.tmp
+.missions-*.tmp
+**/.jarvis-*.tmp

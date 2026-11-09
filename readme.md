@@ -235,18 +235,18 @@ There is also an **output volume slider**, and it belongs to the device chosen t
 
 ### 📱 The phone dashboard
 
-**It is plain HTTP on your local network, and that is a decision rather than an
-oversight.** This release tried making TLS mandatory and it was a mistake worth
-writing down: the certificate has to be self-signed, because no certificate
-authority will vouch for `192.168.1.108`, and a phone treats a self-signed
-certificate as an attack. Chrome shows a full-page interstitial. A QR scanner
-that opens links in its own in-app browser often shows a blank page and offers
-no way through at all, because those views have no "Advanced" button by design.
+**HTTPS is enabled by default.** On first launch JARVIS creates a
+self-signed certificate locally and the phone browser may ask you to trust it
+once. This avoids sending dashboard commands and session data in clear text
+over Wi-Fi. If a phone's in-app QR scanner cannot open the trusted certificate,
+open the QR URL in the system browser and complete the one-time trust step.
 
-A dashboard nobody can reach is not a more secure product than one they can.
-HTTPS is opt-in — `"dashboard_https": true` in `config/api_keys.json`, and the
-certificate is generated for you — and everything else that actually guards the
-door stayed:
+Plain HTTP is an explicit compatibility opt-out only:
+`"dashboard_https": false` in `config/api_keys.json`. In that mode commands
+are not encrypted and the dashboard warns about the risk. If TLS certificate
+generation fails while HTTPS is requested, the dashboard remains disabled
+rather than silently downgrading to HTTP. Pairing, rate limits, token expiry and
+revoke-all-devices protection still apply:
 
 * The pairing key is **eight characters through PBKDF2 at 200,000 rounds**,
   not six through a single round of SHA-256. That was an offline search
@@ -259,11 +259,9 @@ door stayed:
 * **"Revoke all devices" now ends the live sessions** it always claimed to. It
   cleared the remembered devices and left every session those devices had
   already opened working, which is the one case anybody presses it for.
-* When HTTPS *is* switched on, commands are **AES-256-GCM**, not AES-CBC. CBC
-  concealed a message and did nothing to stop one being changed; an attacker on
-  the same network could flip bits and the assistant would act on whatever fell
-  out. Over plain HTTP there is no `crypto.subtle` and so no encryption at all —
-  the page says `NO ENC` on its own badge rather than pretending otherwise.
+* In HTTPS mode, commands are **AES-256-GCM**, not AES-CBC. In explicit
+  HTTP compatibility mode there is no browser secure context and no encryption;
+  the page displays `NO ENC` instead of pretending otherwise.
 
 **And Windows was blocking it, per executable, invisibly.** This produced the
 strangest report of the release: the dashboard worked when JARVIS was started
@@ -543,11 +541,13 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-LVI.git
+git clone https://github.com/konikblabla-cyber/Mark-LVI.git
 cd Mark-LVI
 python setup.py        # installs deps for YOUR OS + the browser automation engine
 python main.py
 ```
+
+For the complete pre-install hardening build, use the latest `feature/preinstall-ready-unified` branch after its GitHub Actions checks pass. Do not combine individual feature branches manually.
 
 `setup.py` only ever installs what your operating system needs — the Windows-only libraries are skipped automatically on macOS and Linux, and vice-versa. It also checks your Python version up front, so a wrong interpreter fails with a sentence instead of a wall of pip output. Prefer to do it by hand? `pip install -r requirements.txt` works too.
 
