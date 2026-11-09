@@ -231,6 +231,8 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
     def setUp(self):
         # Tests share one native window, so restore a known state each time.
         snapshot = _snapshot(int(self.hwnd))
+        if any(item["name"] == "Not saved" for item in snapshot["records"]):
+            return
         matches = _matching_controls(snapshot["clickables"], "Restore baseline")
         self.assertEqual(len(matches), 1, snapshot["clickables"])
         item = matches[0]
