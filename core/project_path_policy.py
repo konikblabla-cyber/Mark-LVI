@@ -32,7 +32,7 @@ def resolve_project_file(project_dir: Path, relative_path: str) -> Path:
     if any(":" in part for part in parts):
         raise ValueError("Drive and alternate-stream paths are not allowed.")
 
-    root = Path(project_dir).resolve()
+    root = validate_project_root(Path(project_dir).parent, project_dir)
     current = root
     for part in parts:
         current = current / part

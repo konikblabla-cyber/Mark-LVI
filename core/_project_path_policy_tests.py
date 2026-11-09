@@ -69,6 +69,8 @@ class ProjectPathPolicyTests(unittest.TestCase):
                 self.skipTest("Symlink creation is unavailable on this platform")
             with self.assertRaises(ValueError):
                 validate_project_root(projects, link)
+            with self.assertRaises(ValueError):
+                resolve_project_file(link, "main.py")
 
     def test_refuses_existing_file_without_overwriting(self):
         with tempfile.TemporaryDirectory() as temp:
