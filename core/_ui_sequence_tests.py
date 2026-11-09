@@ -111,6 +111,33 @@ class UISequenceTests(unittest.TestCase):
                 self.assertIsNone(validated)
                 self.assertTrue(error)
 
+    def test_validation_accepts_checkbox_state_step(self):
+        steps, error = ui_sequence._validate_steps([
+            self._checkbox_step("Enable notifications", True),
+            self._step("Save", "Saved"),
+        ])
+        self.assertEqual(error, "")
+        self.assertEqual(steps[0], {
+            "action": "set_checkbox",
+            "checkbox_label": "Enable notifications",
+            "checked": True,
+        })
+
+    def test_validation_rejects_invalid_or_sensitive_checkbox_steps(self):
+        invalid = [
+            {"action": "set_checkbox", "checkbox_label": "Accept terms", "checked": "yes"},
+            {"action": "set_checkbox", "checkbox_label": "Accept terms", "checked": 1},
+            {"action": "set_checkbox", "checkbox_label": "Password visibility", "checked": True},
+            {"action": "set_checkbox", "checkbox_label": "Enable notifications", "checked": True, "extra": "no"},
+        ]
+        for step in invalid:
+            with self.subTest(step=step):
+                validated, error = ui_sequence._validate_steps([
+                    step, self._step("Save", "Saved"),
+                ])
+                self.assertIsNone(validated)
+                self.assertTrue(error)
+
     def test_validation_rejects_short_long_and_extra_fields(self):
         self.assertIsNone(ui_sequence._validate_steps([])[0])
         self.assertIsNone(ui_sequence._validate_steps([
