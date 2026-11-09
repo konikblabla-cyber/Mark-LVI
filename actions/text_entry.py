@@ -40,6 +40,7 @@ def fill_text_field(parameters: dict, player=None, session_memory=None) -> str:
     # checks and local-only verification in one place.
     return ui._fill_text_and_verify(
         label, value, snapshot["handle"], snapshot["process_id"],
+        action_name="fill_text_field",
     )
 
 
