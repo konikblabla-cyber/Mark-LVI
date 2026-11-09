@@ -126,6 +126,28 @@ class FileControllerSafetyTests(unittest.TestCase):
         finally:
             outside.unlink(missing_ok=True)
 
+    def test_organize_desktop_refuses_destination_symlink_outside_safe_root(self):
+        desktop = self.root / "Desktop"
+        desktop.mkdir()
+        (desktop / "document.pdf").write_text("keep", encoding="utf-8")
+        outside = self.root.parent / (self.root.name + "-outside-folder")
+        outside.mkdir()
+        try:
+            (desktop / "Documents").symlink_to(outside, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            outside.rmdir()
+            self.skipTest("directory symlink creation is not available")
+        try:
+            with patch.object(files, "_get_desktop", return_value=desktop):
+                result = files.organize_desktop()
+            self.assertIn("0 files moved", result)
+            self.assertIn("1 file(s) skipped", result)
+            self.assertTrue((desktop / "document.pdf").exists())
+            self.assertFalse((outside / "document.pdf").exists())
+        finally:
+            (desktop / "Documents").unlink(missing_ok=True)
+            outside.rmdir()
+
     def test_create_file_never_overwrites_an_existing_file(self):
         target = self.root / "existing.txt"
         target.write_text("original", encoding="utf-8")

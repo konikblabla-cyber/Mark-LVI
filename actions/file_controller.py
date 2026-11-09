@@ -688,6 +688,8 @@ def organize_desktop() -> str:
     journal: list[tuple[Path, Path]] = []   # (where it was, where it went)
 
     try:
+        if not _is_safe_path(desktop) or not desktop.is_dir():
+            return f"Access denied: {desktop}"
         for item in desktop.iterdir():
             # Do not relocate symlinks: their relative targets and undo paths
             # can change meaning when the link is moved.
@@ -707,8 +709,14 @@ def organize_desktop() -> str:
                     target_dir = desktop / folder
                     break
 
+            if not _is_safe_path(target_dir):
+                skipped.append(item.name)
+                continue
             target_dir.mkdir(exist_ok=True)
             new_path = target_dir / item.name
+            if not _is_safe_path(target_dir) or not _is_safe_path(new_path):
+                skipped.append(item.name)
+                continue
 
             if new_path.exists():
                 skipped.append(item.name)
@@ -753,7 +761,7 @@ def organize_desktop() -> str:
             if len(moved) > 8:
                 result += f"\n... and {len(moved) - 8} more."
         if skipped:
-            result += f"\n{len(skipped)} file(s) skipped (name conflict)."
+            result += f"\n{len(skipped)} file(s) skipped (unsafe link or name conflict)."
         return result
 
     except Exception as e:
