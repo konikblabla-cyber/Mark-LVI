@@ -18,7 +18,7 @@ _SENSITIVE_PHRASES = (
     "card number", "cvv", "cvc", "iban", "bank account", "routing number",
     "private key", "api key", "access token", "secret key", "security token", "credential", "bearer token",
 )
-_SENSITIVE_WORDS = {"pin", "otp", "cvv", "cvc", "iban"}
+_SENSITIVE_WORDS = {"pin", "otp", "cvv", "cvc", "iban", "token", "credential", "secret"}
 _PATTERN_NAMES = {
     "value", "range_value", "selection_item", "expand_collapse",
     "invoke", "toggle", "grid",
@@ -50,9 +50,9 @@ def _is_sensitive(value):
         return True
     # Avoid exposing personal contact details and opaque identifier payloads
     # embedded in otherwise innocuous accessible names or AutomationIds.
-    if re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}", text, re.I):
+    if re.search(r"[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}", text, re.I):
         return True
-    if re.search(r"(?<!\\d)(?:\\+?\\d[\\s().-]*){9,}(?!\\d)", text):
+    if re.search(r"(?<!\d)(?:\+?\d[\s().-]*){9,}(?!\d)", text):
         return True
     if re.fullmatch(r"[a-z0-9_-]{32,}", text):
         return True
