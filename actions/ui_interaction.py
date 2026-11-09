@@ -126,13 +126,18 @@ def _same_control_identity(candidate: dict, original: dict) -> bool:
     )
 
 
-def _run_bounded(callback, timeout: float):
-    """Run a callback once on a daemon thread and never retry it on timeout."""
+def _run_bounded(callback, timeout: float, cancel_event=None):
+    """Run a callback once; a timed-out worker may not start later."""
     finished = threading.Event()
+    cancelled = cancel_event or threading.Event()
     result = {}
 
     def worker():
         try:
+            # If the scheduler did not start this worker before the caller's
+            # deadline, make the operation a no-op rather than a late action.
+            if cancelled.is_set():
+                return
             result["value"] = callback()
         except Exception as exc:
             result["error"] = exc
@@ -144,6 +149,7 @@ def _run_bounded(callback, timeout: float):
     )
     thread.start()
     if not finished.wait(max(0.01, float(timeout))):
+        cancelled.set()
         return False, None, None
     return True, result.get("value"), result.get("error")
 
@@ -157,19 +163,29 @@ def _run_uia(callback, timeout: float, exclusive_lock=None):
     acquired before COM setup so a timed-out worker reserves the single
     invocation slot until it truly exits.
     """
+    cancelled = threading.Event()
+
     def with_com():
         acquired = False
+        if cancelled.is_set():
+            return ("cancelled", "the operation expired before COM was initialized")
         if exclusive_lock is not None:
             acquired = exclusive_lock.acquire(blocking=False)
             if not acquired:
                 return ("busy", "another UI Automation invocation is still running")
         try:
+            if cancelled.is_set():
+                return ("cancelled", "the operation expired before COM setup")
             with _COMTYPES_IMPORT_LOCK:
                 already_loaded = "comtypes" in sys.modules
                 import comtypes
                 if already_loaded:
                     comtypes.CoInitialize()
             try:
+                # COM setup itself can be slow. Check the deadline again before
+                # crossing the side-effect boundary into InvokePattern.
+                if cancelled.is_set():
+                    return ("cancelled", "the operation expired before invoking the control")
                 return callback()
             finally:
                 comtypes.CoUninitialize()
@@ -177,7 +193,7 @@ def _run_uia(callback, timeout: float, exclusive_lock=None):
             if acquired:
                 exclusive_lock.release()
 
-    return _run_bounded(with_com, timeout)
+    return _run_bounded(with_com, timeout, cancel_event=cancelled)
 
 
 def _collect_accessible_controls(window, include_wrappers: bool = False):
@@ -383,7 +399,7 @@ def _click_and_verify(button_label: str, expected_result: str,
         )
 
     status, reason = invocation
-    if status == "busy":
+    if status in {"busy", "cancelled"}:
         return outcome.failed(
             "click_and_verify",
             reason + "; this click was not started",
