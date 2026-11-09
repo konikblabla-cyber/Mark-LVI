@@ -191,7 +191,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertIn("persisted receipt", recovery)
         self.assertIn("_mission_execution", self.scope)
         completed = self.complete(mission_id)
-        self.assertIn("[MISSION_CONTINUE]", completed)
+        self.assertIn("[MISSION_COMPLETE]", completed)
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["steps"][0]["status"], "done")
         self.assertEqual(mission["status"], "completed")
