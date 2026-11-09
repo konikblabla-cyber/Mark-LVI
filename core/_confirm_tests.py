@@ -53,6 +53,21 @@ class ConfirmationCleanupTests(unittest.TestCase):
         self.assertEqual(cleaned, ["expired"])
         self.assertTrue(any("expired" in message.lower() for message in self.logs))
 
+    def test_pending_title_expires_stale_prompt_and_releases_state(self):
+        cleaned = []
+        with patch.object(confirm.time, "monotonic", side_effect=[
+            100.0, 100.0 + confirm.TIMEOUT_SECONDS + 1,
+        ]):
+            result = confirm.request(
+                "test", "Stale prompt", "detail",
+                lambda: "should not run",
+                on_cancel=lambda: cleaned.append("expired"),
+            )
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            self.assertEqual(confirm.pending_title(), "")
+        self.assertEqual(cleaned, ["expired"])
+        self.assertEqual(len(self.hidden), 1)
+
     def test_unavailable_hud_releases_action_owned_state(self):
         cleaned = []
         confirm.bind(None, None, None)
