@@ -24,7 +24,7 @@ from actions.ui_interaction import (
     _snapshot,
     _fill_text_and_verify,
 )
-from actions import ui_sequence, ui_picker_diagnostics
+from actions import ui_sequence, ui_picker_diagnostics, ui_checkbox
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -35,6 +35,7 @@ _RESET_BUTTON_ID = 103
 _OPEN_PANEL_BUTTON_ID = 104
 _FINISH_WORKFLOW_BUTTON_ID = 105
 _SAVE_TITLE_BUTTON_ID = 106
+_CHECKBOX_ID = 108
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -69,6 +70,8 @@ if sys.platform == "win32":
     _user32.DefWindowProcW.argtypes = [
         wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t,
     ]
+    _user32.GetDlgItem.restype = wintypes.HWND
+    _user32.GetDlgItem.argtypes = [wintypes.HWND, ctypes.c_int]
     _user32.SetWindowTextW.restype = wintypes.BOOL
     _user32.SetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
     _user32.GetWindowTextW.restype = ctypes.c_int
@@ -117,6 +120,7 @@ def _serve_native_window() -> int:
     hinstance = _kernel32.GetModuleHandleW(None)
     status_hwnd = [None]
     project_title_hwnd = [None]
+    checkbox_hwnd = [None]
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -129,6 +133,8 @@ def _serve_native_window() -> int:
             workflow_stage[0] = "idle"
             if project_title_hwnd[0]:
                 _user32.SetWindowTextW(project_title_hwnd[0], "")
+            if checkbox_hwnd[0]:
+                _user32.SendMessageW(checkbox_hwnd[0], 0x00F1, 0, 0)  # BM_SETCHECK / BST_UNCHECKED
             _user32.SetWindowTextW(status_hwnd[0], "Not saved")
             return 0
         if message == 0x0111 and command_id == _OPEN_PANEL_BUTTON_ID:
@@ -213,9 +219,13 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Save title", 0x50000000,
         20, 285, 140, 34, hwnd, ctypes.c_void_p(_SAVE_TITLE_BUTTON_ID), hinstance, None,
     )
+    checkbox_hwnd[0] = _user32.CreateWindowExW(
+        0, "BUTTON", "Remember this device", 0x50010003,
+        190, 288, 220, 28, hwnd, ctypes.c_void_p(_CHECKBOX_ID), hinstance, None,
+    )
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
-                project_title_hwnd[0], save_title_hwnd)):
+                project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0])):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -502,6 +512,27 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         after = _snapshot(int(self.hwnd))
         self.assertTrue(any(item["name"] == "Project title" for item in after["records"]), after["records"])
         self.assertNotIn(sentinel, report)
+
+
+    def test_native_checkbox_toggle_is_verified_and_idempotent(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        checkbox = _user32.GetDlgItem(self.hwnd, _CHECKBOX_ID)
+        self.assertTrue(checkbox)
+        self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 0)  # BM_GETCHECK
+        first = ui_checkbox.set_checkbox_state({
+            "checkbox_label": "Remember this device", "checked": True,
+        })
+        native_state = _user32.SendMessageW(checkbox, 0x00F0, 0, 0)
+        self.assertIn("status=done", first, f"{first}; native BM_GETCHECK={native_state}")
+        self.assertIn("checked=true", first)
+        self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 1)
+        second = ui_checkbox.set_checkbox_state({
+            "checkbox_label": "Remember this device", "checked": True,
+        })
+        self.assertIn("status=done", second)
+        self.assertIn("changed=false", second)
+        self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 1)
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
