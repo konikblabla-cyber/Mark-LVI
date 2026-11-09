@@ -543,11 +543,13 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-LVI.git
+git clone https://github.com/konikblabla-cyber/Mark-LVI.git
 cd Mark-LVI
 python setup.py        # installs deps for YOUR OS + the browser automation engine
 python main.py
 ```
+
+For the complete pre-install hardening build, use the latest `feature/preinstall-ready-unified` branch after its GitHub Actions checks pass. Do not combine individual feature branches manually.
 
 `setup.py` only ever installs what your operating system needs — the Windows-only libraries are skipped automatically on macOS and Linux, and vice-versa. It also checks your Python version up front, so a wrong interpreter fails with a sentence instead of a wall of pip output. Prefer to do it by hand? `pip install -r requirements.txt` works too.
 

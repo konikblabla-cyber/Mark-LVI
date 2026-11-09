@@ -11,6 +11,7 @@ class ConfirmationCleanupTests(unittest.TestCase):
         self._old = (
             confirm._pending, confirm._show_cb,
             confirm._hide_cb, confirm._log_cb,
+            confirm._result_observer_factory,
         )
         with confirm._lock:
             confirm._pending = None
@@ -27,6 +28,7 @@ class ConfirmationCleanupTests(unittest.TestCase):
         with confirm._lock:
             confirm._pending = self._old[0]
         confirm.bind(self._old[1], self._old[2], self._old[3])
+        confirm.set_result_observer_factory(self._old[4])
 
     def test_second_request_cannot_replace_existing_hud_prompt(self):
         first_cleaned = []
@@ -157,6 +159,23 @@ class ConfirmationCleanupTests(unittest.TestCase):
         confirm.resolve(True)
         self.assertTrue(finished.wait(2))
         self.assertEqual(cleaned, [])
+
+    def test_accepted_action_reports_actual_result_to_observer(self):
+        observed = []
+        finished = threading.Event()
+        confirm.set_result_observer_factory(
+            lambda key: lambda result: (observed.append((key, result)), finished.set())
+        )
+        result = confirm.request(
+            "click_and_verify", "Approved click", "detail",
+            lambda: "status=done action=click_and_verify verified=true",
+        )
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        confirm.resolve(True)
+        self.assertTrue(finished.wait(2))
+        self.assertEqual(observed, [
+            ("click_and_verify", "status=done action=click_and_verify verified=true")
+        ])
 
     def test_action_exception_releases_action_owned_state(self):
         cleaned = []

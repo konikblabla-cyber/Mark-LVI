@@ -664,6 +664,16 @@ class JarvisLive:
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
         from core.autonomy_policy import new_turn_authorization
         self._turn_authorization = new_turn_authorization("")
+        def _mission_confirmation_result(tool_name):
+            scope = self._turn_authorization
+            def _record_confirmed_result(result):
+                try:
+                    from plugins.mission_control import record_tool_result
+                    record_tool_result(scope, tool_name, result)
+                except Exception as _evidence_error:
+                    print(f"[Mission] Confirmed-action evidence failed closed: {_evidence_error}")
+            return _record_confirmed_result
+        confirm_gate.set_result_observer_factory(_mission_confirmation_result)
 
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
@@ -973,6 +983,8 @@ class JarvisLive:
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+        from core.autonomy_policy import new_turn_authorization
+        self._turn_authorization = new_turn_authorization(text)
         # Respect wake-word sleep: a typed command must not be answered while
         # asleep either (the sleep gate is not just for the mic). Wake first with
         # "Hey Jarvis" or the WAKE NOW button.
@@ -1364,6 +1376,11 @@ class JarvisLive:
             if key and value:
                 update_memory({category: {key: {"value": value}}})
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+            try:
+                from plugins.mission_control import record_tool_result
+                record_tool_result(self._turn_authorization, name, "", args)
+            except Exception:
+                pass
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
@@ -1548,7 +1565,10 @@ class JarvisLive:
                 if self._plugin_registry.has(name):
                     r = await loop.run_in_executor(
                         None,
-                        lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
+                        lambda: self._plugin_registry.run(
+                            name, args, player=self.ui,
+                            session_memory=self._turn_authorization,
+                        )
                     )
                     result = r or "Done."
                 else:
@@ -1558,6 +1578,17 @@ class JarvisLive:
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
             self.speak_error(name, e)
+
+        # Mission completion is bound to the actual dispatcher result, not a
+        # verification sentence supplied by the model. Mission Control itself
+        # manages the active mission/step scope; every other tool call replaces
+        # the evidence for the currently running step.
+        if name != "mission_control":
+            try:
+                from plugins.mission_control import record_tool_result
+                record_tool_result(self._turn_authorization, name, result, args)
+            except Exception as _mission_evidence_error:
+                print(f"[Mission] Evidence recording failed closed: {_mission_evidence_error}")
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
