@@ -275,7 +275,7 @@ def _serve_native_window() -> int:
                 raise RuntimeError("could not add native test tab")
     listbox_hwnd[0] = _user32.CreateWindowExW(
         0, "LISTBOX", "", 0x50010001,
-        20, 420, 400, 72, hwnd,
+        20, 415, 400, 60, hwnd,
         ctypes.c_void_p(_LISTBOX_ID), hinstance, None,
     )
     if listbox_hwnd[0]:
@@ -640,7 +640,11 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         time.sleep(0.1)
         listbox = _user32.GetDlgItem(self.hwnd, _LISTBOX_ID)
         self.assertTrue(listbox)
+        self.assertEqual(_user32.SendMessageW(listbox, 0x018B, 0, 0), 2)  # LB_GETCOUNT
         self.assertEqual(_user32.SendMessageW(listbox, 0x0188, 0, 0), 0)  # LB_GETCURSEL
+        visible = _snapshot(int(self.hwnd))
+        self.assertTrue(any(item.get("name") == "Invoices" for item in visible["records"]),
+                        visible["records"])
         first = ui_list.select_list_item({"item_label": "Invoices"})
         self.assertIn("status=done", first, f"{first}; controls={_snapshot(int(self.hwnd))['records']}")
         self.assertIn("selected=true", first)
