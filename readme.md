@@ -643,6 +643,10 @@ Mark LVI/
 │   ├── browser_control.py    # Web browser control
 │   ├── file_controller.py    # File system operations
 │   ├── file_processor.py     # Document reading and summarization
+│   ├── screen_understanding.py # On-demand local UIA labels; editable/password values excluded
+│   ├── ui_interaction.py      # Exact UIA click with a verified postcondition and confirmation gate
+│   ├── ui_sequence.py         # 2–8 verified steps pinned to one application window
+│   ├── text_entry.py          # Exact non-sensitive field entry via ValuePattern; value never returned
 │   ├── send_message.py       # Messaging integration
 │   ├── weather_report.py     # Live city weather data
 │   ├── video_player.py       # Plays video on the HUD, where the avatar normally is
