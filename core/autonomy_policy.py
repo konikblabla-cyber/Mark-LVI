@@ -59,6 +59,7 @@ _SETTING_VERB = re.compile(
 )
 _PRIVACY_TERMS = {
     "consent", "permission", "allow", "authorize", "authorization",
+    "agree", "terms", "policy", "acceptance",
     "subscribe", "subscription", "marketing", "privacy", "location",
     "notifications", "tracking", "personalization", "share", "accept",
     "cookies", "cookie", "analytics", "telemetry", "data", "pliki",
