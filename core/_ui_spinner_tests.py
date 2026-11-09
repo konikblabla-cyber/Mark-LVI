@@ -1,5 +1,7 @@
 """Offline tests for verified numeric Windows Spinner input."""
+import sys
 import threading
+import types
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -24,6 +26,50 @@ class FakeRangePattern:
         if self.fail_set:
             raise RuntimeError("provider error")
         self.CurrentValue = float(value)
+
+
+class FakeRect:
+    def width(self):
+        return 100
+
+    def height(self):
+        return 24
+
+
+class FakeControl:
+    def __init__(self, name="Hour", role="Spinner", pattern=None, enabled=True):
+        self.element_info = types.SimpleNamespace(
+            control_type=role, name=name, is_password=False, is_offscreen=False,
+        )
+        self.iface_range_value = pattern or FakeRangePattern()
+        self._enabled = enabled
+
+    def rectangle(self):
+        return FakeRect()
+
+    def is_enabled(self):
+        return self._enabled
+
+
+class FakeWindow:
+    def __init__(self, controls=None, handle=111, process_id=222):
+        self._controls = list(controls or [])
+        self.handle = handle
+        self.element_info = types.SimpleNamespace(process_id=process_id)
+
+    def is_visible(self):
+        return True
+
+    def descendants(self):
+        return iter(self._controls)
+
+
+def patch_desktop(window):
+    module = types.ModuleType("pywinauto")
+    module.Desktop = lambda backend="uia": types.SimpleNamespace(
+        window=lambda handle: types.SimpleNamespace(wrapper_object=lambda: window)
+    )
+    return patch.dict(sys.modules, {"pywinauto": module})
 
 
 class SpinnerTests(unittest.TestCase):
@@ -61,6 +107,12 @@ class SpinnerTests(unittest.TestCase):
         self.assertEqual(status, "invalid_step")
         self.assertEqual(pattern.set_calls, [])
 
+    def test_nearby_but_off_step_value_is_rejected(self):
+        pattern = FakeRangePattern(minimum=0, maximum=24, step=1)
+        status, _ = ui_spinner._set_and_verify(pattern, Decimal("3.0000001"), threading.Event())
+        self.assertEqual(status, "invalid_step")
+        self.assertEqual(pattern.set_calls, [])
+
     def test_already_selected_value_is_not_set_twice(self):
         pattern = FakeRangePattern(current=10)
         status, _ = ui_spinner._set_and_verify(pattern, Decimal("10"), threading.Event())
@@ -94,6 +146,47 @@ class SpinnerTests(unittest.TestCase):
         self.assertEqual(status, "unsupported")
         self.assertEqual(pattern.set_calls, [])
 
+    def test_worker_targets_only_one_exact_spinner(self):
+        pattern = FakeRangePattern(current=8)
+        window = FakeWindow([
+            FakeControl("Minute", pattern=FakeRangePattern()),
+            FakeControl("Hour", role="Edit", pattern=FakeRangePattern()),
+            FakeControl("Hour", pattern=pattern),
+        ])
+        with patch_desktop(window):
+            status, _ = ui_spinner._set_on_window(111, 222, "Hour", Decimal("12"), threading.Event())
+        self.assertEqual(status, "set")
+        self.assertEqual(pattern.CurrentValue, 12)
+        self.assertEqual(len(pattern.set_calls), 1)
+
+    def test_wrong_process_is_rejected_before_spinner_set(self):
+        pattern = FakeRangePattern(current=8)
+        window = FakeWindow([FakeControl("Hour", pattern=pattern)], process_id=999)
+        with patch_desktop(window):
+            status, _ = ui_spinner._set_on_window(111, 222, "Hour", Decimal("12"), threading.Event())
+        self.assertEqual(status, "changed_window")
+        self.assertEqual(pattern.set_calls, [])
+
+    def test_duplicate_spinner_labels_are_rejected(self):
+        one, two = FakeRangePattern(), FakeRangePattern()
+        window = FakeWindow([
+            FakeControl("Hour", pattern=one),
+            FakeControl("Hour", pattern=two),
+        ])
+        with patch_desktop(window):
+            status, _ = ui_spinner._set_on_window(111, 222, "Hour", Decimal("12"), threading.Event())
+        self.assertEqual(status, "ambiguous_spinner")
+        self.assertEqual(one.set_calls, [])
+        self.assertEqual(two.set_calls, [])
+
+    def test_sensitive_spinner_label_is_not_selected(self):
+        pattern = FakeRangePattern(current=8)
+        window = FakeWindow([FakeControl("PIN", pattern=pattern)])
+        with patch_desktop(window):
+            status, _ = ui_spinner._set_on_window(111, 222, "PIN", Decimal("12"), threading.Event())
+        self.assertEqual(status, "missing_spinner")
+        self.assertEqual(pattern.set_calls, [])
+
     def test_sensitive_label_and_bad_value_fail_before_desktop_access(self):
         with patch.object(ui_spinner.ui, "_snapshot") as snapshot:
             self.assertIn("status=failed", ui_spinner.set_spinner_value({
@@ -111,6 +204,19 @@ class SpinnerTests(unittest.TestCase):
                 "field_label": "x" * 121, "value": "1",
             }))
         snapshot.assert_not_called()
+
+    def test_handler_returns_no_numeric_spinner_value(self):
+        pattern = FakeRangePattern(current=8)
+        window = FakeWindow([FakeControl("Hour", pattern=pattern)])
+        with patch_desktop(window), \
+             patch.object(ui_spinner.ui, "_snapshot", return_value={"handle": 111, "process_id": 222}), \
+             patch.object(ui_spinner.ui, "_run_uia",
+                          side_effect=lambda callback, *args, **kwargs:
+                              (True, callback(threading.Event()), None)):
+            result = ui_spinner.set_spinner_value({"field_label": "Hour", "value": "12"})
+        self.assertIn("status=done", result)
+        self.assertNotIn("12", result)
+        self.assertEqual(pattern.CurrentValue, 12)
 
 
 if __name__ == "__main__":
