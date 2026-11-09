@@ -208,6 +208,39 @@ class UIFormTests(unittest.TestCase):
         self.assertEqual(control.iface_value.CurrentValue, "New")
         self.assertIn("inspect it before retrying", result)
 
+    def test_later_inspection_error_preserves_partial_progress_as_unverified(self):
+        first = _Control("City", "Old city")
+        second = _Control("Display name", "Old name")
+        controls = [
+            {
+                "role": "Edit", "name": item.element_info.name,
+                "automation_id": item.element_info.automation_id,
+                "runtime_id": item.element_info.runtime_id,
+                "rect": (10, 10, 180, 38), "control": item,
+            }
+            for item in (first, second)
+        ]
+        with patch.dict(sys.modules, {
+            "pywinauto": types.SimpleNamespace(
+                Desktop=lambda backend="uia": _Desktop(_Window([first, second])),
+            ),
+        }), patch.object(
+            ui_form, "_editable_controls",
+            side_effect=[controls, controls, RuntimeError("window changed")],
+        ):
+            result = ui_form._fill_fields_on_window(
+                77, 4242, self._fields(
+                    ("City", "Szczecin"), ("Display name", "MARK"),
+                ), __import__("threading").Event(),
+            )
+        self.assertTrue(
+            result.startswith("status=unverified action=fill_ui_fields "),
+            result,
+        )
+        self.assertEqual(first.iface_value.CurrentValue, "Szczecin")
+        self.assertEqual(second.iface_value.CurrentValue, "Old name")
+        self.assertIn("fields_filled=1", result)
+
     def test_already_correct_value_is_not_written_again(self):
         control = _Control("City", "Szczecin")
         result = self._with_desktop(
