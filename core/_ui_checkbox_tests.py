@@ -171,7 +171,8 @@ class CheckboxTests(unittest.TestCase):
     def test_consent_and_privacy_labels_require_confirmation(self):
         for label in ("Agree to terms", "Allow notifications", "Share location",
                       "Zgadzam się na regulamin", "Przetwarzanie danych",
-                      "Udostępnianie lokalizacji", "Powiadomienia"):
+                      "Udostępnianie lokalizacji", "Powiadomienia",
+                      "Accept all cookies", "Reject analytics"):
             with self.subTest(label=label):
                 self.assertTrue(ui_checkbox._needs_confirmation(label))
         self.assertFalse(ui_checkbox._needs_confirmation("Remember this device"))
@@ -187,6 +188,34 @@ class CheckboxTests(unittest.TestCase):
                 with self.subTest(params=params):
                     self.assertIn("status=failed", ui_checkbox.set_checkbox_state(params))
         snapshot.assert_not_called()
+
+ 
+    def test_consent_checkbox_invokes_confirmation_gate(self):
+        with patch.object(ui_checkbox.ui, "_snapshot",
+                          return_value={"handle": 111, "process_id": 222}), \
+             patch("core.confirm.pending_title", return_value="") as pending, \
+             patch("core.confirm.request", return_value="confirmation-pending") as request, \
+             patch.object(ui_checkbox.ui, "_run_uia") as run_uia:
+            result = ui_checkbox.set_checkbox_state({
+                "checkbox_label": "Accept all cookies", "checked": True,
+            })
+        self.assertEqual(result, "confirmation-pending")
+        pending.assert_called_once()
+        request.assert_called_once()
+        run_uia.assert_not_called()
+
+    def test_existing_confirmation_prevents_second_consent_action(self):
+        with patch.object(ui_checkbox.ui, "_snapshot",
+                          return_value={"handle": 111, "process_id": 222}), \
+             patch("core.confirm.pending_title", return_value="Existing confirmation"), \
+             patch("core.confirm.request") as request, \
+             patch.object(ui_checkbox.ui, "_run_uia") as run_uia:
+            result = ui_checkbox.set_checkbox_state({
+                "checkbox_label": "Zgadzam się na regulamin", "checked": True,
+            })
+        self.assertIn("status=ask", result)
+        request.assert_not_called()
+        run_uia.assert_not_called()
 
     def test_handler_verifies_state_and_returns_no_field_contents(self):
         pattern = FakeTogglePattern()
