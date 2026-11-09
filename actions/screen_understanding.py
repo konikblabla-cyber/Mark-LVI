@@ -61,6 +61,20 @@ def format_accessible_elements(elements, max_elements: int = _MAX_ELEMENTS,
     return "\n".join(lines)
 
 
+def _active_top_level_window(desktop):
+    """Promote UIA's focused element to the window that owns the full UI tree.
+
+    Under pywinauto's UIA backend, Desktop.get_active() returns the element
+    with input focus, not the top-level application window. Descendant
+    inspection on that control would usually see only a tiny subtree (often
+    no controls at all).
+    """
+    focused = desktop.get_active()
+    if focused is None:
+        return None
+    return focused.top_level_parent()
+
+
 def _read_active_window() -> str:
     try:
         from pywinauto import Desktop
@@ -69,7 +83,7 @@ def _read_active_window() -> str:
                 "pywinauto. No screenshot was taken.")
     try:
         desktop = Desktop(backend="uia")
-        window = desktop.get_active()
+        window = _active_top_level_window(desktop)
         if window is None or not window.is_visible():
             return "No visible active window was available for UI inspection."
 
