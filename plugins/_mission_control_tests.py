@@ -47,9 +47,10 @@ class MissionControlReliabilityTests(unittest.TestCase):
         }, session_memory=self.scope)
 
     def record_verified_tool(self, tool_name="verified_test_action"):
-        from core.mission_evidence import record_tool_result
         result = f"status=done action={tool_name} verified=true"
-        self.assertTrue(record_tool_result(self.scope, tool_name, result))
+        self.assertTrue(mission_control.record_tool_result(
+            self.scope, tool_name, result,
+        ))
         return result
 
     def complete(self, mission_id, step_id="S01", verification="Model-supplied text is not evidence"):
@@ -173,6 +174,40 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(mission["status"], "completed")
         self.assertTrue(all(step["status"] == "done" for step in mission["steps"]))
         self.assertNotIn("_mission_execution", self.scope)
+
+    def test_verified_receipt_survives_new_turn_without_repeating_action(self):
+        mission_id = self.plan("Do a step once")
+        self.start(mission_id)
+        self.record_verified_tool()
+        saved = mission_control._read()["missions"][0]["steps"][0]["tool_evidence"]
+        self.assertEqual(saved["status"], "done")
+        self.assertEqual(saved["tool_name"], "verified_test_action")
+
+        # A later user turn gets a fresh scope; the mission reattaches only
+        # the app-persisted receipt belonging to its currently running step.
+        self.scope = {"user_request": "Continue the mission"}
+        recovery = self.start(mission_id)
+        self.assertIn("[MISSION_RECOVERY]", recovery)
+        self.assertIn("persisted receipt", recovery)
+        self.assertIn("_mission_execution", self.scope)
+        completed = self.complete(mission_id)
+        self.assertIn("[MISSION_CONTINUE]", completed)
+        mission = mission_control._read()["missions"][0]
+        self.assertEqual(mission["steps"][0]["status"], "done")
+        self.assertEqual(mission["status"], "completed")
+
+    def test_failed_dispatcher_result_removes_previously_persisted_receipt(self):
+        mission_id = self.plan("Do a step once")
+        self.start(mission_id)
+        self.record_verified_tool()
+        self.assertIn("tool_evidence", mission_control._read()["missions"][0]["steps"][0])
+        cleared = mission_control.record_tool_result(
+            self.scope, "verified_test_action",
+            "status=unverified action=verified_test_action reason=timeout",
+        )
+        self.assertFalse(cleared)
+        self.assertNotIn("tool_evidence",
+                         mission_control._read()["missions"][0]["steps"][0])
 
     def test_corrupt_store_is_not_silently_overwritten(self):
         self.store.write_text("{ definitely not valid json", encoding="utf-8")

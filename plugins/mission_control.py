@@ -107,7 +107,7 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
                 "Report the completed result to the user; do not invent extra work.")
     if step.get("status") == "running" and recovery:
         if step.get("tool_evidence"):
-            return ("\\n[MISSION_RECOVERY] The previous session has a persisted receipt from "
+            return ("\n[MISSION_RECOVERY] The previous session has a persisted receipt from "
                     "a tool that returned status=done. Do NOT repeat the action. Call "
                     "complete_step for this exact step; the application will accept it only "
                     "if the persisted receipt still matches the running mission step.")
