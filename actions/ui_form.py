@@ -185,6 +185,9 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
     """Preflight every target, then set and locally verify each value once."""
     from pywinauto import Desktop
     desktop = Desktop(backend="uia")
+    filled = 0
+    already_correct = 0
+    attempted = False
     try:
         window = _window_for_handle(desktop, handle, process_id)
         controls = _editable_controls(window, include_wrappers=True)
@@ -250,8 +253,6 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
                 "signature": signature,
             })
 
-        filled = 0
-        already_correct = 0
         for item in planned:
             attempted = False
             if cancelled.is_set():
@@ -341,6 +342,15 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
             submitted=False,
         )
     except Exception as exc:
+        if attempted or filled:
+            return outcome.unverified(
+                "fill_ui_fields",
+                f"the application may contain partial changes after an access error ({type(exc).__name__}); inspect it before retrying",
+                fields_filled=filled,
+                fields_attempted=filled + int(bool(attempted)),
+                fields_already_correct=already_correct,
+                total_fields=len(fields),
+            )
         return outcome.failed(
             "fill_ui_fields",
             f"the original application window could not be safely accessed ({type(exc).__name__})",
