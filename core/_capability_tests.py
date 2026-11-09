@@ -241,7 +241,7 @@ class MissionControlTests(unittest.TestCase):
                 planned = mission.run({
                     "action": "plan", "title": "Ordered job",
                     "goal": "Perform steps in order",
-                    "steps": "First step\\nSecond step",
+                    "steps": "First step\nSecond step",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 scope = self._new_scope("Run ordered job")
