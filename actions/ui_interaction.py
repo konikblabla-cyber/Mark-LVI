@@ -523,29 +523,30 @@ def _fill_text_on_window(window_handle: int, expected_process_id: int,
 
 def _fill_text_and_verify(field_label: str, text: str,
                           expected_window_handle: int,
-                          expected_process_id: int) -> str:
+                          expected_process_id: int,
+                          action_name: str = action_name) -> str:
     """Fill one exact safe Edit field; the typed value never leaves this function."""
     label = " ".join(str(field_label or "").split())
     value = str(text) if isinstance(text, str) else ""
     if not label or len(label) > 120:
         return outcome.failed(
-            "fill_text_and_verify", "field_label is missing or too long",
+            action_name, "field_label is missing or too long",
         )
     if _is_sensitive_input_label(label):
         return outcome.failed(
-            "fill_text_and_verify",
+            action_name,
             "credential, verification-code and payment fields are not supported",
             field=label,
         )
     if not value or len(value) > _MAX_INPUT_CHARS or "\x00" in value:
         return outcome.failed(
-            "fill_text_and_verify",
+            action_name,
             f"text must contain 1 to {_MAX_INPUT_CHARS} characters and no NUL bytes",
             field=label,
         )
     if _looks_like_secret_payload(value):
         return outcome.failed(
-            "fill_text_and_verify",
+            action_name,
             "the text resembles a credential, key or opaque access token; it was not entered",
             field=label,
         )
@@ -561,13 +562,13 @@ def _fill_text_and_verify(field_label: str, text: str,
     )
     if not completed:
         return outcome.unverified(
-            "fill_text_and_verify",
+            action_name,
             "UI Automation did not return within 4 seconds; the field may have changed. Do not retry blindly.",
             field=label, timed_out=True,
         )
     if error is not None:
         return outcome.unverified(
-            "fill_text_and_verify",
+            action_name,
             f"UI Automation raised {type(error).__name__}; whether the field changed is unknown. Do not retry blindly.",
             field=label,
         )
@@ -575,26 +576,26 @@ def _fill_text_and_verify(field_label: str, text: str,
     status, reason = result
     if status == "filled":
         return outcome.done(
-            "fill_text_and_verify", field=label, verified=True, changed=True,
+            action_name, field=label, verified=True, changed=True,
         )
     if status == "already_set":
         return outcome.done(
-            "fill_text_and_verify", field=label, verified=True, changed=False,
+            action_name, field=label, verified=True, changed=False,
         )
     if status in {"invoke_uncertain", "verification_mismatch"}:
         return outcome.unverified(
-            "fill_text_and_verify", reason, field=label,
+            action_name, reason, field=label,
         )
     if status == "ambiguous_field":
         return outcome.ask(
-            "fill_text_and_verify", reason, field=label,
+            action_name, reason, field=label,
         )
     if status == "sensitive_existing_value":
         return outcome.failed(
-            "fill_text_and_verify", reason, field=label,
+            action_name, reason, field=label,
         )
     return outcome.failed(
-        "fill_text_and_verify", reason or status, field=label,
+        action_name, reason or status, field=label,
     )
 
 
