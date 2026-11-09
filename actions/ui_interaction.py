@@ -524,7 +524,7 @@ def _fill_text_on_window(window_handle: int, expected_process_id: int,
 def _fill_text_and_verify(field_label: str, text: str,
                           expected_window_handle: int,
                           expected_process_id: int,
-                          action_name: str = action_name) -> str:
+                          action_name: str = "fill_text_and_verify") -> str:
     """Fill one exact safe Edit field; the typed value never leaves this function."""
     label = " ".join(str(field_label or "").split())
     value = str(text) if isinstance(text, str) else ""
