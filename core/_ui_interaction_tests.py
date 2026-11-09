@@ -37,6 +37,48 @@ class UIInteractionTests(unittest.TestCase):
         self.assertIn("status=failed", result)
         self.assertIn("action=click_and_verify", result)
 
+    def test_high_impact_click_is_parked_behind_the_hud_gate(self):
+        from core import confirm
+        snapshot = {
+            "handle": 100, "process_id": 1234,
+            "records": [{"role": "Button", "name": "Delete"}],
+            "clickables": [{
+                "role": "Button", "name": "Delete",
+                "automation_id": "delete", "runtime_id": (1, 2, 3),
+                "rect": (10, 10, 100, 40),
+            }],
+        }
+        with patch.object(ui_interaction, "_snapshot", return_value=snapshot), \\
+             patch.object(confirm, "pending_title", return_value=""), \\
+             patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as request:
+            result = ui_interaction.click_and_verify({
+                "button_label": "Delete", "expected_result": "Deleted",
+            })
+        self.assertEqual(result, "[CONFIRMATION_PENDING]")
+        request.assert_called_once()
+        self.assertEqual(request.call_args.kwargs["key"], "click_and_verify")
+        self.assertTrue(callable(request.call_args.kwargs["run"]))
+
+    def test_existing_hud_confirmation_blocks_a_second_critical_click(self):
+        from core import confirm
+        snapshot = {
+            "handle": 100, "process_id": 1234,
+            "records": [{"role": "Button", "name": "Delete"}],
+            "clickables": [{
+                "role": "Button", "name": "Delete",
+                "automation_id": "delete", "runtime_id": (1, 2, 3),
+                "rect": (10, 10, 100, 40),
+            }],
+        }
+        with patch.object(ui_interaction, "_snapshot", return_value=snapshot), \\
+             patch.object(confirm, "pending_title", return_value="Another action"), \\
+             patch.object(confirm, "request") as request:
+            result = ui_interaction.click_and_verify({
+                "button_label": "Delete", "expected_result": "Deleted",
+            })
+        self.assertIn("status=ask", result)
+        request.assert_not_called()
+
     def test_normalises_whitespace_and_case(self):
         self.assertEqual(_normalise("  Save   Changes "), "save changes")
 
