@@ -114,6 +114,8 @@ jobs:
         run: python -m core._model_router_tests
       - name: Run fail-closed engine policy tests
         run: python -m core._engine_policy_tests
+      - name: Run dashboard network policy tests
+        run: python -m core._dashboard_policy_tests
       - name: Run offline capability tests
         run: python -m core._capability_tests
       - name: Run offline proactive tests

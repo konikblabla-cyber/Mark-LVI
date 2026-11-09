@@ -586,8 +586,8 @@ def _ensure_certs() -> bool:
     present a certificate that matches it. Generating locally gives each install
     its own key, costs about a second, and happens exactly once.
 
-    Returns True when a usable pair exists afterwards; False leaves the caller on
-    plain HTTP, which still works — the QR code simply encodes http:// instead.
+    Returns True when a usable pair exists afterwards. Failure must leave the
+    dashboard bound to loopback only; remote control is never served in clear.
     """
     certs = BASE_DIR / "config" / "certs"
     key_p = certs / "jarvis.key"
@@ -753,48 +753,27 @@ class DashboardServer:
 
     @staticmethod
     def _ssl_enabled() -> bool:
-        """Is HTTPS switched on? Off unless the user asked for it.
-
-        WHY THE DEFAULT IS PLAIN HTTP, AFTER A RELEASE THAT MADE TLS MANDATORY
-            The certificate has to be self-signed — there is no certificate
-            authority on earth that will vouch for 192.168.1.108 — and a phone
-            treats a self-signed certificate as an attack. Chrome shows a
-            full-page interstitial; a QR scanner that opens links in its own
-            in-app browser often shows nothing at all and offers no way to
-            proceed, because those views deliberately have no "Advanced" button.
-
-            So the practical result of requiring TLS was a dashboard nobody
-            could reach, which is not a more secure product than one they can.
-            The pairing key, the rate limit, the token expiry and the
-            revoke-all-devices fix are all unaffected and all still apply.
-
-            What IS lost over plain HTTP is the AES-GCM layer, because
-            `crypto.subtle` does not exist outside a secure context. The page
-            says so on its own badge rather than pretending, and commands then
-            travel the local network in clear — which is what this dashboard
-            did for every release before this one.
-
-            Turn it on with "dashboard_https": true in config/api_keys.json if
-            the network is one where that matters; the certificate is generated
-            automatically and you will have to accept it once per device.
-        """
+        """HTTPS is the default; an explicit opt-out is loopback-only."""
         try:
             import json as _json
+            from core.dashboard_policy import dashboard_https_requested
             with open(BASE_DIR / "config" / "api_keys.json", "r",
                       encoding="utf-8") as f:
-                if not _json.load(f).get("dashboard_https"):
-                    return False
+                requested = dashboard_https_requested(_json.load(f))
         except Exception:
-            return False
+            requested = False
         certs = BASE_DIR / "config" / "certs"
-        return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
+        return requested and (certs / "jarvis.key").exists() \
+            and (certs / "jarvis.crt").exists()
 
     def get_url(self) -> str:
         """The full URL the QR code carries — always with its scheme, so a
         scanner never has to guess."""
         if self._ssl_enabled():
             return f"https://{self._ip}:{SECURE_PORT}"
-        return f"http://{self._ip}:{PORT}"
+        from core.dashboard_policy import dashboard_display_host
+        host = dashboard_display_host(False, self._ip)
+        return f"http://{host}:{PORT}"
 
     def get_manual_url(self) -> str:
         """What to type into a phone browser by hand.
@@ -804,7 +783,9 @@ class DashboardServer:
         looks exactly like the server being switched off. The redirector speaks
         HTTP, so it answers, and sends the browser on to the secure page.
         """
-        return f"{self._ip}:{PORT}"
+        from core.dashboard_policy import dashboard_display_host
+        host = dashboard_display_host(self._ssl_enabled(), self._ip)
+        return f"{host}:{PORT}"
 
     def _aes_key(self, session_key: str) -> bytes:
         if session_key not in self._aes_cache:
@@ -1235,45 +1216,36 @@ class DashboardServer:
         asyncio.get_running_loop().run_in_executor(
             None, report_network_access, PORT, SECURE_PORT)
 
-        # Only make a certificate if HTTPS was actually asked for. Generating
-        # one nobody uses just leaves a private key on disk.
+        # HTTPS is the default. If the config cannot be read, or certificate
+        # creation fails, the dashboard is restricted to this computer.
         try:
             import json as _json
+            from core.dashboard_policy import dashboard_https_requested
             with open(BASE_DIR / "config" / "api_keys.json", "r",
                       encoding="utf-8") as f:
-                if _json.load(f).get("dashboard_https"):
-                    _ensure_certs()
+                https_requested = dashboard_https_requested(_json.load(f))
         except Exception:
-            pass
+            https_requested = False
+        if https_requested:
+            _ensure_certs()
 
         use_ssl  = self._ssl_enabled()
+        from core.dashboard_policy import dashboard_bind_host
+        bind_host = dashboard_bind_host(use_ssl)
         ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
         ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
 
-        # TLS IS WANTED, BUT NOT AT THE COST OF NOT STARTING.
-        #
-        # An earlier version returned here when certificates could not be made,
-        # on the argument that serving a remote-control channel in clear is a
-        # different product. The argument is right and the behaviour was wrong:
-        # a dashboard that does not start is not more secure, it is absent, and
-        # the user is left with "refused to connect" and nothing to act on.
-        #
-        # So: HTTPS whenever it can be had — which is almost always, since the
-        # certificate is generated locally on first run — and plain HTTP with a
-        # loud, repeated warning when it cannot. The page keeps working either
-        # way; without a secure context it simply cannot encrypt, and it says
-        # so on screen rather than pretending.
+        # Remote access is permitted only over HTTPS. If TLS is disabled or
+        # certificate creation failed, serve on loopback and never expose
+        # credentials or remote-control commands to the LAN in clear text.
         if use_ssl:
             asyncio.create_task(self._serve_redirector())
         else:
-            print("[Dashboard] Plain HTTP on your local network. Commands are "
-                  "not encrypted; the pairing key still gates access.")
-            print('[Dashboard] For HTTPS set "dashboard_https": true in '
-                  'config/api_keys.json (your phone will ask you to trust the '
-                  'certificate once).')
+            print("[Dashboard] HTTPS unavailable or disabled; dashboard is "
+                  "available on this PC only (127.0.0.1).")
 
         cfg = uvicorn.Config(
-            self.app, host="0.0.0.0",
+            self.app, host=bind_host,
             port=SECURE_PORT if use_ssl else PORT, log_level="warning",
             **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)}
                if use_ssl else {}),
@@ -1295,7 +1267,7 @@ class DashboardServer:
         # being tested for, so setting it made the probe always succeed.
         _probe = _socket.socket()
         try:
-            _probe.bind(("0.0.0.0", SECURE_PORT if use_ssl else PORT))
+            _probe.bind((bind_host, SECURE_PORT if use_ssl else PORT))
         except OSError as exc:
             _probe.close()
             self._bind_error = (
