@@ -470,6 +470,9 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertNotIn("do-not-enter", result)
 
     def test_form_sequence_fills_edit_then_clicks_save_button(self):
+        # This test isolates ValuePattern entry; the separate checkbox test
+        # verifies that changing a checkbox itself requires HUD approval.
+        _user32.SendMessageW(self.checkbox_hwnd, 0x00F1, 1, 0)  # BM_SETCHECK BST_CHECKED
         self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
         time.sleep(0.1)
         active = _snapshot()
