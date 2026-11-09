@@ -128,6 +128,7 @@ def _stop_with_step_result(state: dict, index: int, result: str) -> str:
         "total_steps": len(state["steps"]),
         "failed_step": index + 1,
         "step_status": result.split(" ", 1)[0],
+        "step_detail": result[:280],
     }
     _release_sequence(state["id"])
     reason = (
