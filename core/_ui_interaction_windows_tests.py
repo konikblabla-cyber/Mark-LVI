@@ -35,6 +35,7 @@ _RESET_BUTTON_ID = 103
 _OPEN_PANEL_BUTTON_ID = 104
 _FINISH_WORKFLOW_BUTTON_ID = 105
 _SAVE_TITLE_BUTTON_ID = 106
+_CHECKBOX_ID = 108
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -117,6 +118,7 @@ def _serve_native_window() -> int:
     hinstance = _kernel32.GetModuleHandleW(None)
     status_hwnd = [None]
     project_title_hwnd = [None]
+    checkbox_hwnd = [None]
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -129,6 +131,8 @@ def _serve_native_window() -> int:
             workflow_stage[0] = "idle"
             if project_title_hwnd[0]:
                 _user32.SetWindowTextW(project_title_hwnd[0], "")
+            if checkbox_hwnd[0]:
+                _user32.SendMessageW(checkbox_hwnd[0], 0x00F1, 0, 0)  # BM_SETCHECK BST_UNCHECKED
             _user32.SetWindowTextW(status_hwnd[0], "Not saved")
             return 0
         if message == 0x0111 and command_id == _OPEN_PANEL_BUTTON_ID:
@@ -146,7 +150,11 @@ def _serve_native_window() -> int:
                 _user32.GetWindowTextW(
                     project_title_hwnd[0], buffer, len(buffer),
                 )
-            if buffer.value == "Quarterly plan":
+            checkbox_checked = bool(
+                checkbox_hwnd[0]
+                and _user32.SendMessageW(checkbox_hwnd[0], 0x00F0, 0, 0) == 1
+            )  # BM_GETCHECK BST_CHECKED
+            if buffer.value == "Quarterly plan" and checkbox_checked:
                 workflow_stage[0] = "title_saved"
                 _user32.SetWindowTextW(status_hwnd[0], "Title saved")
             else:
@@ -213,9 +221,13 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Save title", 0x50000000,
         20, 285, 140, 34, hwnd, ctypes.c_void_p(_SAVE_TITLE_BUTTON_ID), hinstance, None,
     )
+    checkbox_hwnd[0] = _user32.CreateWindowExW(
+        0, "BUTTON", "Enable notifications", 0x50010003,
+        190, 285, 220, 34, hwnd, ctypes.c_void_p(_CHECKBOX_ID), hinstance, None,
+    )
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
-                project_title_hwnd[0], save_title_hwnd)):
+                project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0])):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -484,6 +496,61 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             any(item["name"] == "Title saved" for item in after["records"]),
             after["records"],
         )
+
+    def test_checkbox_state_change_waits_for_hud_then_verifies_native_state(self):
+        from core import confirm
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        active = _snapshot()
+        self.assertEqual(active["handle"], int(self.hwnd), active)
+        requests = []
+
+        def capture_request(**kwargs):
+            requests.append(kwargs)
+            return "[CONFIRMATION_PENDING]"
+
+        with patch.object(ui_sequence, "_capture_active_window", return_value=active), \\
+             patch.object(confirm, "pending_title", return_value=""), \\
+             patch.object(confirm, "request", side_effect=capture_request):
+            pending = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {
+                        "action": "fill_text",
+                        "field_label": "Project title",
+                        "text": "Quarterly plan",
+                    },
+                    {
+                        "action": "set_checkbox",
+                        "checkbox_label": "Enable notifications",
+                        "checked": True,
+                    },
+                    {
+                        "action": "click",
+                        "button_label": "Save title",
+                        "expected_result": "Title saved",
+                    },
+                ],
+            })
+            self.assertEqual(pending, "[CONFIRMATION_PENDING]")
+            self.assertEqual(
+                _user32.SendMessageW(self.checkbox_hwnd, 0x00F0, 0, 0), 0,
+                "checkbox changed before HUD approval",
+            )
+            self.assertEqual(len(requests), 1)
+            self.assertIn("Confirm checkbox", requests[0]["title"])
+            result = requests[0]["run"]()
+
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        self.assertIn("steps_completed=3", result)
+        self.assertEqual(
+            _user32.SendMessageW(self.checkbox_hwnd, 0x00F0, 0, 0), 1,
+        )
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Title saved" for item in after["records"]),
+            after["records"],
+        )
+
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
         matches = _matching_controls(snapshot["clickables"], "Definitely not present")
