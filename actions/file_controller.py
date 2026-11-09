@@ -1,6 +1,8 @@
 import os
 import shutil
 import platform
+import stat
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -20,25 +22,124 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 _UNDO_CONTENT_LIMIT = 1_000_000
 
 
+def _path_exists(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def _lexical_path(path: Path) -> Path:
+    """Normalise a path without following a final symlink."""
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _file_signature(path: Path):
+    try:
+        info = path.lstat()
+        link = os.readlink(path) if stat.S_ISLNK(info.st_mode) else None
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, link)
+    except OSError:
+        return None
+
+
+def _atomic_write_bytes(target: Path, content: bytes) -> None:
+    """Replace one file atomically using a temporary sibling file."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=".mark-write-", suffix=".tmp", dir=str(target.parent))
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        if target.exists() and not target.is_symlink():
+            try:
+                os.chmod(temp, stat.S_IMODE(target.stat().st_mode))
+            except OSError:
+                pass
+        os.replace(temp, target)
+    except Exception:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_text(target: Path, content: str, append: bool = False) -> None:
+    """Stream an append into a sibling temp file, then atomically replace."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=".mark-write-", suffix=".tmp", dir=str(target.parent))
+    temp = Path(temp_name)
+    try:
+        with os.fdopen(fd, "wb") as output:
+            if append and target.exists():
+                with target.open("rb") as previous:
+                    shutil.copyfileobj(previous, output, length=1024 * 1024)
+            output.write(content.encode("utf-8"))
+            output.flush()
+            os.fsync(output.fileno())
+        if target.exists() and not target.is_symlink():
+            try:
+                os.chmod(temp, stat.S_IMODE(target.stat().st_mode))
+            except OSError:
+                pass
+        os.replace(temp, target)
+    except Exception:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _copy_signature(target: Path):
+    """Metadata manifest used to avoid deleting a copy changed after creation."""
+    if not _path_exists(target):
+        return None
+    def entry(path: Path):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            return ("link", os.readlink(path), info.st_dev, info.st_ino)
+        if stat.S_ISDIR(info.st_mode):
+            return ("dir", info.st_dev, info.st_ino, info.st_mtime_ns)
+        return ("file", info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+    manifest = {".": entry(target)}
+    if target.is_dir() and not target.is_symlink():
+        for parent, dirs, names in os.walk(target, followlinks=False):
+            current = Path(parent)
+            for name in list(dirs) + names:
+                child = current / name
+                manifest[child.relative_to(target).as_posix()] = entry(child)
+                if child.is_symlink() and name in dirs:
+                    dirs.remove(name)
+    return manifest
+
+
 def _undo_move(src: Path, dst: Path):
     """Reverse of a move: put it back where it came from."""
+    src, dst = _lexical_path(src), _lexical_path(dst)
     def _fn():
-        if not dst.exists():
+        if not _path_exists(dst):
             return f"'{dst.name}' is no longer there — nothing moved back."
+        if _path_exists(src):
+            return f"Cannot undo: '{src.name}' already exists at the original location; leaving both paths untouched."
+        if not _is_safe_path(src) or not _is_safe_path(dst):
+            return "Cannot undo: one of the paths is outside the allowed home directory."
         src.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(dst), str(src))
         return f"'{src.name}' is back in {src.parent.name}/."
     return _fn
 
 
-def _undo_create(target: Path):
+def _undo_create(target: Path, expected_signature=None):
     """Reverse of a create: remove what we made — and only if we still made it.
 
     Deliberately refuses to touch a directory that has since been filled: the
     undo for 'create a folder' is not 'delete whatever ended up in it'."""
     def _fn():
-        if not target.exists():
+        if not _path_exists(target):
             return f"'{target.name}' is already gone."
+        if expected_signature is not None and _file_signature(target) != expected_signature:
+            return f"'{target.name}' changed after creation — leaving it untouched."
         if target.is_dir():
             if any(target.iterdir()):
                 return (f"'{target.name}' is not empty any more — "
@@ -50,17 +151,18 @@ def _undo_create(target: Path):
     return _fn
 
 
-def _undo_write(target: Path, previous: str | None):
+def _undo_write(target: Path, previous: bytes | None, expected_signature=None):
     """Reverse of a write: restore the old contents, or remove a file that did
     not exist before the write created it."""
     def _fn():
+        if expected_signature is not None and _file_signature(target) != expected_signature:
+            return f"'{target.name}' changed after my write — leaving the newer contents untouched."
         if previous is None:
-            if target.exists():
+            if _path_exists(target):
                 target.unlink()
                 return f"Removed '{target.name}' — it did not exist before."
             return f"'{target.name}' is already gone."
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(previous, encoding="utf-8")
+        _atomic_write_bytes(target, previous)
         return f"Restored the previous contents of '{target.name}'."
     return _fn
 
@@ -232,17 +334,13 @@ def create_file(path: str, name: str = "", content: str = "") -> str:
         target = (base / name) if name else base
         if not _is_safe_path(target):
             return f"Access denied: {target}"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        existed = target.exists()
-        previous = None
-        if existed:
-            try:
-                previous = target.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                previous = None
-        target.write_text(content, encoding="utf-8")
-        push_undo(f"created {target.name}",
-                  _undo_write(target, previous) if existed else _undo_create(target))
+        target = target.resolve(strict=False)
+        if not _is_safe_path(target):
+            return f"Access denied: {target}"
+        if _path_exists(target):
+            return f"A file named '{target.name}' already exists; I will not overwrite it."
+        _atomic_write_bytes(target, str(content).encode("utf-8"))
+        push_undo(f"created {target.name}", _undo_create(target, _file_signature(target)))
         return f"File created: {target.name}"
     except Exception as e:
         return f"Could not create file: {e}"
@@ -302,23 +400,35 @@ def move_file(path: str, name: str = "", destination: str = "") -> str:
         src    = (base / name) if name else base
         dst    = _resolve_path(destination) if destination else None
 
-        if not src.exists():
+        if not _path_exists(src):
             return f"Source not found: {src.name}"
         if dst is None:
             return "No destination specified."
+        if src.is_symlink():
+            return "Moving symbolic links is disabled; move the link manually so its target cannot change unexpectedly."
         if not _is_safe_path(src):
             return f"Access denied (source): {src}"
         if not _is_safe_path(dst):
             return f"Access denied (destination): {dst}"
-
         if dst.is_dir():
             dst = dst / src.name
-
+        dst = _lexical_path(dst)
+        if not _is_safe_path(dst):
+            return f"Access denied (destination): {dst}"
+        if _path_exists(dst):
+            return f"Destination already exists: {dst}; nothing was moved."
+        if src.is_dir():
+            try:
+                if dst.resolve(strict=False).is_relative_to(src.resolve()):
+                    return "Cannot move a folder inside itself."
+            except Exception:
+                return "Could not safely compare source and destination paths."
         dst.parent.mkdir(parents=True, exist_ok=True)
-        origin = src.resolve()
+        if not _is_safe_path(dst):
+            return f"Access denied (destination): {dst}"
+        origin = _lexical_path(src)
         shutil.move(str(src), str(dst))
-        push_undo(f"moved {origin.name} to {dst.parent.name}/",
-                  _undo_move(origin, dst.resolve()))
+        push_undo(f"moved {origin.name} to {dst.parent.name}/", _undo_move(origin, dst))
         return f"Moved: {src.name} → {dst.parent.name}/"
 
     except Exception as e:
@@ -331,35 +441,52 @@ def copy_file(path: str, name: str = "", destination: str = "") -> str:
         src  = (base / name) if name else base
         dst  = _resolve_path(destination) if destination else None
 
-        if not src.exists():
+        if not _path_exists(src):
             return f"Source not found: {src.name}"
         if dst is None:
             return "No destination specified."
+        if src.is_symlink():
+            return "Copying a symbolic link is disabled; choose its in-root target explicitly."
         if not _is_safe_path(src):
             return f"Access denied (source): {src}"
         if not _is_safe_path(dst):
             return f"Access denied (destination): {dst}"
-
         if dst.is_dir():
             dst = dst / src.name
-
-        dst.parent.mkdir(parents=True, exist_ok=True)
-
+        dst = _lexical_path(dst)
+        if not _is_safe_path(dst):
+            return f"Access denied (destination): {dst}"
+        if _path_exists(dst):
+            return f"Destination already exists: {dst}; nothing was copied."
         if src.is_dir():
-            shutil.copytree(str(src), str(dst))
+            try:
+                if dst.resolve(strict=False).is_relative_to(src.resolve()):
+                    return "Cannot copy a folder into itself."
+            except Exception:
+                return "Could not safely compare source and destination paths."
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if not _is_safe_path(dst):
+            return f"Access denied (destination): {dst}"
+        if src.is_dir():
+            shutil.copytree(str(src), str(dst), symlinks=True)
+            unsafe_links = [p for p in dst.rglob("*") if p.is_symlink() and not _is_safe_path(p)]
+            if unsafe_links:
+                shutil.rmtree(dst)
+                return "Copy refused: the folder contains a symbolic link pointing outside the allowed home directory."
         else:
             shutil.copy2(str(src), str(dst))
-
-        # The undo for a copy is deleting the copy — never the original.
-        _copy = dst.resolve()
+        _copy = _lexical_path(dst)
+        signature = _copy_signature(_copy)
         def _undo_copy():
-            if not _copy.exists():
+            if not _path_exists(_copy):
                 return f"The copy '{_copy.name}' is already gone."
-            if _copy.is_dir():
+            if _copy_signature(_copy) != signature:
+                return f"The copy '{_copy.name}' changed after creation — leaving it untouched."
+            if _copy.is_dir() and not _copy.is_symlink():
                 shutil.rmtree(_copy)
             else:
                 _copy.unlink()
-            return f"Removed the copy in {_copy.parent.name}/."
+            return f"Removed the unchanged copy in {_copy.parent.name}/."
         push_undo(f"copied {src.name} to {dst.parent.name}/", _undo_copy)
 
         return f"Copied: {src.name} → {dst.parent.name}/"
@@ -374,19 +501,24 @@ def rename_file(path: str, name: str = "", new_name: str = "") -> str:
         target   = (base / name) if name else base
         if not _is_safe_path(target):
             return f"Access denied: {target}"
-        if not target.exists():
+        if not _path_exists(target):
             return f"Not found: {target.name}"
+        if target.is_symlink():
+            return "Renaming symbolic links is disabled; choose the link target explicitly."
         if not new_name:
             return "No new name provided."
-
-        new_path = target.parent / new_name
-        if new_path.exists():
+        if (new_name in {".", ".."} or "/" in new_name or "\\" in new_name
+                or Path(new_name).is_absolute() or "\x00" in new_name):
+            return "Invalid new name: use one plain file or folder name without a path."
+        new_path = _lexical_path(target.parent / new_name)
+        if not _is_safe_path(new_path):
+            return f"Access denied: {new_path}"
+        if _path_exists(new_path):
             return f"A file named '{new_name}' already exists here."
 
-        old_path = target.resolve()
+        old_path = _lexical_path(target)
         target.rename(new_path)
-        push_undo(f"renamed {old_path.name} to {new_name}",
-                  _undo_move(old_path, new_path.resolve()))
+        push_undo(f"renamed {old_path.name} to {new_name}", _undo_move(old_path, new_path))
         return f"Renamed: {target.name} → {new_name}"
 
     except Exception as e:
@@ -420,32 +552,29 @@ def write_file(path: str, name: str = "", content: str = "",
         target = (base / name) if name else base
         if not _is_safe_path(target):
             return f"Access denied: {target}"
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        # Snapshot before writing. None means "did not exist", which is a
-        # different undo (delete it) from "existed and had this in it".
-        previous: str | None = None
+        target = target.resolve(strict=False)
+        if not _is_safe_path(target):
+            return f"Access denied: {target}"
+        if target.exists() and not target.is_file():
+            return f"Not a regular file: {target.name}"
+        previous: bytes | None = None
         undoable = True
         if target.exists():
             try:
                 if target.stat().st_size > _UNDO_CONTENT_LIMIT:
-                    undoable = False       # too large to hold in memory
+                    undoable = False
                 else:
-                    previous = target.read_text(encoding="utf-8", errors="ignore")
+                    previous = target.read_bytes()
             except Exception:
-                undoable = False           # binary, locked, unreadable
-
-        mode = "a" if append else "w"
-        with open(target, mode, encoding="utf-8") as f:
-            f.write(content)
-
+                return "Could not create a safe backup of the existing file; nothing was changed."
+        _atomic_write_text(target, str(content), append=bool(append))
+        expected = _file_signature(target)
         action = "Appended to" if append else "Written to"
         if undoable:
-            push_undo(f"wrote to {target.name}", _undo_write(target, previous))
+            push_undo(f"wrote to {target.name}", _undo_write(target, previous, expected))
             return f"{action}: {target.name}"
         return (f"{action}: {target.name}. "
-                f"(Too large to keep a copy of the old contents, so this one "
-                f"cannot be undone.)")
+                f"(The previous file exceeded {_UNDO_CONTENT_LIMIT} bytes, so this change is atomic but cannot be undone.)")
     except Exception as e:
         return f"Could not write file: {e}"
 
@@ -526,6 +655,8 @@ def get_largest_files(path: str = "downloads", count: int = 10) -> str:
 def get_disk_usage(path: str = "home") -> str:
     try:
         target = _resolve_path(path)
+        if not _is_safe_path(target):
+            return f"Access denied: {target}"
         usage  = shutil.disk_usage(target)
         pct    = usage.used / usage.total * 100
         return (
@@ -590,10 +721,11 @@ def organize_desktop() -> str:
                 restored = 0
                 for origin, moved_to in entries:
                     try:
-                        if moved_to.exists():
-                            origin.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.move(str(moved_to), str(origin))
-                            restored += 1
+                        if moved_to.exists() and not _path_exists(origin):
+                            if _is_safe_path(moved_to) and _is_safe_path(origin):
+                                origin.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.move(str(moved_to), str(origin))
+                                restored += 1
                     except Exception as e:
                         print(f"[file] undo organize: {moved_to.name}: {e}")
                 # Clear away the folders we created, but only while they are
