@@ -8,25 +8,42 @@ import json
 import numpy as np
 
 
-class WhisperSTT:
-    """Offline transcription using faster-whisper."""
+def _select_whisper_device(requested: str | None, cuda_available: bool) -> tuple[str, str]:
+    """Choose inference placement. CPU is the default to leave gaming VRAM free.
 
-    def __init__(self, model_name: str = "base", language: str | None = None):
+    Set MARK_STT_DEVICE=auto to prefer CUDA, or MARK_STT_DEVICE=cuda to
+    explicitly request it. An unavailable CUDA device safely falls back to CPU.
+    """
+    choice = str(requested or "cpu").strip().lower()
+    if choice in {"auto", "cuda"} and cuda_available:
+        return "cuda", "float16"
+    return "cpu", "int8"
+
+
+class WhisperSTT:
+    """Offline transcription using faster-whisper.
+
+    For gaming systems the default is CPU/int8, preserving VRAM for the game.
+    Set MARK_STT_DEVICE=auto (or cuda) to opt into GPU inference.
+    """
+
+    def __init__(self, model_name: str = "base", language: str | None = None,
+                 device: str | None = None):
         import os
         from faster_whisper import WhisperModel
-        print(f"[STT] Loading Whisper '{model_name}'…")
-        try:
-            import torch
-            device  = "cuda" if torch.cuda.is_available() else "cpu"
-            compute = "float16" if device == "cuda" else "int8"
-        except Exception:
-            device, compute = "cpu", "int8"
-
+        requested_device = device or os.environ.get("MARK_STT_DEVICE", "cpu")
+        cuda_available = False
+        if str(requested_device).strip().lower() in {"auto", "cuda"}:
+            try:
+                import torch
+                cuda_available = bool(torch.cuda.is_available())
+            except Exception:
+                cuda_available = False
+        device, compute = _select_whisper_device(requested_device, cuda_available)
+        print(f"[STT] Loading Whisper '{model_name}' on {device}…")
         try:
             self._model = WhisperModel(model_name, device=device, compute_type=compute)
         except Exception as _first_err:
-            # Offline flag set but model not cached yet → clear flags and download once.
-            # Keywords cover multiple huggingface_hub error message variants across versions.
             _e = str(_first_err).lower()
             _offline_keywords = (
                 "offline", "not found", "cache", "localentry",
@@ -34,9 +51,9 @@ class WhisperSTT:
             )
             if any(k in _e for k in _offline_keywords):
                 print(f"[STT] Whisper '{model_name}' not in local cache — downloading (one-time, internet required)…")
-                os.environ.pop("HF_HUB_OFFLINE",      None)
+                os.environ.pop("HF_HUB_OFFLINE", None)
                 os.environ.pop("TRANSFORMERS_OFFLINE", None)
-                os.environ.pop("HF_DATASETS_OFFLINE",  None)
+                os.environ.pop("HF_DATASETS_OFFLINE", None)
                 try:
                     self._model = WhisperModel(model_name, device=device, compute_type=compute)
                 except Exception as _dl_err:
@@ -58,9 +75,9 @@ class WhisperSTT:
             segments, _ = self._model.transcribe(
                 audio,
                 language=self._language,
-                beam_size=1,                       # greedy — 2-3x faster
+                beam_size=1,
                 best_of=1,
-                condition_on_previous_text=False,  # no hallucinations, faster
+                condition_on_previous_text=False,
                 vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 300},
             )
