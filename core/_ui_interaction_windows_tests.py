@@ -303,6 +303,31 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             after["records"],
         )
 
+    def test_reused_window_handle_from_another_process_is_rejected(self):
+        snapshot = _snapshot(int(self.hwnd))
+        matches = _matching_controls(snapshot["clickables"], "Save")
+        self.assertEqual(len(matches), 1, snapshot["clickables"])
+        item = matches[0]
+        signature = {
+            "role": item["role"],
+            "automation_id": item.get("automation_id", ""),
+            "runtime_id": item.get("runtime_id", ()),
+            "rect": item.get("rect"),
+        }
+        wrong_process_id = snapshot["process_id"] + 9999
+        result = _click_and_verify(
+            "Save", "Saved", int(self.hwnd), wrong_process_id, signature,
+        )
+        self.assertTrue(
+            result.startswith("status=failed action=click_and_verify "),
+            result,
+        )
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Not saved" for item in after["records"]),
+            after["records"],
+        )
+
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
         matches = _matching_controls(snapshot["clickables"], "Definitely not present")
