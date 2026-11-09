@@ -517,14 +517,14 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
     def test_native_checkbox_toggle_is_verified_and_idempotent(self):
         self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
         time.sleep(0.1)
-        snapshot = _snapshot(int(self.hwnd))
         checkbox = _user32.GetDlgItem(self.hwnd, _CHECKBOX_ID)
         self.assertTrue(checkbox)
         self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 0)  # BM_GETCHECK
         first = ui_checkbox.set_checkbox_state({
             "checkbox_label": "Remember this device", "checked": True,
         })
-        self.assertIn("status=done", first)
+        native_state = _user32.SendMessageW(checkbox, 0x00F0, 0, 0)
+        self.assertIn("status=done", first, f"{first}; native BM_GETCHECK={native_state}")
         self.assertIn("checked=true", first)
         self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 1)
         second = ui_checkbox.set_checkbox_state({
