@@ -8,25 +8,61 @@ from actions.screen_understanding import (
 
 
 class ScreenUnderstandingTests(unittest.TestCase):
-    def test_active_focused_control_is_promoted_to_top_level_window(self):
-        app_window = object()
-
-        class FocusedControl:
-            def top_level_parent(self):
-                return app_window
+    def test_uses_pywinauto_069_active_visible_top_level_windows(self):
+        app_window = type("Window", (), {"is_visible": lambda self: True})()
 
         class FakeDesktop:
-            def get_active(self):
-                return FocusedControl()
+            def windows(self, **kwargs):
+                self.asserted = kwargs
+                return [app_window]
 
-        self.assertIs(_active_top_level_window(FakeDesktop()), app_window)
+        desktop = FakeDesktop()
+        self.assertIs(_active_top_level_window(desktop), app_window)
+        self.assertEqual(desktop.asserted, {
+            "active_only": True,
+            "visible_only": True,
+            "top_level_only": True,
+        })
 
-    def test_missing_focused_element_returns_no_window(self):
+    def test_no_active_window_returns_none(self):
         class FakeDesktop:
-            def get_active(self):
-                return None
+            def windows(self, **kwargs):
+                return []
 
         self.assertIsNone(_active_top_level_window(FakeDesktop()))
+
+    def test_multiple_active_roots_are_not_guessed(self):
+        class FakeWindow:
+            def is_visible(self):
+                return True
+
+        class FakeDesktop:
+            def windows(self, **kwargs):
+                return [FakeWindow(), FakeWindow()]
+
+        self.assertIsNone(_active_top_level_window(FakeDesktop()))
+
+    def test_invisible_or_inaccessible_windows_are_ignored(self):
+        class VisibleWindow:
+            def is_visible(self):
+                return True
+
+        class InvisibleWindow:
+            def is_visible(self):
+                return False
+
+        class BrokenWindow:
+            def is_visible(self):
+                raise RuntimeError("stale")
+
+        class FakeDesktop:
+            def windows(self, **kwargs):
+                return [InvisibleWindow(), BrokenWindow(), VisibleWindow()]
+
+        self.assertIsInstance(_active_top_level_window(FakeDesktop()), VisibleWindow)
+
+    def test_missing_windows_api_returns_none(self):
+        self.assertIsNone(_active_top_level_window(object()))
 
     def test_formats_accessible_labels(self):
         result = format_accessible_elements([
