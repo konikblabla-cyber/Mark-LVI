@@ -66,6 +66,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
 | 🖱️ Verified UI Workflows | Run 2–8 exact clicks in one application, verify every visible result before continuing, stop on ambiguity and pause critical steps for HUD confirmation |
+| 📝 Privacy-Preserving Form Entry | Fill explicit non-sensitive fields through local UI Automation ValuePattern, verify each value locally, never return field contents or submit the form |
 | 📚 Knowledge Vault | Local Markdown notes in an Obsidian-compatible folder, with safe search/read/create/append paths and undo for note changes |
 | 👁️ Memory Panel | See every fact JARVIS has stored about you, when it learned it, and delete any of it in one click |
 | ↩️ Undo | Take back what the assistant did — files it moved, renamed, created or wrote, and settings it changed |
