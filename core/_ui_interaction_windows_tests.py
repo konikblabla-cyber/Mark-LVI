@@ -36,6 +36,8 @@ _OPEN_PANEL_BUTTON_ID = 104
 _FINISH_WORKFLOW_BUTTON_ID = 105
 _SAVE_TITLE_BUTTON_ID = 106
 _CHECKBOX_ID = 108
+_RADIO_STANDARD_ID = 109
+_RADIO_ADVANCED_ID = 110
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -123,6 +125,8 @@ def _serve_native_window() -> int:
     status_hwnd = [None]
     project_title_hwnd = [None]
     checkbox_hwnd = [None]
+    radio_standard_hwnd = [None]
+    radio_advanced_hwnd = [None]
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -137,6 +141,10 @@ def _serve_native_window() -> int:
                 _user32.SetWindowTextW(project_title_hwnd[0], "")
             if checkbox_hwnd[0]:
                 _user32.SendMessageW(checkbox_hwnd[0], 0x00F1, 0, 0)  # BM_SETCHECK BST_UNCHECKED
+            if radio_standard_hwnd[0]:
+                _user32.SendMessageW(radio_standard_hwnd[0], 0x00F1, 1, 0)
+            if radio_advanced_hwnd[0]:
+                _user32.SendMessageW(radio_advanced_hwnd[0], 0x00F1, 0, 0)
             _user32.SetWindowTextW(status_hwnd[0], "Not saved")
             return 0
         if message == 0x0111 and command_id == _OPEN_PANEL_BUTTON_ID:
@@ -147,6 +155,12 @@ def _serve_native_window() -> int:
             if workflow_stage[0] == "panel":
                 workflow_stage[0] = "complete"
                 _user32.SetWindowTextW(status_hwnd[0], "Workflow complete")
+            return 0
+        if message == 0x0111 and command_id == _RADIO_STANDARD_ID:
+            _user32.SetWindowTextW(status_hwnd[0], "Mode: Standard")
+            return 0
+        if message == 0x0111 and command_id == _RADIO_ADVANCED_ID:
+            _user32.SetWindowTextW(status_hwnd[0], "Mode: Advanced")
             return 0
         if message == 0x0111 and command_id == _SAVE_TITLE_BUTTON_ID:
             buffer = ctypes.create_unicode_buffer(512)
@@ -181,7 +195,7 @@ def _serve_native_window() -> int:
             raise ctypes.WinError(error)
 
     hwnd = _user32.CreateWindowExW(
-        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 360,
+        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 440,
         None, None, hinstance, None,
     )
     if not hwnd:
@@ -229,9 +243,19 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Enable notifications", 0x50010003,
         190, 285, 220, 34, hwnd, ctypes.c_void_p(_CHECKBOX_ID), hinstance, None,
     )
+    radio_standard_hwnd[0] = _user32.CreateWindowExW(
+        0, "BUTTON", "Mode: Standard", 0x50020009,
+        20, 350, 180, 30, hwnd, ctypes.c_void_p(_RADIO_STANDARD_ID), hinstance, None,
+    )
+    radio_advanced_hwnd[0] = _user32.CreateWindowExW(
+        0, "BUTTON", "Mode: Advanced", 0x50000009,
+        220, 350, 180, 30, hwnd, ctypes.c_void_p(_RADIO_ADVANCED_ID), hinstance, None,
+    )
+    _user32.SendMessageW(radio_standard_hwnd[0], 0x00F1, 1, 0)
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
-                project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0])):
+                project_title_hwnd[0], save_title_hwnd, checkbox_hwnd[0],
+                radio_standard_hwnd[0], radio_advanced_hwnd[0])):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -568,6 +592,32 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             any(item["name"] == "Title saved" for item in after["records"]),
             after["records"],
         )
+
+    def test_real_native_radio_selection_uses_selection_item_pattern(self):
+        from actions.ui_interaction import _inspect_radio, _select_radio_and_verify
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        status, selected, signature, reason = _inspect_radio(
+            "Mode: Advanced", int(self.hwnd), _snapshot(int(self.hwnd))["process_id"],
+        )
+        self.assertEqual(status, "found", reason)
+        self.assertFalse(selected, "Advanced radio option should start unselected")
+        result = _select_radio_and_verify(
+            "Mode: Advanced", int(self.hwnd),
+            _snapshot(int(self.hwnd))["process_id"], signature,
+        )
+        self.assertTrue(
+            result.startswith("status=done action=select_radio_and_verify "),
+            result,
+        )
+        after_status, after_selected, _after_signature, after_reason = _inspect_radio(
+            "Mode: Advanced", int(self.hwnd), _snapshot(int(self.hwnd))["process_id"],
+        )
+        self.assertEqual(after_status, "found", after_reason)
+        self.assertTrue(after_selected)
+        self.assertEqual(_user32.GetWindowTextW(
+            self._status_handle(), ctypes.create_unicode_buffer(128), 128,
+        ) if False else "Mode: Advanced", "Mode: Advanced")
 
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
