@@ -67,6 +67,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
 | 🖱️ Verified UI Workflows | Run 2–8 exact clicks in one application, verify every visible result before continuing, stop on ambiguity and pause critical steps for HUD confirmation |
 | 📝 Safe UI Text Entry | Fill one explicitly requested, labelled non-sensitive field locally; verify without returning the field value; never submits the form |
+| 🎚️ Verified UI Sliders | Set one exact visible Windows slider value, check its live range, and verify the result locally without returning the value |
 | 📚 Knowledge Vault | Local Markdown notes in an Obsidian-compatible folder, with safe search/read/create/append paths and undo for note changes |
 | 👁️ Memory Panel | See every fact JARVIS has stored about you, when it learned it, and delete any of it in one click |
 | ↩️ Undo | Take back what the assistant did — files it moved, renamed, created or wrote, and settings it changed |
