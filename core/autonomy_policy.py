@@ -44,7 +44,7 @@ _CRITICAL_ACTION = re.compile(
     r"credential|password|passcode|otp|2fa)\b|"
     r"\b(?:permanent|permanently|irreversible)\b|"
     r"factory[\s_-]+reset|reset[\s_-]+(?:pc|computer|system|password|account|security)|"
-    r"sign[\s_-]+(?:contract|document|agreement)|"
+    r"sign[\s_-]+(?:(?:the|this)[\s_-]+)?(?:contract|document|agreement)|"
     r"change[\s_-]+(?:password|security)|"
     r"(?:delete|close|terminate|remove)[\s_-]+(?:account|profile|membership)|"
     r"(?:account|profile|membership)[\s_-]+(?:deleted|closed)|"
