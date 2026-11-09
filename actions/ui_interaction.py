@@ -45,12 +45,15 @@ _HIGH_IMPACT_WORDS = (
     "wyslano", "opublikowano", "przelano",
 )
 _MAX_CONTROLS = 240
+_MAX_SCANNED_CONTROLS = 1200
 _SNAPSHOT_TIMEOUT_SECONDS = 4.0
 _INVOKE_TIMEOUT_SECONDS = 4.0
+_VERIFY_TIMEOUT_SECONDS = 6.0
 _VERIFY_ATTEMPTS = 8
 _VERIFY_INTERVAL = 0.25
 _RECT_TOLERANCE = 8
 _COMTYPES_IMPORT_LOCK = threading.Lock()
+_SNAPSHOT_LOCK = threading.Lock()
 _INVOKE_LOCK = threading.Lock()
 
 
@@ -174,7 +177,8 @@ def _run_bounded(callback, timeout: float, cancel_event=None):
     return True, result.get("value"), result.get("error")
 
 
-def _run_uia(callback, timeout: float, exclusive_lock=None):
+def _run_uia(callback, timeout: float, exclusive_lock=None,
+              pass_cancel_event: bool = False):
     """Run fresh UIA objects in their own initialized COM apartment.
 
     comtypes initializes the importing thread automatically. If this is its
@@ -215,7 +219,7 @@ def _run_uia(callback, timeout: float, exclusive_lock=None):
                 # crossing the side-effect boundary into InvokePattern.
                 if cancelled.is_set():
                     return ("cancelled", "the operation expired before invoking the control")
-                return callback()
+                return callback(cancelled) if pass_cancel_event else callback()
             finally:
                 comtypes.CoUninitialize()
         finally:
@@ -228,8 +232,8 @@ def _run_uia(callback, timeout: float, exclusive_lock=None):
 def _collect_accessible_controls(window, include_wrappers: bool = False):
     records = []
     clickables = []
-    for control in window.descendants():
-        if len(records) >= _MAX_CONTROLS:
+    for scanned, control in enumerate(window.descendants()):
+        if scanned >= _MAX_SCANNED_CONTROLS or len(records) >= _MAX_CONTROLS:
             break
         try:
             info = control.element_info
@@ -305,6 +309,7 @@ def _snapshot(window_handle=None) -> dict:
     completed, value, error = _run_uia(
         lambda: _read_window_snapshot(window_handle),
         _SNAPSHOT_TIMEOUT_SECONDS,
+        exclusive_lock=_SNAPSHOT_LOCK,
     )
     if not completed:
         raise TimeoutError("UI Automation could not inspect the window within 4 seconds")
@@ -312,11 +317,16 @@ def _snapshot(window_handle=None) -> dict:
         raise RuntimeError(
             f"UI Automation could not inspect the window ({type(error).__name__})"
         ) from error
+    if isinstance(value, tuple) and value and value[0] in {"busy", "cancelled"}:
+        raise RuntimeError(value[1])
+    if not isinstance(value, dict) or not isinstance(value.get("records"), list):
+        raise RuntimeError("UI Automation returned an invalid window snapshot")
     return value
 
 
 def _invoke_on_window(window_handle: int, label: str,
-                      original_signature: dict) -> tuple[str, str]:
+                      original_signature: dict,
+                      cancelled: threading.Event) -> tuple[str, str]:
     """Re-find and invoke the same control inside the target window."""
     from pywinauto import Desktop
 
@@ -337,8 +347,12 @@ def _invoke_on_window(window_handle: int, label: str,
     if not _same_control_identity(target, original_signature):
         return "changed_control", "the matching control is not the one originally identified"
 
-    # Resolve the pattern before calling it. A missing InvokePattern proves
-    # that no action was sent; an exception during Invoke itself is ambiguous.
+    # Timeout cancellation is checked after control discovery and once more
+    # after resolving InvokePattern, immediately before the side-effect call.
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before invoking the control"
+    # A missing InvokePattern proves that no action was sent; an exception
+    # during Invoke itself is ambiguous.
     try:
         invoke_pattern = target["control"].iface_invoke
     except Exception as exc:
@@ -346,6 +360,8 @@ def _invoke_on_window(window_handle: int, label: str,
             "unsupported_pattern",
             f"the control does not expose InvokePattern ({type(exc).__name__})",
         )
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before invoking the control"
     invoke_pattern.Invoke()
     return "invoked", ""
 
@@ -353,17 +369,24 @@ def _invoke_on_window(window_handle: int, label: str,
 def _wait_for_expected_result(expected: str, snapshot_reader,
                               attempts: int = _VERIFY_ATTEMPTS,
                               interval: float = _VERIFY_INTERVAL,
-                              sleep=time.sleep) -> bool:
+                              sleep=time.sleep,
+                              timeout_seconds: float = _VERIFY_TIMEOUT_SECONDS) -> bool:
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
     for attempt in range(max(1, int(attempts))):
+        if attempt and time.monotonic() >= deadline:
+            break
         try:
             snapshot = snapshot_reader()
             records = snapshot.get("records", []) if isinstance(snapshot, dict) else snapshot
             if _has_exact_expected_text(records, expected):
                 return True
         except Exception:
+            # UIA can transiently fail while a window is changing. Keep polling
+            # only within the shared verification deadline; never infer success.
             pass
-        if attempt + 1 < attempts:
-            sleep(max(0.0, interval))
+        remaining = deadline - time.monotonic()
+        if attempt + 1 < attempts and remaining > 0:
+            sleep(min(max(0.0, interval), remaining))
     return False
 
 
@@ -418,11 +441,12 @@ def _click_and_verify(button_label: str, expected_result: str,
         )
 
     completed, invocation, error = _run_uia(
-        lambda: _invoke_on_window(
-            expected_window_handle, label, original_signature,
+        lambda cancelled: _invoke_on_window(
+            expected_window_handle, label, original_signature, cancelled,
         ),
         _INVOKE_TIMEOUT_SECONDS,
         exclusive_lock=_INVOKE_LOCK,
+        pass_cancel_event=True,
     )
     if not completed:
         return outcome.unverified(
