@@ -92,12 +92,6 @@ if sys.platform == "win32":
     ]
     _user32.FindWindowW.restype = wintypes.HWND
     _user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
-    _user32.GetDlgItem.restype = wintypes.HWND
-    _user32.GetDlgItem.argtypes = [wintypes.HWND, ctypes.c_int]
-    _user32.GetWindowTextW.restype = ctypes.c_int
-    _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
-    _user32.GetWindowTextLengthW.restype = ctypes.c_int
-    _user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
     _user32.GetMessageW.restype = ctypes.c_int
     _user32.GetMessageW.argtypes = [
         ctypes.POINTER(wintypes.MSG), wintypes.HWND,
@@ -283,12 +277,12 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         # Tests share one native window, so restore a known state each time.
-        _user32.SetWindowTextW(
-            _user32.GetDlgItem(self.hwnd, _SEARCH_EDIT_ID), "",
-        )
-        _user32.SetWindowTextW(
-            _user32.GetDlgItem(self.hwnd, _PASSWORD_EDIT_ID), "",
-        )
+        from pywinauto import Desktop
+        window = Desktop(backend="uia").window(handle=int(self.hwnd)).wrapper_object()
+        fields = text_entry._collect_edit_controls(window, include_wrappers=True)
+        search_fields = text_entry._matching_fields(fields, "Search query")
+        if len(search_fields) == 1:
+            search_fields[0]["control"].iface_value.SetValue("")
         snapshot = _snapshot(int(self.hwnd))
         if any(item["name"] == "Not saved" for item in snapshot["records"]):
             return
