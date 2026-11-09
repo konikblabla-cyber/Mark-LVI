@@ -2451,6 +2451,8 @@ class JarvisLive:
             from providers import registry
 
             pipe = get_pipeline()
+            from core import model_router
+            model_router.validate_zero_cost_pipeline(pipe)
             llm_id = str(pipe.get("llm") or "").strip()
             if not llm_id:
                 raise RuntimeError("no language model is chosen")
@@ -2482,13 +2484,16 @@ class JarvisLive:
             caps["audio_out"] = bool(str(pipe.get("tts") or "").strip())
             return caps
         except Exception as e:
-            # A local engine that will not start must never mean no assistant.
-            # Falling back to Live is the whole reason the ladder exists, and
-            # the reason is said out loud rather than left in a console.
-            self.ui.write_log(f"SYS: local engine unavailable ({e}) — "
-                              f"using Gemini Live.")
-            print(f"[JARVIS] Pipeline engine unavailable: {e}")
-            return None
+            # A selected provider pipeline is an explicit routing choice.
+            # Never send audio or prompts to Gemini Live when that pipeline
+            # cannot start; the user must switch engines intentionally.
+            message = (
+                f"Selected provider pipeline unavailable ({type(e).__name__}: {e}). "
+                "Cloud fallback is disabled; choose another engine explicitly."
+            )
+            self.ui.write_log("ERR: " + message)
+            print("[JARVIS] " + message)
+            raise RuntimeError(message) from e
 
     @asynccontextmanager
     async def _open_session(self, live_model: str, config):

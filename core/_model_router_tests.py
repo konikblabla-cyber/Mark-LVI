@@ -212,6 +212,53 @@ class RouterSafetyTests(unittest.TestCase):
 
 
 
+class PipelineProviderSafetyTests(unittest.TestCase):
+    def test_local_pipeline_is_allowed_without_hosted_provider_ack(self):
+        with patch.object(router, "_settings", return_value={"zero_cost_confirmed": False}), \
+             patch("providers.registry.get_declaration", return_value={"local": True}), \
+             patch("providers.registry.catalog_entry", return_value={}), \
+             patch("memory.config_manager.get_provider_config", return_value={}), \
+             patch("providers.llm_openai._is_own_hardware", return_value=False), \
+             patch.object(router, "_assert_zero_cost_provider") as guard:
+            router.validate_zero_cost_pipeline({
+                "llm": "local_llm", "stt": "local_stt", "tts": "local_tts",
+            })
+        guard.assert_not_called()
+
+    def test_hosted_pipeline_requires_explicit_zero_cost_ack(self):
+        with patch.object(router, "_settings", return_value={"zero_cost_confirmed": False}), \
+             patch("providers.registry.get_declaration", return_value={"local": False}), \
+             patch("providers.registry.catalog_entry", return_value={"local": False}), \
+             patch("memory.config_manager.get_provider_config", return_value={"base_url": "https://api.example.invalid"}), \
+             patch("providers.llm_openai._is_own_hardware", return_value=False), \
+             patch.object(router, "_assert_zero_cost_provider") as allowlist:
+            with self.assertRaises(router.RouterError):
+                router.validate_zero_cost_pipeline({"llm": "hosted@provider"})
+        allowlist.assert_not_called()
+
+    def test_metered_hosted_pipeline_is_rejected_even_after_ack(self):
+        with patch.object(router, "_settings", return_value={"zero_cost_confirmed": True}), \
+             patch("providers.registry.get_declaration", return_value={"local": False}), \
+             patch("providers.registry.catalog_entry", return_value={"local": False}), \
+             patch("memory.config_manager.get_provider_config", return_value={"base_url": "https://api.groq.com/openai/v1"}), \
+             patch("providers.llm_openai._is_own_hardware", return_value=False), \
+             patch.object(router, "_assert_zero_cost_provider",
+                          side_effect=router.RouterError("not on $0 allowlist")) as allowlist:
+            with self.assertRaises(router.RouterError):
+                router.validate_zero_cost_pipeline({"llm": "openai_compat@groq"})
+        allowlist.assert_called_once_with("openai_compat@groq")
+
+    def test_private_custom_pipeline_endpoint_is_allowed_without_hosted_ack(self):
+        with patch.object(router, "_settings", return_value={"zero_cost_confirmed": False}), \
+             patch("providers.registry.get_declaration", return_value={"local": False}), \
+             patch("providers.registry.catalog_entry", return_value={"local": None}), \
+             patch("memory.config_manager.get_provider_config", return_value={"base_url": "http://127.0.0.1:1234/v1"}), \
+             patch("providers.llm_openai._is_own_hardware", return_value=True), \
+             patch.object(router, "_assert_zero_cost_provider") as allowlist:
+            router.validate_zero_cost_pipeline({"llm": "openai_compat@custom"})
+        allowlist.assert_not_called()
+
+
 class ProviderFallbackGuardTests(unittest.TestCase):
     def test_fallback_is_blocked_without_explicit_zero_cost_acknowledgement(self):
         with patch.object(router, "_settings", return_value={

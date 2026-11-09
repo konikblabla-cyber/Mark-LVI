@@ -528,6 +528,43 @@ def _assert_zero_cost_provider(provider_id: str) -> None:
     )
 
 
+def validate_zero_cost_pipeline(pipeline: dict) -> None:
+    """Fail closed unless each conversation provider is local or verified $0.
+
+    The pipeline engine calls providers directly, outside dispatch(), so it needs
+    its own preflight. Local package backends and private endpoints are allowed.
+    Hosted services require the explicit $0 acknowledgement plus the same strict
+    provider/model allowlist used by the background router.
+    """
+    from memory.config_manager import get_provider_config
+    from providers import registry
+    from providers.llm_openai import _is_own_hardware
+
+    settings = _settings()
+    for slot in ("llm", "stt", "tts"):
+        provider_id = str((pipeline or {}).get(slot) or "").strip()
+        if not provider_id:
+            continue
+        declaration = registry.get_declaration(provider_id) or {}
+        entry = registry.catalog_entry(provider_id) or {}
+        config = get_provider_config(provider_id)
+        base_url = str(config.get("base_url") or "").strip()
+        if declaration.get("local") is True:
+            continue
+        if _is_own_hardware(base_url):
+            continue
+        if entry.get("local") is True:
+            raise RouterError(
+                f"{provider_id} is labelled local but its endpoint is not private"
+            )
+        if not settings.get("zero_cost_confirmed"):
+            raise RouterError(
+                f"{provider_id} is hosted. Confirm a $0 plan with no payment "
+                "method before enabling it in the conversation pipeline."
+            )
+        _assert_zero_cost_provider(provider_id)
+
+
 def _provider_call(provider_id: str, contents, config, timeout_ms: int,
                    task: str):
     from memory.config_manager import get_provider_config
