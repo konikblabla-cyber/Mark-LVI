@@ -558,7 +558,7 @@ PLUGIN = {
             "steps": {"type": "STRING", "description": "Optional ordered step list, one step per line"},
             "mission_id": {"type": "STRING", "description": "ID of an existing mission"},
             "step_id": {"type": "STRING", "description": "Step ID such as S01"},
-            "verification": {"type": "STRING", "description": "Short result or evidence from the tool that completed the step"},
+            "verification": {"type": "STRING", "description": "For complete_step: actual tool result; for resolve_step: actual read-only inspection evidence."},
             "reason": {"type": "STRING", "description": "Why the current step cannot proceed, for block_step"},
             "resolution": {"type": "STRING", "description": "For resolve_step: completed or retry_safe, chosen only after read-only verification."},
         },
