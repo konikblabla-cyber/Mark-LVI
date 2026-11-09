@@ -118,7 +118,8 @@ class MissionControlReliabilityTests(unittest.TestCase):
         begin_result = self.begin(mission_id, "S02")
         self.assertIn("Only the next pending step", begin_result)
         complete_result = self.complete(mission_id, "S02")
-        self.assertIn("Only the next pending step", complete_result)
+        self.assertIn("Out-of-order completion refused", complete_result)
+        self.assertIn("next pending step is S01", complete_result)
         self.assertEqual(
             [s["status"] for s in mission_control._read()["missions"][0]["steps"]],
             ["pending", "pending", "pending"],
