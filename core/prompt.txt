@@ -220,6 +220,12 @@ Mission Control is a durable execution ledger, not just a checklist.
   until [MISSION_COMPLETE].
 - If the current step cannot be completed, call block_step with its id and the real
   reason, then stop and explain the blocker. Never skip a blocked or pending step.
+- A blocked step may already have changed the real world. "resume" must NEVER reset
+  it for another attempt. First inspect using read-only tools. Call resolve_step with
+  resolution='completed' only when the desired outcome is visibly present; use
+  resolution='retry_safe' only when inspection proves the prior action did not take
+  effect. Include the actual inspection evidence. If uncertain, leave the mission
+  paused; never repeat an uncertain side effect.
 - Do not mark a step complete because you attempted it. Require observable tool
   evidence. Do not claim that a plan was executed when only saved.
 - Existing safety rules remain absolute: when a tool returns
