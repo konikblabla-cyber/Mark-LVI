@@ -33,6 +33,16 @@ def _normalise_label(value: str) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _field_matches(item: dict, requested: str) -> bool:
+    prefix = "automationid:"
+    value = str(requested or "").strip()
+    if value.casefold().startswith(prefix):
+        return _normalise_label(item.get("automation_id", "")) == _normalise_label(
+            value[len(prefix):],
+        )
+    return _normalise_label(item.get("name", "")) == _normalise_label(value)
+
+
 def _is_sensitive_label(label: str) -> bool:
     normal = _normalise_label(label)
     padded = f" {normal} "
@@ -63,7 +73,12 @@ def _validate_fields(raw_fields) -> tuple[list[dict] | None, str]:
         if key in seen:
             return None, f"field {index} repeats a field label; each target must be unique"
         seen.add(key)
-        if _is_sensitive_label(clean_label):
+        sensitive_target = (
+            clean_label.split(":", 1)[1]
+            if clean_label.casefold().startswith("automationid:")
+            else clean_label
+        )
+        if _is_sensitive_label(sensitive_target):
             return None, f"field {index} targets a credential or sensitive identifier; this action will not fill it"
         total += len(value)
         fields.append({"field_label": clean_label, "text": value})
@@ -95,17 +110,23 @@ def _editable_controls(window, include_wrappers=False) -> list[dict]:
                 continue
             if bool(getattr(info, "is_offscreen", False)):
                 continue
-            label = ui._safe_name(getattr(info, "name", ""))
-            if not label or _is_sensitive_label(label):
-                continue
+            name = ui._safe_name(getattr(info, "name", ""))
             rect = control.rectangle()
             if rect.width() <= 0 or rect.height() <= 0 or not control.is_enabled():
                 continue
             signature = ui._control_signature(info, rect)
+            automation_id = signature["automation_id"]
+            if _is_sensitive_label(name) or _is_sensitive_label(automation_id):
+                continue
+            label = name or (
+                f"AutomationId:{automation_id}" if automation_id else ""
+            )
+            if not label:
+                continue
             item = {
                 "role": "Edit",
                 "name": label,
-                "automation_id": signature["automation_id"],
+                "automation_id": automation_id,
                 "runtime_id": signature["runtime_id"],
                 "rect": signature["rect"],
             }
@@ -171,7 +192,7 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
             label = field["field_label"]
             matches = [
                 item for item in controls
-                if _normalise_label(item["name"]) == _normalise_label(label)
+                if _field_matches(item, label)
             ]
             if not matches:
                 return outcome.failed(
@@ -227,7 +248,7 @@ def _fill_fields_on_window(handle: int, process_id: int, fields: list[dict],
             current_controls = _editable_controls(window, include_wrappers=True)
             matches = [
                 control for control in current_controls
-                if _normalise_label(control["name"]) == _normalise_label(item["label"])
+                if _field_matches(control, item["label"])
             ]
             if len(matches) != 1 or not ui._same_control_identity(matches[0], item["signature"]):
                 status = outcome.failed if filled == 0 else outcome.unverified
@@ -399,7 +420,7 @@ TOOL = {
     "description": (
         "Use only when the user explicitly asks you to enter supplied text into "
         "specific fields of the currently active Windows application. Supply "
-        "one to eight exact accessible Edit field labels and the exact text "
+        "one to eight exact accessible Edit field labels (or AutomationId:<id>) and the exact text "
         "for each. The action accepts only unique, visible, enabled, non-password "
         "Edit controls with a writable UI Automation ValuePattern. Credential "
         "and sensitive-identifier fields (passwords, one-time codes, payment "
@@ -426,7 +447,7 @@ TOOL = {
                     "properties": {
                         "field_label": {
                             "type": "STRING",
-                            "description": "Exact accessible label of one visible, non-sensitive Edit field.",
+                            "description": "Exact accessible label, or AutomationId:<id>, of one visible, non-sensitive Edit field.",
                         },
                         "text": {
                             "type": "STRING",
