@@ -21,7 +21,9 @@ PROJECTS_DIR     = Path.home() / "Desktop" / "JarvisProjects"
 MAX_FIX_ATTEMPTS = 5
 # Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
-from core.project_path_policy import (\n    require_new_project_file, resolve_project_file, validate_project_root,\n)
+from core.project_path_policy import (
+    require_new_project_file, resolve_project_file, validate_project_root,
+)
 
 MODEL_PLANNER    = gemini.SMART
 MODEL_WRITER     = gemini.SMART
