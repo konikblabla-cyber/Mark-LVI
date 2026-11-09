@@ -60,7 +60,7 @@ def _range_snapshot(pattern):
 def _step_aligned(target, minimum, step):
     units = (target - minimum) / step
     nearest = units.to_integral_value(rounding=ROUND_HALF_UP)
-    return abs(units - nearest) <= Decimal("0.000001")
+    return abs(units - nearest) <= Decimal("0.000000001")
 
 
 def _set_and_verify(pattern, target, cancelled):
