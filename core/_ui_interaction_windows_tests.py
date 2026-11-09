@@ -25,6 +25,7 @@ from actions.ui_interaction import (
     _fill_text_and_verify,
 )
 from actions import ui_sequence
+from actions import text_entry
 
 
 _CLASS_NAME = "MARK_UIA_Integration_Window"
@@ -447,6 +448,42 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         # The action compares ValuePattern.CurrentValue internally; it must
         # never include the entered value in its result sent back to the model.
         self.assertNotIn("Quarterly plan", result)
+
+    def test_standalone_text_entry_uses_shared_verified_path(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        result = text_entry.fill_text_field({
+            "field_label": "Project title",
+            "text": "Standalone draft",
+        })
+        self.assertTrue(
+            result.startswith("status=done action=fill_text_field "),
+            result,
+        )
+        self.assertNotIn("Standalone draft", result)
+        after = _snapshot(int(self.hwnd))
+        matches = [item for item in after["records"] if item["name"] == "Standalone draft"]
+        self.assertFalse(matches, "Entered value must not be returned as an accessible name")
+
+        # The native app consumes the actual Edit value when its Save button is invoked.
+        button = _matching_controls(after["clickables"], "Save title")
+        self.assertEqual(len(button), 1, after["clickables"])
+        signature = {
+            "role": button[0]["role"],
+            "automation_id": button[0].get("automation_id", ""),
+            "runtime_id": button[0].get("runtime_id", ()),
+            "rect": button[0].get("rect"),
+        }
+        saved = _click_and_verify(
+            "Save title", "Title saved", int(self.hwnd),
+            after["process_id"], signature,
+        )
+        self.assertTrue(saved.startswith("status=done action=click_and_verify "), saved)
+        final = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Title saved" for item in final["records"]),
+            final["records"],
+        )
 
     def test_fill_text_does_not_touch_password_or_secret_fields(self):
         snapshot = _snapshot(int(self.hwnd))
