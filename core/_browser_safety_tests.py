@@ -12,7 +12,7 @@ class BrowserSafetyClassifierTests(unittest.TestCase):
         for value in (
             "password", "current-password", "input[name=pin_code]",
             "autocomplete=one-time-code", "Credit card number",
-            "CVV", "IBAN", "security_code",
+            "CVV", "IBAN", "security_code", "Hasło", "kod jednorazowy", "kod weryfikacyjny", "numer karty", "karta płatnicza",
         ):
             with self.subTest(value=value):
                 self.assertTrue(is_sensitive_field_descriptor(value))
@@ -24,7 +24,7 @@ class BrowserSafetyClassifierTests(unittest.TestCase):
 
     def test_irreversible_browser_targets_require_confirmation(self):
         for target in ("Send", "Submit order", "Pay now", "Delete account",
-                       "Publish post", "Cancel subscription", "Transfer funds"):
+                       "Publish post", "Cancel subscription", "Transfer funds", "Wyślij", "Wyslij", "Kup teraz", "Zapłać", "Usuń konto", "Opublikuj", "Przenieś środki", "Zamknij konto"):
             with self.subTest(target=target):
                 self.assertTrue(requires_browser_confirmation("smart_click", target))
 

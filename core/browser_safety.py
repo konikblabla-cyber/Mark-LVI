@@ -9,7 +9,7 @@ _SENSITIVE_FIELD = re.compile(
     r"otp|totp|verification[\s_-]*code|security[\s_-]*code|"
     r"credit[\s_-]*card|card[\s_-]*(?:number|security|verification)|"
     r"cvv|cvc|iban|bank[\s_-]*(?:account|routing)|"
-    r"private[\s_-]*key|recovery[\s_-]*phrase|seed[\s_-]*phrase)",
+    r"private[\s_-]*key|recovery[\s_-]*phrase|seed[\s_-]*phrase|has[lł]o|kod[\s_-]*jednorazowy|kod[\s_-]*weryfikacyjny|karta[\s_-]*(?:płatnicza|platnicza|kredytowa)|numer[\s_-]*karty|rachunek[\s_-]*bankowy|klucz[\s_-]*prywatny|fraza[\s_-]*(?:odzyskiwania|seed))",
     re.IGNORECASE,
 )
 
@@ -17,7 +17,7 @@ _HIGH_IMPACT_TARGET = re.compile(
     r"(?:\bsend\b|\bsubmit\b|\bpay\b|\bpurchase\b|\bbuy\b|"
     r"\bcheckout\b|\bdelete\b|\bremove\b|\bpublish\b|\bpost\b|"
     r"\btransfer\b|\bauthori[sz]e\b|\bsign\b|"
-    r"cancel[\s_-]+subscription|close[\s_-]+account)",
+    r"cancel[\s_-]+subscription|close[\s_-]+account|wyślij|wyslij|prześlij|przeslij|zatwierdź|zatwierdz|zapłać|zaplac|kup(?:\s+teraz)?|zamów|zamow|usuń|usun|skasuj|opublikuj|przenieś|przenies|autoryzuj|podpisz|zakończ\s+zakup|anuluj\s+subskrypcj[ęe]|zamknij\s+konto)",
     re.IGNORECASE,
 )
 
