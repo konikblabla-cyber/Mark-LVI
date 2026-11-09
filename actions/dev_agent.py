@@ -254,8 +254,6 @@ Code for {file_path}:"""
         code = _strip_fences(response.text)
 
         full_path = require_new_project_file(project_dir, file_path)
-        if full_path.exists() or full_path.is_symlink():
-            raise FileExistsError(f"Refusing to overwrite existing project file: {file_path}")
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(code, encoding="utf-8")
 
