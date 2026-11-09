@@ -121,18 +121,18 @@ class UISequenceTests(unittest.TestCase):
         initial = self._snapshot("Application")
         click_snapshot = self._snapshot("Save")
         events = []
-        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \\
-             patch.object(ui_sequence.ui, "_snapshot", return_value=click_snapshot), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=click_snapshot), \
              patch.object(
                  ui_sequence.ui, "_fill_text_and_verify",
                  side_effect=lambda *args: (events.append(("fill", args[0])) or
                      "status=done action=fill_text_and_verify verified=true changed=true"),
-             ) as fill, \\
+             ) as fill, \
              patch.object(
                  ui_sequence.ui, "_click_and_verify",
                  side_effect=lambda *args: (events.append(("click", args[0])) or
                      "status=done action=click_and_verify verified=true"),
-             ) as click, \\
+             ) as click, \
              patch("core.confirm.pending_title", return_value=""):
             result = ui_sequence.run_ui_sequence({
                 "steps": [
@@ -147,13 +147,13 @@ class UISequenceTests(unittest.TestCase):
 
     def test_unverified_fill_stops_before_next_button(self):
         initial = self._snapshot("Application")
-        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
              patch.object(
                  ui_sequence.ui, "_fill_text_and_verify",
                  return_value="status=unverified action=fill_text_and_verify reason=readback_mismatch",
-             ) as fill, \\
-             patch.object(ui_sequence.ui, "_snapshot") as snapshot, \\
-             patch.object(ui_sequence.ui, "_click_and_verify") as click, \\
+             ) as fill, \
+             patch.object(ui_sequence.ui, "_snapshot") as snapshot, \
+             patch.object(ui_sequence.ui, "_click_and_verify") as click, \
              patch("core.confirm.pending_title", return_value=""):
             result = ui_sequence.run_ui_sequence({
                 "steps": [
