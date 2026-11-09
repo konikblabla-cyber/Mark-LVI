@@ -106,6 +106,11 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
         return ("\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
                 "Report the completed result to the user; do not invent extra work.")
     if step.get("status") == "running" and recovery:
+        if step.get("tool_evidence"):
+            return ("\\n[MISSION_RECOVERY] The previous session has a persisted receipt from "
+                    "a tool that returned status=done. Do NOT repeat the action. Call "
+                    "complete_step for this exact step; the application will accept it only "
+                    "if the persisted receipt still matches the running mission step.")
         if step.get("ui_action"):
             return ("\n[MISSION_RECOVERY] A UI action plan was persisted before the last "
                     "session ended. The action may or may not have happened. Do NOT issue "
@@ -223,6 +228,50 @@ def _fresh_ui_plan(goal: str) -> dict:
     return {"status": "planned", "execution": "not_started", "steps": [safe_item]}
 
 
+def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
+    """Persist the actual dispatcher receipt for the currently running step.
+
+    This is an internal application hook, not a model-callable plugin action.
+    Raw tool output is reduced to a status/action pair and a SHA-256 fingerprint.
+    """
+    from core.mission_evidence import (
+        record_tool_result as record_turn_result,
+        verified_evidence,
+    )
+
+    accepted = record_turn_result(session_memory, tool_name, result)
+    current = (session_memory.get("_mission_execution")
+               if isinstance(session_memory, dict) else None)
+    if not isinstance(current, dict):
+        return False
+    mission_id = str(current.get("mission_id") or "")
+    step_id = str(current.get("step_id") or "")
+    if not mission_id or not step_id:
+        return False
+
+    evidence = verified_evidence(session_memory, mission_id, step_id) if accepted else None
+    try:
+        with _LOCK:
+            data = _read()
+            mission = next((m for m in data["missions"] if m.get("id") == mission_id), None)
+            if mission is None:
+                return False
+            step = next((s for s in mission.get("steps", []) if s.get("id") == step_id), None)
+            if step is None or step.get("status") != "running":
+                return False
+            if evidence is None:
+                step.pop("tool_evidence", None)
+            else:
+                step["tool_evidence"] = evidence
+            step["updated_at"] = _now()
+            mission["updated_at"] = _now()
+            _write(data)
+        return evidence is not None
+    except Exception:
+        # Failure to persist evidence must never authorize a completion.
+        return False
+
+
 def run(parameters: dict, player=None, session_memory=None) -> str:
     action = str(parameters.get("action") or "list").strip().lower()
     mission_id = str(parameters.get("mission_id") or "").strip()
@@ -281,7 +330,15 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     next_step["started_at"] = _now()
                     next_step["updated_at"] = _now()
                     from core.mission_evidence import activate_step
+                    next_step.pop("tool_evidence", None)
                     activate_step(session_memory, mission_id, next_step["id"])
+                elif next_step and next_step.get("status") == "running":
+                    from core.mission_evidence import seed_step_evidence
+                    activate_step(session_memory, mission_id, next_step["id"])
+                    seed_step_evidence(
+                        session_memory, mission_id, next_step["id"],
+                        next_step.get("tool_evidence"),
+                    )
                 _write(data)
                 result = _format(mission) + _continue_instruction(
                     mission, recovery=was_running,
@@ -356,6 +413,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if expected is None or expected.get("id") != sid or step.get("status") != "pending":
                     return "Only the next pending step can be started."
                 step["status"] = "running"
+                step.pop("tool_evidence", None)
                 step["started_at"] = _now()
                 step["updated_at"] = _now()
                 mission["updated_at"] = _now()
@@ -403,6 +461,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 mission["updated_at"] = _now()
                 clear_step(session_memory, mission_id, sid)
                 next_step = _next_open_step(mission)
+                step.pop("tool_evidence", None)
                 if next_step is None:
                     mission["status"] = "completed"
                 elif next_step.get("status") == "pending":
@@ -412,6 +471,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     next_step["started_at"] = _now()
                     next_step["updated_at"] = _now()
                     from core.mission_evidence import activate_step
+                    next_step.pop("tool_evidence", None)
                     activate_step(session_memory, mission_id, next_step["id"])
                 _write(data)
                 result = _format(mission)
@@ -432,6 +492,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if expected is not None and expected.get("id") != sid:
                     return f"Only the next active step ({expected['id']}) can be blocked."
                 step["status"] = "blocked"
+                step.pop("tool_evidence", None)
                 step["blocked_reason"] = reason[:500]
                 step["updated_at"] = _now()
                 mission["status"] = "paused"
@@ -480,7 +541,15 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                         next_step["started_at"] = _now()
                         next_step["updated_at"] = _now()
                         from core.mission_evidence import activate_step
+                        next_step.pop("tool_evidence", None)
                         activate_step(session_memory, mission_id, next_step["id"])
+                    elif next_step and next_step.get("status") == "running":
+                        from core.mission_evidence import seed_step_evidence
+                        activate_step(session_memory, mission_id, next_step["id"])
+                        seed_step_evidence(
+                            session_memory, mission_id, next_step["id"],
+                            next_step.get("tool_evidence"),
+                        )
                 else:
                     mission["status"] = status
                 mission["updated_at"] = _now()

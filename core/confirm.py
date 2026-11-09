@@ -54,6 +54,7 @@ class _Pending:
     run:     Callable[[], str]
     at:      float
     on_cancel: Optional[Callable[[], None]] = None
+    on_result: Optional[Callable[[str], None]] = None
 
 
 _pending: Optional[_Pending] = None
@@ -64,6 +65,13 @@ _lock = threading.Lock()
 _show_cb: Optional[Callable[[str, str], None]] = None
 _hide_cb: Optional[Callable[[], None]] = None
 _log_cb:  Optional[Callable[[str], None]] = None
+_result_observer_factory: Optional[Callable[[str], Optional[Callable[[str], None]]]] = None
+
+
+def set_result_observer_factory(factory) -> None:
+    """Set an optional app-owned callback factory for completed HUD actions."""
+    global _result_observer_factory
+    _result_observer_factory = factory if callable(factory) else None
 
 
 def bind(show, hide, log=None) -> None:
@@ -110,9 +118,15 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
     # atomically. Two callers can race between their own pending_title()
     # checks; the gate itself must never let one overwrite the other.
     pending_title()
+    on_result = None
+    if _result_observer_factory is not None:
+        try:
+            on_result = _result_observer_factory(key)
+        except Exception as e:
+            _log(f"ERR: Could not bind confirmation result observer — {e}")
     pending = _Pending(
         key=key, title=title, detail=detail, run=run,
-        at=time.monotonic(), on_cancel=on_cancel,
+        at=time.monotonic(), on_cancel=on_cancel, on_result=on_result,
     )
     with _lock:
         if _pending is not None:
@@ -179,6 +193,11 @@ def resolve(accepted: bool) -> None:
     def _worker():
         try:
             result = p.run() or "Done."
+            if p.on_result is not None:
+                try:
+                    p.on_result(result)
+                except Exception as observer_error:
+                    _log(f"ERR: Could not record confirmed result — {observer_error}")
             _log(f"SYS: Confirmed — {p.title}. {result}")
         except Exception as e:
             _log(f"ERR: {p.title} failed — {e}")

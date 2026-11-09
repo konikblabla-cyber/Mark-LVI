@@ -664,6 +664,16 @@ class JarvisLive:
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
         from core.autonomy_policy import new_turn_authorization
         self._turn_authorization = new_turn_authorization("")
+        def _mission_confirmation_result(tool_name):
+            scope = self._turn_authorization
+            def _record_confirmed_result(result):
+                try:
+                    from plugins.mission_control import record_tool_result
+                    record_tool_result(scope, tool_name, result)
+                except Exception as _evidence_error:
+                    print(f"[Mission] Confirmed-action evidence failed closed: {_evidence_error}")
+            return _record_confirmed_result
+        confirm_gate.set_result_observer_factory(_mission_confirmation_result)
 
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
@@ -1367,7 +1377,7 @@ class JarvisLive:
                 update_memory({category: {key: {"value": value}}})
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
             try:
-                from core.mission_evidence import record_tool_result
+                from plugins.mission_control import record_tool_result
                 record_tool_result(self._turn_authorization, name, "")
             except Exception:
                 pass
@@ -1575,7 +1585,7 @@ class JarvisLive:
         # the evidence for the currently running step.
         if name != "mission_control":
             try:
-                from core.mission_evidence import record_tool_result
+                from plugins.mission_control import record_tool_result
                 record_tool_result(self._turn_authorization, name, result)
             except Exception as _mission_evidence_error:
                 print(f"[Mission] Evidence recording failed closed: {_mission_evidence_error}")

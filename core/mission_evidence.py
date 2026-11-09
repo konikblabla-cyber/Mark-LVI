@@ -80,6 +80,26 @@ def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
     return True
 
 
+def seed_step_evidence(session_memory, mission_id: str, step_id: str,
+                       evidence: dict | None) -> bool:
+    """Reattach a persisted, app-created receipt to a fresh user-turn scope."""
+    if not isinstance(session_memory, dict) or not isinstance(evidence, dict):
+        return False
+    if (evidence.get("status") != "done"
+            or not isinstance(evidence.get("tool_name"), str)
+            or evidence.get("action") != evidence.get("tool_name")
+            or not isinstance(evidence.get("result_sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", evidence["result_sha256"])):
+        return False
+    current = session_memory.get(_SCOPE_KEY)
+    if (not isinstance(current, dict)
+            or current.get("mission_id") != str(mission_id or "")
+            or current.get("step_id") != str(step_id or "")):
+        return False
+    current["last_result"] = dict(evidence)
+    return True
+
+
 def verified_evidence(session_memory, mission_id: str, step_id: str) -> dict | None:
     """Return a copy of evidence only for the exact active mission and step."""
     if not isinstance(session_memory, dict):
@@ -111,5 +131,5 @@ def verification_summary(evidence: dict) -> str:
 
 __all__ = [
     "activate_step", "clear_step", "record_tool_result",
-    "verified_evidence", "verification_summary",
+    "seed_step_evidence", "verified_evidence", "verification_summary",
 ]
