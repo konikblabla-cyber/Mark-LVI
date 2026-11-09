@@ -5,7 +5,7 @@ import threading
 import time
 from pathlib import Path
 
-from core import outcome
+from core import confirm, outcome
 from core.lazyimport import LazyModule, installed
 
 # Imported on first USE, not at launch — see core/lazyimport.py. PAUSE is 0.06
@@ -321,10 +321,10 @@ def send_message(
     player=None,
     session_memory=None,
 ) -> str:
-    params       = parameters or {}
-    receiver     = params.get("receiver", "").strip()
-    message_text = params.get("message_text", "").strip()
-    platform     = params.get("platform", "whatsapp").strip()
+    params = parameters or {}
+    receiver = str(params.get("receiver") or "").strip()
+    message_text = str(params.get("message_text") or "").strip()
+    platform = str(params.get("platform") or "whatsapp").strip()
 
     if not receiver:
         return outcome.failed("send_message", "no recipient was given")
@@ -339,21 +339,34 @@ def send_message(
             to=receiver, platform=platform,
         )
 
+    # Outbound communication is irreversible. The HUD, not the model, owns
+    # the approval decision. Show the exact recipient, platform and message;
+    # no worker is started until the user presses CONFIRM.
+    title = f"Send message to {receiver} via {platform}?"
+    detail = (
+        f"Recipient: {receiver}\n"
+        f"Platform: {platform}\n\n"
+        f"Exact message to send:\n{message_text}"
+    )
+    return confirm.request(
+        key="send_message",
+        title=title[:120],
+        detail=detail,
+        run=lambda: _queue_send(player, platform, receiver, message_text),
+    )
+
+
+def _queue_send(player, platform: str, receiver: str, message_text: str) -> str:
+    """Start outbound delivery only after the human confirmation callback."""
     preview = message_text[:50] + ("…" if len(message_text) > 50 else "")
     print(f"[SendMessage] 📨 {platform} → {receiver}: {preview}")
     if player:
-        player.write_log(f"[msg] {platform} → {receiver}")   # the message itself IS the news
-
+        player.write_log(f"[msg] {platform} → {receiver}")
     threading.Thread(
         target=_send_and_report,
         args=(player, platform, receiver, message_text),
         daemon=True, name="send-message",
     ).start()
-
-    # Sending opens an application, searches for a person and types — several
-    # seconds during which the old code held the whole conversation still. The
-    # answer goes out now and the result follows, which is the shape
-    # whatsapp_call.py settled on for the same reason.
     return outcome.started("send_message", platform=platform, to=receiver)
 
 
@@ -412,8 +425,11 @@ TOOL = {
     "description": (
         "Sends a text message via WhatsApp, Telegram, or another messaging "
         "platform. Write 'message_text' in the USER'S OWN LANGUAGE, exactly "
-        "what they asked to be said. "
-        "This tool answers immediately and sends in the background. On "
+        "what they asked to be said. This is an irreversible outbound action: "
+        "the tool first shows the exact recipient, platform and message on the "
+        "HUD and MUST wait for the user to press CONFIRM. If confirmation is "
+        "pending, do not call this tool again and do not say it was sent. Only "
+        "after the user confirms does the background send begin. On "
         "status=started say only that you are sending it, never that it is "
         "sent. The result follows separately: status=done means it was "
         "confirmed delivered to the conversation, status=unverified means the "

@@ -13,7 +13,8 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from core import appidentity, outcome
+from core import appidentity, confirm, outcome
+from core.browser_safety import is_sensitive_field_descriptor, requires_browser_confirmation
 
 # Importing playwright cost 198 ms at every launch, paid by action discovery
 # whether or not a browser was ever opened. It is the second-largest import in
@@ -83,6 +84,31 @@ def _load_playwright() -> None:
 
 _OS = platform.system()   # "Windows" | "Darwin" | "Linux"
 
+async def _locator_ready(locator) -> bool:
+    """Only interact with one visible, enabled match; never take .first blindly."""
+    try:
+        if await locator.count() != 1:
+            return False
+        if not await locator.is_visible():
+            return False
+        if not await locator.is_enabled():
+            return False
+        return True
+    except Exception:
+        return False
+
+
+async def _locator_is_sensitive(locator) -> bool:
+    """Inspect field metadata only; never read or return the field's value."""
+    descriptors = []
+    for attribute in ("type", "name", "id", "placeholder", "aria-label", "autocomplete"):
+        try:
+            descriptors.append(await locator.get_attribute(attribute) or "")
+        except Exception:
+            continue
+    return is_sensitive_field_descriptor(*descriptors)
+
+
 def _normalize_url(url: str) -> str:
     """
     Bare words like "instagram" → "https://instagram.com"
@@ -94,7 +120,6 @@ def _normalize_url(url: str) -> str:
         return "about:blank"
     if "://" in url:
         return url
-    # No dot at all → assume .com  (e.g. "instagram" → "instagram.com")
     if "." not in url:
         url = url + ".com"
     return "https://" + url
@@ -809,35 +834,51 @@ class _BrowserSession:
     async def click(self, selector: str = None, text: str = None) -> str:
         page = await self._get_page()
         try:
-            if text:
-                await page.get_by_text(text, exact=False).first.click(timeout=8_000)
-                return f"Clicked text: '{text}'"
-            if selector:
-                await page.click(selector, timeout=8_000)
-                return f"Clicked selector: {selector}"
-            return outcome.failed("browser_control",
-                                  "no element was named to click")
+            locator = page.get_by_text(text, exact=True) if text else (
+                page.locator(selector) if selector else None
+            )
+            if locator is None:
+                return outcome.failed("browser_control", "no element was named to click")
+            if not await _locator_ready(locator):
+                return outcome.failed(
+                    "browser_control",
+                    "the target was missing, ambiguous, hidden or disabled; nothing was clicked",
+                    selector=selector or text,
+                )
+            await locator.click(timeout=8_000)
+            return outcome.done("browser_control", clicked=True, verified=True)
         except PlaywrightTimeout:
             return outcome.failed(
                 "browser_control",
-                "no element matching that appeared on the page in time",
-                selector=selector or text)
+                "no unique matching target appeared on the page in time",
+                selector=selector or text,
+            )
         except Exception as e:
             return f"Click error: {e}"
+
 
     async def type_text(self, selector: str = None, text: str = "",
                         clear_first: bool = True) -> str:
         page = await self._get_page()
         try:
-            el = page.locator(selector).first if selector else page.locator(":focus")
+            locator = page.locator(selector) if selector else page.locator(":focus")
+            if not await _locator_ready(locator):
+                return outcome.failed(
+                    "browser_control",
+                    "the input was missing, ambiguous, hidden or disabled",
+                )
+            if await _locator_is_sensitive(locator):
+                return outcome.failed(
+                    "browser_control",
+                    "sensitive fields (passwords, PINs, one-time codes and payment data) are blocked",
+                )
             if clear_first:
-                await el.clear()
-            await el.type(text, delay=50)
-            # playwright raises when the field is not there, so reaching this
-            # line means the text went into a real input.
+                await locator.clear()
+            await locator.type(text, delay=50)
             return outcome.done("browser_control", typed=True, verified=True)
         except Exception as e:
             return f"Type error: {e}"
+
 
     async def scroll(self, direction: str = "down", amount: int = 500) -> str:
         page = await self._get_page()
@@ -869,63 +910,85 @@ class _BrowserSession:
         return page.url
 
     async def fill_form(self, fields: dict) -> str:
-        page    = await self._get_page()
+        if not isinstance(fields, dict) or not fields:
+            return outcome.failed("browser_control", "no form fields were supplied")
+        if len(fields) > 20:
+            return outcome.failed("browser_control", "form fill is limited to 20 fields per call")
+        page = await self._get_page()
         results = []
         for selector, value in fields.items():
             try:
-                el = page.locator(selector).first
-                await el.clear()
-                await el.type(str(value), delay=40)
-                results.append(f"✓ {selector}")
+                if is_sensitive_field_descriptor(selector):
+                    results.append(f"blocked sensitive field: {selector}")
+                    continue
+                locator = page.locator(selector)
+                if not await _locator_ready(locator):
+                    results.append(f"skipped ambiguous/hidden/disabled field: {selector}")
+                    continue
+                if await _locator_is_sensitive(locator):
+                    results.append(f"blocked sensitive field: {selector}")
+                    continue
+                await locator.clear()
+                await locator.type(str(value), delay=40)
+                results.append(f"filled: {selector}")
             except Exception as e:
-                results.append(f"✗ {selector}: {e}")
-        return "Form filled: " + ", ".join(results)
+                results.append(f"failed {selector}: {type(e).__name__}")
+        return "Form fill results: " + ", ".join(results)
+
 
     async def smart_click(self, description: str) -> str:
         page = await self._get_page()
-        for role in ("button", "link", "searchbox", "textbox", "menuitem", "tab"):
+        for role in ("button", "link", "menuitem", "tab", "searchbox", "textbox"):
             try:
-                loc = page.get_by_role(role, name=description)
-                if await loc.count() > 0:
-                    await loc.first.click(timeout=5_000)
-                    return f"Clicked ({role}): '{description}'"
+                locator = page.get_by_role(role, name=description, exact=True)
+                if await _locator_ready(locator):
+                    await locator.click(timeout=5_000)
+                    return outcome.done("browser_control", clicked=True, role=role, verified=True)
             except Exception:
-                pass
-        for attempt in (
-            lambda: page.get_by_text(description, exact=False).first.click(timeout=5_000),
-            lambda: page.get_by_placeholder(description, exact=False).first.click(timeout=5_000),
-            lambda: page.locator(
-                f'[alt*="{description}" i],[title*="{description}" i],'
-                f'[aria-label*="{description}" i]'
-            ).first.click(timeout=5_000),
-        ):
-            try:
-                await attempt()
-                return f"Clicked: '{description}'"
-            except Exception:
-                pass
-        return f"Could not find element: '{description}'"
+                continue
+        try:
+            locator = page.get_by_text(description, exact=True)
+            if await _locator_ready(locator):
+                await locator.click(timeout=5_000)
+                return outcome.done("browser_control", clicked=True, verified=True)
+        except Exception:
+            pass
+        return outcome.failed(
+            "browser_control",
+            "no single visible and enabled exact target matched; nothing was clicked",
+            target=description,
+        )
+
 
     async def smart_type(self, description: str, text: str) -> str:
         page = await self._get_page()
         candidates = [
-            ("placeholder", page.get_by_placeholder(description, exact=False)),
-            ("label",       page.get_by_label(description, exact=False)),
-            ("role",        page.get_by_role("textbox", name=description)),
-            ("searchbox",   page.get_by_role("searchbox")),
-            ("combobox",    page.get_by_role("combobox", name=description)),
+            page.get_by_placeholder(description, exact=True),
+            page.get_by_label(description, exact=True),
+            page.get_by_role("textbox", name=description, exact=True),
+            page.get_by_role("searchbox", name=description, exact=True),
+            page.get_by_role("combobox", name=description, exact=True),
         ]
-        for method, loc in candidates:
+        for locator in candidates:
             try:
-                el = loc.first
-                if await el.count() == 0:
+                if not await _locator_ready(locator):
                     continue
-                await el.clear()
-                await el.type(text, delay=50)
-                return f"Typed into ({method}): '{description}'"
+                if await _locator_is_sensitive(locator):
+                    return outcome.failed(
+                        "browser_control",
+                        "sensitive fields (passwords, PINs, one-time codes and payment data) are blocked",
+                    )
+                await locator.clear()
+                await locator.type(text, delay=50)
+                return outcome.done("browser_control", typed=True, verified=True)
             except Exception:
                 continue
-        return f"Could not find input: '{description}'"
+        return outcome.failed(
+            "browser_control",
+            "no single visible, enabled and non-sensitive input matched",
+            target=description,
+        )
+
 
     async def new_tab(self, url: str = "") -> str:
         page = await self._get_page()
@@ -1067,7 +1130,7 @@ class _SessionRegistry:
 
 _registry = _SessionRegistry()
 
-def browser_control(
+def _browser_control_execute(
     parameters:    dict = None,
     response=None,
     player=None,
@@ -1202,6 +1265,39 @@ def _log(player, text: str):
     print(f"[Browser] {short}")
     if player:
         print(f"[Browser] {short[:80]}")          # terminal, not the HUD
+
+
+def browser_control(
+    parameters: dict = None,
+    response=None,
+    player=None,
+    session_memory=None,
+) -> str:
+    params = parameters or {}
+    action = str(params.get("action") or "").strip().lower()
+    target = params.get("text") or params.get("description") or params.get("selector") or ""
+    if requires_browser_confirmation(action, target):
+        title = f"Confirm browser action: {str(target)[:80]}"
+        detail = (
+            f"Browser action: {action}\n"
+            f"Target: {target}\n\n"
+            "This target can send, submit, delete, purchase, publish or otherwise "
+            "change something outside MARK. Check the active page and confirm "
+            "only if this exact action is intended."
+        )
+        return confirm.request(
+            key="browser_high_impact",
+            title=title[:120],
+            detail=detail[:1800],
+            run=lambda: _browser_control_execute(
+                parameters, response=response, player=player,
+                session_memory=session_memory,
+            ),
+        )
+    return _browser_control_execute(
+        parameters, response=response, player=player,
+        session_memory=session_memory,
+    )
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
