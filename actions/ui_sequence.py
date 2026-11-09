@@ -127,12 +127,17 @@ def _stop_with_step_result(state: dict, index: int, result: str) -> str:
         f"step {index + 1} was not verified; all later steps were skipped. "
         "Inspect the application before deciding whether to retry."
     )
-    if result.startswith("status=ask "):
-        return outcome.ask(
+    # ASK means no work has happened yet. Once earlier steps completed, using
+    # that status would falsely imply the sequence did nothing. Report partial
+    # progress as unverified and spell out exactly how many steps were done.
+    if completed:
+        return outcome.unverified(
             "run_ui_sequence",
-            reason,
+            f"the sequence stopped after {completed} verified step(s); {reason}",
             **facts,
         )
+    if result.startswith("status=ask "):
+        return outcome.ask("run_ui_sequence", reason, **facts)
     if result.startswith("status=unverified "):
         return outcome.unverified(
             "run_ui_sequence",
