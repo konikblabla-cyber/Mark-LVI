@@ -280,11 +280,16 @@ def _serve_native_window() -> int:
     )
     if listbox_hwnd[0]:
         for label in ("Projects", "Invoices"):
-            added = _user32.SendMessageW(listbox_hwnd[0], 0x0180, 0, ctypes.cast(
-                ctypes.c_wchar_p(label), ctypes.c_void_p,
-            ).value)  # LB_ADDSTRING
+            # Keep the Unicode buffer alive until SendMessageW has synchronously
+            # copied the string into the native listbox.
+            text_buffer = ctypes.create_unicode_buffer(label)
+            added = _user32.SendMessageW(
+                listbox_hwnd[0], 0x0180, 0, ctypes.addressof(text_buffer),
+            )  # LB_ADDSTRING
             if added < 0:
                 raise RuntimeError("could not add native test list item")
+            if added != (0 if label == "Projects" else 1):
+                raise RuntimeError("native test listbox inserted an unexpected item index")
         _user32.SendMessageW(listbox_hwnd[0], 0x0186, 0, 0)  # LB_SETCURSEL
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
                 open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
