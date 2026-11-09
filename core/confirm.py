@@ -53,6 +53,7 @@ class _Pending:
     detail:  str
     run:     Callable[[], str]
     at:      float
+    on_cancel: Optional[Callable[[], None]] = None
 
 
 _pending: Optional[_Pending] = None
@@ -79,7 +80,18 @@ def _log(msg: str) -> None:
             pass
 
 
-def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
+def _cancel_callback(callback, title: str, reason: str) -> None:
+    """Release action-owned state when a human rejects or loses a prompt."""
+    if callback is None:
+        return
+    try:
+        callback()
+    except Exception as e:
+        _log(f"ERR: Cleanup after {reason} failed — {title}: {e}")
+
+
+def request(key: str, title: str, detail: str, run: Callable[[], str],
+            on_cancel: Optional[Callable[[], None]] = None) -> str:
     """Park an irreversible action behind the on-screen gate.
 
     Returns the sentence the tool should hand back to the model — phrased as an
@@ -90,18 +102,40 @@ def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
     if _show_cb is None:
         # No interface bound (headless, or a very early call). Refuse rather
         # than silently performing something irreversible.
+        _cancel_callback(on_cancel, title, "unavailable confirmation")
         return (f"I cannot confirm '{title}' right now because the interface is "
                 f"not available, so I have not done it.")
 
+    # Expire stale prompts first, then claim the single global HUD slot
+    # atomically. Two callers can race between their own pending_title()
+    # checks; the gate itself must never let one overwrite the other.
+    pending_title()
+    pending = _Pending(
+        key=key, title=title, detail=detail, run=run,
+        at=time.monotonic(), on_cancel=on_cancel,
+    )
     with _lock:
-        _pending = _Pending(key=key, title=title, detail=detail,
-                            run=run, at=time.monotonic())
+        if _pending is not None:
+            existing_title = _pending.title
+            claimed = False
+        else:
+            _pending = pending
+            existing_title = ""
+            claimed = True
+    if not claimed:
+        _cancel_callback(on_cancel, title, "another confirmation is pending")
+        return (
+            f"[CONFIRMATION_BUSY] Another confirmation is already waiting "
+            f"on the HUD: {existing_title}. Nothing was done for '{title}'."
+        )
 
     try:
         _show_cb(title, detail)
     except Exception as e:
         with _lock:
-            _pending = None
+            if _pending is pending:
+                _pending = None
+        _cancel_callback(on_cancel, title, "failed confirmation display")
         return f"Could not ask for confirmation: {e}. Nothing was done."
 
     _log(f"SYS: Awaiting confirmation — {title}")
@@ -134,10 +168,12 @@ def resolve(accepted: bool) -> None:
 
     if time.monotonic() - p.at > TIMEOUT_SECONDS:
         _log(f"SYS: Confirmation expired — {p.title}")
+        _cancel_callback(p.on_cancel, p.title, "expired confirmation")
         return
 
     if not accepted:
         _log(f"SYS: Cancelled — {p.title}")
+        _cancel_callback(p.on_cancel, p.title, "cancelled confirmation")
         return
 
     def _worker():
@@ -146,16 +182,40 @@ def resolve(accepted: bool) -> None:
             _log(f"SYS: Confirmed — {p.title}. {result}")
         except Exception as e:
             _log(f"ERR: {p.title} failed — {e}")
+            _cancel_callback(p.on_cancel, p.title, "failed confirmed action")
 
     threading.Thread(target=_worker, daemon=True,
                      name=f"confirm-{p.key}").start()
 
 
-def pending_title() -> str:
-    """'' when nothing is waiting. Lets an action avoid stacking two banners."""
+def _expire_pending(p: _Pending) -> bool:
+    """Atomically discard an expired prompt and release its action-owned state."""
+    global _pending
     with _lock:
-        if _pending is None:
+        if _pending is not p or time.monotonic() - p.at <= TIMEOUT_SECONDS:
+            return False
+        _pending = None
+
+    if _hide_cb:
+        try:
+            _hide_cb()
+        except Exception:
+            pass
+    _log(f"SYS: Confirmation expired — {p.title}")
+    _cancel_callback(p.on_cancel, p.title, "expired confirmation")
+    return True
+
+
+def pending_title() -> str:
+    """'' when nothing is waiting. Also expires stale prompts and cleans them up."""
+    with _lock:
+        pending = _pending
+    if pending is None:
+        return ""
+    if _expire_pending(pending):
+        return ""
+    with _lock:
+        # The pending request may have been resolved while the expiry check ran.
+        if _pending is not pending:
             return ""
-        if time.monotonic() - _pending.at > TIMEOUT_SECONDS:
-            return ""
-        return _pending.title
+        return pending.title
