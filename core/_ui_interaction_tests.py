@@ -458,6 +458,18 @@ class UIInteractionTests(unittest.TestCase):
         time.sleep(0.02)
         self.assertEqual(calls, ["called"])
 
+    def test_routine_labels_do_not_trigger_confirmation(self):
+        for label in ("Save", "Created", "Confirm", "Closed", "Remove filter"):
+            with self.subTest(label=label):
+                self.assertFalse(_requires_confirmation(label))
+
+    def test_only_critical_or_unrequested_external_targets_are_gated(self):
+        from core.autonomy_policy import requires_ui_confirmation
+        self.assertFalse(requires_ui_confirmation("Send", "Wyślij wiadomość do Alex"))
+        self.assertTrue(requires_ui_confirmation("Send"))
+        self.assertTrue(requires_ui_confirmation("Pay now", "Pay now"))
+        self.assertFalse(requires_ui_confirmation("Save", "Save the settings"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

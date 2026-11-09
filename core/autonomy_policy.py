@@ -23,16 +23,16 @@ _SEND_INTENT = re.compile(
 )
 _EXTERNAL_ACTION = re.compile(
     r"\b(?:send|text|message|submit|publish|post|share|upload|subscribe|unsubscribe|"
-    r"sign|authorize|grant|revoke)\b|"
+    r"delete|erase|remove|sign|grant|revoke)\b|"
     r"cancel[\s_-]+subscription|"
     r"\b(?:wyślij|wyslij|prześlij|przeslij|opublikuj|udostępnij|udostepnij|"
-    r"subskrybuj|anuluj)\b|"
+    r"usuń|usun|skasuj|usuńcie|usuniecie|subskrybuj|anuluj)\b|"
     r"anuluj[\s_-]+subskrypcj[ęe]",
     re.IGNORECASE,
 )
 _CRITICAL_ACTION = re.compile(
     r"\b(?:pay|payment|purchase|buy|checkout|transfer|wire|withdraw|refund|"
-    r"delete|erase|destroy|wipe|format|factory|reset|revoke|authorize|sign)\b|"
+    r"destroy|wipe|format|factory|reset|revoke|authorize|sign)\b|"
     r"\b(?:permanent|permanently|irreversible)\b|"
     r"(?:delete|close|terminate)[\s_-]+(?:account|profile|membership)|"
     r"\b(?:zapłać|zaplac|płatność|platnosc|kup|zakup|przelew|usuń|usun|"
