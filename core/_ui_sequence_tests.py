@@ -530,20 +530,20 @@ class UISequenceTests(unittest.TestCase):
             requests.append(kwargs)
             return "[CONFIRMATION_PENDING]"
 
-        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
              patch.object(ui_sequence.ui, "_inspect_radio", return_value=(
                  "found", False,
                  {"role": "RadioButton", "automation_id": "advanced",
                   "runtime_id": (4, 5), "rect": (10, 10, 100, 40)}, "",
-             )), \\
+             )), \
              patch.object(ui_sequence.ui, "_select_radio_and_verify", return_value=(
                  "status=done action=select_radio_and_verify verified=true"
-             )) as select_radio, \\
-             patch.object(ui_sequence.ui, "_snapshot", return_value=after), \\
+             )) as select_radio, \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=after), \
              patch.object(ui_sequence.ui, "_click_and_verify", return_value=(
                  "status=done action=click_and_verify verified=true"
-             )) as click, \\
-             patch.object(confirm, "pending_title", return_value=""), \\
+             )) as click, \
+             patch.object(confirm, "pending_title", return_value=""), \
              patch.object(confirm, "request", side_effect=capture_request):
             pending = ui_sequence.run_ui_sequence({
                 "steps": [
@@ -566,18 +566,18 @@ class UISequenceTests(unittest.TestCase):
         from core import confirm
         initial = self._snapshot("Mode: Standard")
         after = self._snapshot("Finish")
-        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=initial), \
              patch.object(ui_sequence.ui, "_inspect_radio", return_value=(
                  "found", True,
                  {"role": "RadioButton", "automation_id": "standard",
                   "runtime_id": (4, 4), "rect": (10, 10, 100, 40)}, "",
-             )), \\
-             patch.object(ui_sequence.ui, "_select_radio_and_verify") as select_radio, \\
-             patch.object(ui_sequence.ui, "_snapshot", return_value=after), \\
+             )), \
+             patch.object(ui_sequence.ui, "_select_radio_and_verify") as select_radio, \
+             patch.object(ui_sequence.ui, "_snapshot", return_value=after), \
              patch.object(ui_sequence.ui, "_click_and_verify", return_value=(
                  "status=done action=click_and_verify verified=true"
-             )), \\
-             patch.object(confirm, "pending_title", return_value=""), \\
+             )), \
+             patch.object(confirm, "pending_title", return_value=""), \
              patch.object(confirm, "request") as request:
             result = ui_sequence.run_ui_sequence({
                 "steps": [
@@ -591,11 +591,11 @@ class UISequenceTests(unittest.TestCase):
 
     def test_ambiguous_radio_option_stops_without_selection(self):
         from core import confirm
-        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Mode")), \\
+        with patch.object(ui_sequence, "_capture_active_window", return_value=self._snapshot("Mode")), \
              patch.object(ui_sequence.ui, "_inspect_radio", return_value=(
                  "ambiguous_radio", None, None, "duplicate radio labels",
-             )), \\
-             patch.object(ui_sequence.ui, "_select_radio_and_verify") as select_radio, \\
+             )), \
+             patch.object(ui_sequence.ui, "_select_radio_and_verify") as select_radio, \
              patch.object(confirm, "pending_title", return_value=""):
             result = ui_sequence.run_ui_sequence({
                 "steps": [
