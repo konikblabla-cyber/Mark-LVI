@@ -296,6 +296,39 @@ def _fill_worker(handle: int, process_id: int, fields: list[dict], cancelled=Non
     )
 
 
+def _run_fill_with_timeout(handle: int, process_id: int,
+                           fields: list[dict]) -> str:
+    completed, value, worker_error = ui._run_uia(
+        lambda cancelled: _fill_worker(
+            handle, process_id, fields, cancelled,
+        ),
+        _FILL_TIMEOUT_SECONDS,
+        exclusive_lock=ui._INVOKE_LOCK,
+        pass_cancel_event=True,
+    )
+    if not completed:
+        return outcome.unverified(
+            "fill_ui_fields",
+            "the operation exceeded its time limit; inspect the form before retrying",
+            total_fields=len(fields),
+        )
+    if worker_error is not None:
+        return outcome.failed(
+            "fill_ui_fields",
+            f"UI Automation could not fill the requested fields ({type(worker_error).__name__})",
+            total_fields=len(fields),
+        )
+    if isinstance(value, tuple) and value and value[0] in {"busy", "cancelled"}:
+        return outcome.unverified(
+            "fill_ui_fields", value[1], total_fields=len(fields),
+        )
+    return value if isinstance(value, str) else outcome.unverified(
+        "fill_ui_fields",
+        "the UI Automation worker returned no verifiable result",
+        total_fields=len(fields),
+    )
+
+
 def fill_ui_fields(parameters: dict, player=None, session_memory=None) -> str:
     fields, error = _validate_fields((parameters or {}).get("fields"))
     if fields is None:
@@ -329,41 +362,13 @@ def fill_ui_fields(parameters: dict, player=None, session_memory=None) -> str:
                 "No submit, send, purchase or save button will be pressed. "
                 "Confirm only if this data entry is intended."
             ),
-            run=lambda: ui._run_uia(
-                run, _FILL_TIMEOUT_SECONDS,
-                exclusive_lock=ui._INVOKE_LOCK,
-                pass_cancel_event=True,
-            )[1] or outcome.unverified(
-                "fill_ui_fields",
-                "the UI Automation worker did not return a verifiable result",
+            run=lambda: _run_fill_with_timeout(
+                snapshot["handle"], snapshot["process_id"], fields,
             ),
         )
 
-    completed, value, worker_error = ui._run_uia(
-        run, _FILL_TIMEOUT_SECONDS,
-        exclusive_lock=ui._INVOKE_LOCK,
-        pass_cancel_event=True,
-    )
-    if not completed:
-        return outcome.unverified(
-            "fill_ui_fields",
-            "the operation exceeded its time limit; inspect the form before retrying",
-            total_fields=len(fields),
-        )
-    if worker_error is not None:
-        return outcome.failed(
-            "fill_ui_fields",
-            f"UI Automation could not fill the requested fields ({type(worker_error).__name__})",
-            total_fields=len(fields),
-        )
-    if isinstance(value, tuple) and value and value[0] in {"busy", "cancelled"}:
-        return outcome.unverified(
-            "fill_ui_fields", value[1], total_fields=len(fields),
-        )
-    return value if isinstance(value, str) else outcome.unverified(
-        "fill_ui_fields",
-        "the UI Automation worker returned no verifiable result",
-        total_fields=len(fields),
+    return _run_fill_with_timeout(
+        snapshot["handle"], snapshot["process_id"], fields,
     )
 
 
