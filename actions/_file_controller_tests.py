@@ -214,6 +214,23 @@ class FileControllerSafetyTests(unittest.TestCase):
         gate.assert_called_once()
         self.assertTrue(target.exists())
 
+    def test_explicit_downloads_name_does_not_authorize_delete_from_desktop(self):
+        desktop = self.root / "Desktop"
+        downloads = self.root / "Downloads"
+        desktop.mkdir()
+        downloads.mkdir()
+        target = desktop / "report.txt"
+        target.write_text("keep", encoding="utf-8")
+        params = {"action": "delete", "path": str(desktop), "name": target.name}
+        request = new_turn_authorization("Delete report.txt from Downloads.")
+        with patch.object(files, "_get_desktop", return_value=desktop), patch.object(
+            files, "_get_downloads", return_value=downloads
+        ), patch.object(confirm, "request", return_value="[CONFIRMATION_PENDING]") as gate:
+            result = files.file_controller(params, session_memory=request)
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        gate.assert_called_once()
+        self.assertTrue(target.exists())
+
     def test_exact_named_downloads_folder_authorizes_delete_without_second_prompt(self):
         target = self.root / "report.txt"
         target.write_text("keep", encoding="utf-8")

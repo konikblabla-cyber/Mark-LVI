@@ -882,12 +882,6 @@ def _delete_target_was_explicitly_requested(request: str, path: str, name: str) 
     except Exception:
         return False
 
-    # A bare filename means the default Desktop only. A different folder must
-    # be named in the user's request, not guessed by the model.
-    desktop = _get_desktop().resolve(strict=False)
-    if actual == desktop:
-        return True
-
     locations = {
         "desktop": _get_desktop(), "pulpit": _get_desktop(), "pulpitu": _get_desktop(),
         "downloads": _get_downloads(), "download": _get_downloads(),
@@ -907,6 +901,10 @@ def _delete_target_was_explicitly_requested(request: str, path: str, name: str) 
             if actual == root or actual.is_relative_to(root):
                 return True
         return False
+
+    # With no folder named, a bare filename is scoped to the default Desktop.
+    if actual == _get_desktop().resolve(strict=False):
+        return True
 
     # Custom folders are authorized only when their own name was included.
     folder_name = actual.name.casefold()
