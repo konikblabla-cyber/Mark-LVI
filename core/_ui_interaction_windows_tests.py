@@ -27,6 +27,7 @@ from actions.ui_interaction import (
 _CLASS_NAME = "MARK_UIA_Integration_Window"
 _WINDOW_TITLE = "MARK UIA Integration Test"
 _BUTTON_ID = 101
+_NOOP_BUTTON_ID = 102
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -136,7 +137,11 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Save", 0x50000000,
         20, 70, 120, 34, hwnd, ctypes.c_void_p(_BUTTON_ID), hinstance, None,
     )
-    if not status_hwnd[0] or not button_hwnd:
+    noop_button_hwnd = _user32.CreateWindowExW(
+        0, "BUTTON", "No change", 0x50000000,
+        170, 70, 140, 34, hwnd, ctypes.c_void_p(_NOOP_BUTTON_ID), hinstance, None,
+    )
+    if not status_hwnd[0] or not button_hwnd or not noop_button_hwnd:
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -211,6 +216,30 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
                 log_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def test_real_native_button_without_expected_change_is_not_reported_done(self):
+        snapshot = _snapshot(int(self.hwnd))
+        matches = _matching_controls(snapshot["clickables"], "No change")
+        self.assertEqual(len(matches), 1, snapshot["clickables"])
+        signature = {
+            "role": matches[0]["role"],
+            "automation_id": matches[0].get("automation_id", ""),
+            "runtime_id": matches[0].get("runtime_id", ()),
+            "rect": matches[0].get("rect"),
+        }
+        result = _click_and_verify(
+            "No change", "Completed", int(self.hwnd),
+            snapshot["process_id"], signature,
+        )
+        self.assertTrue(
+            result.startswith("status=unverified action=click_and_verify "),
+            result,
+        )
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Not saved" for item in after["records"]),
+            after["records"],
+        )
 
     def test_real_native_button_invoke_changes_exact_accessible_text(self):
         snapshot = _snapshot(int(self.hwnd))
