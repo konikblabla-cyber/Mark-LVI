@@ -18,7 +18,7 @@ def _needs_confirmation(label):
         "prywatność", "prywatnosc", "powiadomienia", "lokalizacja",
         "udostępnianie", "udostepnianie", "udostępnij", "udostepnij",
         "pozwól", "pozwol", "zezwól", "zezwol", "subskrypcja",
-        "subskrybuj", "śledzenie", "sledzenie", "dane", "trenowanie",
+        "subskrybuj", "śledzenie", "sledzenie", "dane", "danych", "danymi", "przetwarzanie", "przetwarzania", "trenowanie",
     }
     return ui._requires_confirmation(label) or bool(words.intersection(consent_terms))
 
