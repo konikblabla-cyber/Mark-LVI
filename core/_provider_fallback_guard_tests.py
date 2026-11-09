@@ -51,5 +51,17 @@ class ProviderFallbackGuardTests(unittest.TestCase):
         reserve.assert_called_once()
 
 
+
+    def test_provider_call_runs_guard_before_reading_provider_configuration(self):
+        with patch.object(gemini, "_guard_provider_fallback",
+                          side_effect=router.RouterError("blocked")) as guard, \
+             patch("memory.config_manager.get_provider_config") as get_config, \
+             patch("providers.registry.build") as build:
+            with self.assertRaises(router.RouterError):
+                gemini._provider_call("prov:openai_compat@groq", "hello", None, 10_000)
+        guard.assert_called_once_with("openai_compat@groq", "hello")
+        get_config.assert_not_called()
+        build.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
