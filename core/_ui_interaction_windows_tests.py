@@ -809,6 +809,36 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertIn("changed=false", again)
         self.assertFalse(_native_tree_item_expanded(int(self.hwnd), "Projects"))
 
+    def test_native_tree_expansion_continues_to_next_verified_sequence_step(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        self.assertFalse(_native_tree_item_expanded(int(self.hwnd), "Projects"))
+        active = _snapshot(int(self.hwnd))
+        self.assertEqual(active["handle"], int(self.hwnd), active)
+        with patch.object(ui_sequence, "_capture_active_window", return_value=active):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {
+                        "action": "set_tree_item_expanded",
+                        "item_label": "Projects",
+                        "expanded": True,
+                    },
+                    {
+                        "action": "click",
+                        "button_label": "Open panel",
+                        "expected_result": "Panel ready",
+                    },
+                ],
+            })
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        self.assertIn("steps_completed=2", result)
+        self.assertTrue(_native_tree_item_expanded(int(self.hwnd), "Projects"))
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item.get("name") == "Panel ready" for item in after["records"]),
+            after["records"],
+        )
+
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
         matches = _matching_controls(snapshot["clickables"], "Definitely not present")

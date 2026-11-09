@@ -112,6 +112,58 @@ def _set_on_window(window_handle, process_id, item_label, desired, cancelled):
     return _set_expand_collapse(pattern, desired, cancelled)
 
 
+def _requires_confirmation(label: str) -> bool:
+    return ui_checkbox._needs_confirmation(label) or ui._requires_confirmation(label)
+
+
+def _set_tree_item_expanded_in_window(item_label: str, desired: bool,
+                                     window_handle: int, process_id: int) -> str:
+    """Run the verified change against a previously captured HWND/PID."""
+    if not ui._valid_window_process_id(process_id):
+        return outcome.failed(
+            "set_tree_item_expanded",
+            "the original application process could not be verified",
+            item=item_label,
+        )
+    completed, result, error = ui._run_uia(
+        lambda cancelled: _set_on_window(
+            window_handle, process_id, item_label, desired, cancelled,
+        ),
+        ui._INVOKE_TIMEOUT_SECONDS,
+        exclusive_lock=ui._INVOKE_LOCK,
+        pass_cancel_event=True,
+    )
+    if not completed or error is not None:
+        return outcome.unverified(
+            "set_tree_item_expanded",
+            "the tree item may have changed; inspect it before retrying",
+            item=item_label,
+        )
+    if isinstance(result, tuple):
+        status, reason = result
+        if status in {"busy", "cancelled"}:
+            return outcome.ask("set_tree_item_expanded", reason, item=item_label)
+    else:
+        status, reason = "", "UI Automation returned an invalid result"
+    if status in {"expanded", "collapsed", "already_set"}:
+        return outcome.done(
+            "set_tree_item_expanded",
+            item=item_label,
+            expanded=desired,
+            verified=True,
+            changed=status != "already_set",
+        )
+    if status in {"uncertain", "unverified"}:
+        return outcome.unverified(
+            "set_tree_item_expanded", reason, item=item_label,
+        )
+    if status == "ambiguous_item":
+        return outcome.ask("set_tree_item_expanded", reason, item=item_label)
+    return outcome.failed(
+        "set_tree_item_expanded", reason or status, item=item_label,
+    )
+
+
 def set_tree_item_expanded(parameters: dict, player=None, session_memory=None) -> str:
     params = parameters or {}
     label = " ".join(str(params.get("item_label") or "").split())
@@ -131,31 +183,8 @@ def set_tree_item_expanded(parameters: dict, player=None, session_memory=None) -
     except Exception as exc:
         return outcome.failed("set_tree_item_expanded", f"could not identify the active application ({type(exc).__name__})")
 
-    def run():
-        completed, result, error = ui._run_uia(
-            lambda cancelled: _set_on_window(handle, process_id, label, desired, cancelled),
-            ui._INVOKE_TIMEOUT_SECONDS,
-            exclusive_lock=ui._INVOKE_LOCK,
-            pass_cancel_event=True,
-        )
-        if not completed or error is not None:
-            return outcome.unverified("set_tree_item_expanded", "the tree item may have changed; inspect it before retrying", item=label)
-        if isinstance(result, tuple):
-            status, reason = result
-            if status in {"busy", "cancelled"}:
-                return outcome.ask("set_tree_item_expanded", reason, item=label)
-        else:
-            status, reason = "", "UI Automation returned an invalid result"
-        if status in {"expanded", "collapsed", "already_set"}:
-            return outcome.done("set_tree_item_expanded", item=label, expanded=desired,
-                                verified=True, changed=status != "already_set")
-        if status in {"uncertain", "unverified"}:
-            return outcome.unverified("set_tree_item_expanded", reason, item=label)
-        if status in {"ambiguous_item"}:
-            return outcome.ask("set_tree_item_expanded", reason, item=label)
-        return outcome.failed("set_tree_item_expanded", reason or status, item=label)
-
-    if ui_checkbox._needs_confirmation(label) or ui._requires_confirmation(label):
+    run = lambda: _set_tree_item_expanded_in_window(label, desired, handle, process_id)
+    if _requires_confirmation(label):
         from core import confirm
         if confirm.pending_title():
             return outcome.ask("set_tree_item_expanded", "another confirmation is already waiting on the HUD", item=label)

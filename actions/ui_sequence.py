@@ -13,6 +13,7 @@ import uuid
 
 from core import outcome
 from actions import ui_interaction as ui
+from actions import ui_tree
 
 _MAX_STEPS = 8
 _MAX_SEQUENCE_SECONDS = 600.0
@@ -69,6 +70,27 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
+        if action == "set_tree_item_expanded":
+            allowed = {"action", "item_label", "expanded"}
+            if set(raw) != allowed:
+                return None, (
+                    f"tree expansion step {index} must contain only action, item_label and expanded"
+                )
+            label = raw.get("item_label")
+            desired = raw.get("expanded")
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong item_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a credential, verification-code or payment control"
+            if not isinstance(desired, bool):
+                return None, f"step {index} expanded must be a boolean true or false"
+            validated.append({
+                "action": "set_tree_item_expanded",
+                "item_label": " ".join(label.split()),
+                "expanded": desired,
+            })
+            continue
+
         if action == "fill_text":
             allowed = {"action", "field_label", "text"}
             if set(raw) != allowed:
@@ -88,7 +110,7 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
-        return None, f"step {index} action must be click or fill_text"
+        return None, f"step {index} action must be click, fill_text or set_tree_item_expanded"
 
     return validated, ""
 
@@ -188,7 +210,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                     state, index,
                     outcome.ask(
                         "run_ui_sequence",
-                        "another action is waiting for HUD confirmation; this sequence paused without clicking",
+                        "another action is waiting for HUD confirmation; this sequence paused without starting another UI action",
                         pending_title=pending,
                     ),
                 )
@@ -203,6 +225,45 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            if step["action"] == "set_tree_item_expanded":
+                label = step["item_label"]
+                if ui_tree._requires_confirmation(label):
+                    pending = confirm.pending_title()
+                    if pending:
+                        return _stop_with_step_result(
+                            state, index,
+                            outcome.ask(
+                                "run_ui_sequence",
+                                "another action is already waiting for HUD confirmation",
+                                pending_title=pending,
+                            ),
+                        )
+                    verb = "expand" if step["expanded"] else "collapse"
+                    return confirm.request(
+                        key="run_ui_sequence",
+                        title=f"MARK sequence {index + 1}/{len(state['steps'])}: {verb} {label}",
+                        detail=(
+                            f"This is step {index + 1} of {len(state['steps'])}. "
+                            f"MARK will {verb} the visible tree item '{label}' in "
+                            "the original application window. It will not activate "
+                            "a child item or submit a form. Later steps run only "
+                            "after this state is verified."
+                        ),
+                        run=lambda: _resume_tree_after_confirmation(state, index, step),
+                        on_cancel=lambda: _release_sequence(state["id"]),
+                    )
+                result = ui_tree._set_tree_item_expanded_in_window(
+                    label, step["expanded"],
+                    state["window_handle"], state["process_id"],
+                )
+                if not result.startswith("status=done "):
+                    return _stop_with_step_result(state, index, result)
+                state["completed"] += 1
+                state["completed_labels"].append(label)
+                if index == 0:
+                    state.pop("initial_snapshot", None)
+                continue
+
             if step["action"] == "fill_text":
                 # Filling uses the exact original HWND/PID directly and does
                 # not enumerate or return editable-field contents.
@@ -299,6 +360,33 @@ def _continue_sequence(state: dict, start_index: int) -> str:
         )
 
 
+def _resume_tree_after_confirmation(state: dict, index: int,
+                                    step: dict) -> str:
+    """Run an approved tree action against the original HWND/PID, then continue."""
+    try:
+        result = ui_tree._set_tree_item_expanded_in_window(
+            step["item_label"], step["expanded"],
+            state["window_handle"], state["process_id"],
+        )
+        if not result.startswith("status=done "):
+            return _stop_with_step_result(state, index, result)
+        state["completed"] += 1
+        state["completed_labels"].append(step["item_label"])
+        if index == 0:
+            state.pop("initial_snapshot", None)
+        return _continue_sequence(state, index + 1)
+    except Exception as exc:
+        _release_sequence(state["id"])
+        return outcome.failed(
+            "run_ui_sequence",
+            f"the confirmed tree action failed internally ({type(exc).__name__}); later steps were not started",
+            sequence_id=state["id"],
+            steps_completed=state["completed"],
+            total_steps=len(state["steps"]),
+            failed_step=index + 1,
+        )
+
+
 def _resume_after_confirmation(state: dict, index: int,
                                prepared: dict) -> str:
     """Run the approved step, then continue only after verified success."""
@@ -377,11 +465,14 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Fill safe labelled fields and click exact controls in a verified 2–8 step Windows UI workflow.",
+    "brief": "Expand or collapse exact tree items, fill safe fields and click exact controls in a verified 2–8 step Windows UI workflow.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
-        "ordered steps. A click step must name one exact visible Button, "
+        "ordered steps. A set_tree_item_expanded step must supply one exact visible "
+        "TreeItem label and a boolean expanded value; MARK verifies the ExpandCollapsePattern "
+        "state in the original window before starting the next step. It expands or collapses "
+        "only the node and never activates a child item. A click step must name one exact visible Button, "
         "Hyperlink or MenuItem label and the exact distinctive accessible "
         "element text that should newly appear after that click. A fill_text "
         "step must name one exact accessible, non-sensitive Edit field and "
@@ -413,14 +504,14 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered steps. Use click with button_label and expected_result, or fill_text with field_label and literal text.",
+                "description": "Two to eight ordered steps. Use click, fill_text, or set_tree_item_expanded with an exact TreeItem label and boolean expanded state.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "enum": ["click", "fill_text"],
-                            "description": "Use click for a verified button press or fill_text for one safe text field.",
+                            "enum": ["click", "fill_text", "set_tree_item_expanded"],
+                            "description": "Use click for a verified button press, fill_text for one safe text field, or set_tree_item_expanded for one exact visible TreeItem.",
                         },
                         "button_label": {
                             "type": "STRING",
@@ -437,6 +528,14 @@ TOOL = {
                         "text": {
                             "type": "STRING",
                             "description": "For fill_text: literal non-secret text to enter; never use for credentials or payment details.",
+                        },
+                        "item_label": {
+                            "type": "STRING",
+                            "description": "For set_tree_item_expanded: exact accessible label of one visible, enabled, non-sensitive Windows TreeItem.",
+                        },
+                        "expanded": {
+                            "type": "BOOLEAN",
+                            "description": "For set_tree_item_expanded: true to expand the item; false to collapse it.",
                         },
                     },
                     "required": ["action"],
