@@ -198,8 +198,12 @@ class UIInteractionTests(unittest.TestCase):
         fake_comtypes = types.ModuleType("comtypes")
         fake_comtypes.CoInitialize = lambda: calls.append("init")
         fake_comtypes.CoUninitialize = lambda: calls.append("uninit")
+        fake_pywinauto = types.ModuleType("pywinauto")
 
-        with patch.dict(sys.modules, {"comtypes": fake_comtypes}):
+        with patch.dict(sys.modules, {
+            "pywinauto": fake_pywinauto,
+            "comtypes": fake_comtypes,
+        }):
             completed, value, error = _run_uia(lambda: "ui", 1)
 
         self.assertTrue(completed)
