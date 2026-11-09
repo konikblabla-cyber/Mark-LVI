@@ -333,7 +333,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     next_step.pop("tool_evidence", None)
                     activate_step(session_memory, mission_id, next_step["id"])
                 elif next_step and next_step.get("status") == "running":
-                    from core.mission_evidence import seed_step_evidence
+                    from core.mission_evidence import activate_step, seed_step_evidence
                     activate_step(session_memory, mission_id, next_step["id"])
                     seed_step_evidence(
                         session_memory, mission_id, next_step["id"],
@@ -544,7 +544,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                         next_step.pop("tool_evidence", None)
                         activate_step(session_memory, mission_id, next_step["id"])
                     elif next_step and next_step.get("status") == "running":
-                        from core.mission_evidence import seed_step_evidence
+                        from core.mission_evidence import activate_step, seed_step_evidence
                         activate_step(session_memory, mission_id, next_step["id"])
                         seed_step_evidence(
                             session_memory, mission_id, next_step["id"],
