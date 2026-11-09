@@ -29,6 +29,9 @@ def resolve_project_file(project_dir: Path, relative_path: str) -> Path:
     parts = normalized.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise ValueError("Project file path must stay inside the project folder.")
+    reserved = {".venv", "venv", ".git", "__pycache__", "node_modules", ".jarvis_backup"}
+    if any(part.lower() in reserved for part in parts):
+        raise ValueError("Generated project files cannot use reserved environment or metadata paths.")
     if any(":" in part for part in parts):
         raise ValueError("Drive and alternate-stream paths are not allowed.")
 

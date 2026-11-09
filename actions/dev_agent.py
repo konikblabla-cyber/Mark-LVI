@@ -1,4 +1,5 @@
 import subprocess
+import os
 import sys
 import hashlib
 import json
@@ -21,6 +22,7 @@ PROJECTS_DIR     = Path.home() / "Desktop" / "JarvisProjects"
 MAX_FIX_ATTEMPTS = 5
 # Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
+from core.project_env import dependency_name, project_venv_python
 from core.project_path_policy import (
     require_new_project_file, resolve_project_file, validate_project_root,
 )
@@ -269,37 +271,45 @@ def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
     if not dependencies:
         return "No external dependencies."
 
+    try:
+        package_names = [dependency_name(dep) for dep in dependencies]
+        python_exe = project_venv_python(project_dir, create=True)
+    except (TypeError, ValueError, RuntimeError) as e:
+        return f"Dependency install blocked: {e}"
+
     to_install = []
-    for dep in dependencies:
-        pkg_name = re.split(r"[>=<!]", dep)[0].strip()
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", pkg_name],
-            capture_output=True, text=True
-        )
+    for dep, pkg_name in zip(dependencies, package_names):
+        try:
+            result = subprocess.run(
+                [str(python_exe), "-m", "pip", "show", pkg_name],
+                capture_output=True, text=True, timeout=20,
+                cwd=str(project_dir)
+            )
+        except Exception as e:
+            return f"Dependency check failed: {e}"
         if result.returncode != 0:
             to_install.append(dep)
         else:
-            print(f"[DevAgent] ✓ Already installed: {pkg_name}")
+            print(f"[DevAgent] ✓ Already installed in project environment: {pkg_name}")
 
     if not to_install:
-        return f"All dependencies already installed: {', '.join(dependencies)}"
+        return f"All dependencies already installed in project environment: {', '.join(dependencies)}"
 
-    print(f"[DevAgent] 📦 Installing: {to_install}")
+    print(f"[DevAgent] 📦 Installing into the project's isolated environment: {to_install}")
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install"] + to_install,
+            [str(python_exe), "-m", "pip", "install"] + to_install,
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
-            timeout=120, cwd=str(project_dir)
+            timeout=180, cwd=str(project_dir)
         )
         if result.returncode == 0:
-            return f"Installed: {', '.join(to_install)}"
+            return f"Installed in .venv: {', '.join(to_install)}"
         return f"Install warning (non-fatal): {result.stderr[:200]}"
     except subprocess.TimeoutExpired:
         return "Dependency install timed out (non-fatal)."
     except Exception as e:
         return f"Install error (non-fatal): {e}"
-
 def _open_vscode(project_dir: Path) -> bool:
     vscode_candidates = [
         "code",
@@ -325,15 +335,24 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     print(f"[DevAgent] 🚀 Running: {run_command}")
     try:
         parts = run_command.split()
-        if parts[0].lower() == "python":
-            parts[0] = sys.executable
+        if not parts:
+            return "Run error: empty run command."
+
+        python_exe = project_venv_python(project_dir, create=False)
+        env = os.environ.copy()
+        if python_exe:
+            env["PATH"] = str(python_exe.parent) + os.pathsep + env.get("PATH", "")
+        command_name = Path(parts[0]).name.lower()
+        if re.fullmatch(r"python(?:3(?:\.\d+)?)?(?:\.exe)?|py\.exe?", command_name):
+            parts[0] = str(python_exe or sys.executable)
 
         result = subprocess.run(
             parts,
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=timeout,
-            cwd=str(project_dir)
+            cwd=str(project_dir),
+            env=env,
         )
 
         stdout = result.stdout.strip()
@@ -353,9 +372,8 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
         return f"Command not found: {e}"
     except Exception as e:
         return f"Run error: {e}"
-
 def _try_auto_install(error_output: str, project_dir: Path) -> bool:
-    """If there is a ModuleNotFoundError, tries to auto-install the missing package."""
+    """Install a missing package only inside this project's virtual environment."""
     pattern = re.compile(
         r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]", re.IGNORECASE
     )
@@ -364,18 +382,23 @@ def _try_auto_install(error_output: str, project_dir: Path) -> bool:
         return False
 
     pkg = match.group(1).replace("_", "-").split(".")[0]
-    print(f"[DevAgent] 🔧 Auto-installing missing package: {pkg}")
+    try:
+        dependency_name(pkg)
+        python_exe = project_venv_python(project_dir, create=True)
+    except (TypeError, ValueError, RuntimeError):
+        return False
+
+    print(f"[DevAgent] 🔧 Installing missing package in .venv: {pkg}")
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", pkg],
+            [str(python_exe), "-m", "pip", "install", pkg],
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
-            timeout=60, cwd=str(project_dir)
+            timeout=120, cwd=str(project_dir)
         )
         return result.returncode == 0
     except Exception:
         return False
-
 def _fix_files(
     error_output: str,
     project_description: str,
@@ -496,8 +519,18 @@ def _build_project(
     proj_name    = project_name or plan.get("project_name", "jarvis_project")
     proj_name    = re.sub(r"[^\w\-]", "_", proj_name)
     project_dir  = PROJECTS_DIR / proj_name
-    project_dir.mkdir(parents=True, exist_ok=True)
-    project_dir = validate_project_root(PROJECTS_DIR, project_dir)
+    try:
+        PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+        project_dir.mkdir()
+        project_dir = validate_project_root(PROJECTS_DIR, project_dir)
+    except FileExistsError:
+        msg = f"Project folder '{proj_name}' already exists. Choose a new name; existing files were left untouched."
+        if speak: speak(msg)
+        return msg
+    except Exception as e:
+        msg = f"Could not create a safe project folder: {e}"
+        if speak: speak(msg)
+        return msg
 
     files        = plan.get("files", [])
     entry_point  = plan.get("entry_point", "main.py")
