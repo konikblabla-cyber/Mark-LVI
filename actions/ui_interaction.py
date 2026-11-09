@@ -112,10 +112,18 @@ def _control_signature(info, rect) -> dict:
         if automation_id:
             break
     try:
+        runtime_id = tuple(getattr(info, "runtime_id", ()) or ())
+    except Exception:
+        runtime_id = ()
+    try:
         bounds = (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
     except Exception:
         bounds = None
-    return {"automation_id": automation_id, "rect": bounds}
+    return {
+        "automation_id": automation_id,
+        "runtime_id": runtime_id,
+        "rect": bounds,
+    }
 
 
 def _same_control_identity(candidate: dict, original: dict) -> bool:
@@ -125,6 +133,10 @@ def _same_control_identity(candidate: dict, original: dict) -> bool:
     new_id = str(candidate.get("automation_id") or "")
     if old_id:
         return new_id == old_id
+    old_runtime = tuple(original.get("runtime_id") or ())
+    new_runtime = tuple(candidate.get("runtime_id") or ())
+    if old_runtime:
+        return new_runtime == old_runtime
     old_rect, new_rect = original.get("rect"), candidate.get("rect")
     if not old_rect or not new_rect or len(old_rect) != 4 or len(new_rect) != 4:
         return False
@@ -232,6 +244,7 @@ def _collect_accessible_controls(window, include_wrappers: bool = False):
                 item = {
                     "role": role, "name": label,
                     "automation_id": signature["automation_id"],
+                    "runtime_id": signature["runtime_id"],
                     "rect": signature["rect"],
                 }
                 if include_wrappers:
@@ -314,8 +327,16 @@ def _invoke_on_window(window_handle: int, label: str,
     if not _same_control_identity(target, original_signature):
         return "changed_control", "the matching control is not the one originally identified"
 
-    # InvokePattern calls the actual accessible control; no coordinate guess.
-    target["control"].iface_invoke.Invoke()
+    # Resolve the pattern before calling it. A missing InvokePattern proves
+    # that no action was sent; an exception during Invoke itself is ambiguous.
+    try:
+        invoke_pattern = target["control"].iface_invoke
+    except Exception as exc:
+        return (
+            "unsupported_pattern",
+            f"the control does not expose InvokePattern ({type(exc).__name__})",
+        )
+    invoke_pattern.Invoke()
     return "invoked", ""
 
 
@@ -413,6 +434,11 @@ def _click_and_verify(button_label: str, expected_result: str,
             reason + "; this click was not started",
             button=label,
         )
+    if status == "unsupported_pattern":
+        return outcome.failed(
+            "click_and_verify", reason + "; nothing was clicked",
+            button=label,
+        )
     if status != "invoked":
         return outcome.failed(
             "click_and_verify", reason or "the control was not invoked",
@@ -476,6 +502,7 @@ def click_and_verify(parameters: dict, player=None, session_memory=None) -> str:
     signature = {
         "role": matches[0]["role"],
         "automation_id": matches[0].get("automation_id", ""),
+        "runtime_id": matches[0].get("runtime_id", ()),
         "rect": matches[0].get("rect"),
     }
     context_text = " ".join(
