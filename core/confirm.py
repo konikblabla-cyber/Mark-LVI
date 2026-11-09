@@ -106,12 +106,28 @@ def request(key: str, title: str, detail: str, run: Callable[[], str],
         return (f"I cannot confirm '{title}' right now because the interface is "
                 f"not available, so I have not done it.")
 
+    # Expire stale prompts first, then claim the single global HUD slot
+    # atomically. Two callers can race between their own pending_title()
+    # checks; the gate itself must never let one overwrite the other.
+    pending_title()
     pending = _Pending(
         key=key, title=title, detail=detail, run=run,
         at=time.monotonic(), on_cancel=on_cancel,
     )
     with _lock:
-        _pending = pending
+        if _pending is not None:
+            existing_title = _pending.title
+            claimed = False
+        else:
+            _pending = pending
+            existing_title = ""
+            claimed = True
+    if not claimed:
+        _cancel_callback(on_cancel, title, "another confirmation is pending")
+        return (
+            f"Another confirmation is already waiting on the HUD: "
+            f"{existing_title}. Nothing was done for '{title}'."
+        )
 
     try:
         _show_cb(title, detail)
