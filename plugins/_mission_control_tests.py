@@ -125,7 +125,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
             ["pending", "pending", "pending"],
         )
 
-    def test_blocked_step_pauses_mission_and_resume_reopens_it(self):
+    def test_blocked_step_cannot_be_retried_until_read_only_recovery(self):
         mission_id = self.plan()
         self.start(mission_id)
         self.begin(mission_id)
@@ -137,11 +137,61 @@ class MissionControlReliabilityTests(unittest.TestCase):
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["status"], "paused")
         self.assertEqual(mission["steps"][0]["status"], "blocked")
+        self.assertTrue(mission["steps"][0]["outcome_uncertain"])
+
         resumed = mission_control.run({"action": "resume", "mission_id": mission_id})
-        self.assertIn("[MISSION_CONTINUE]", resumed)
+        self.assertIn("[MISSION_RECOVERY_REQUIRED]", resumed)
+        mission = mission_control._read()["missions"][0]
+        self.assertEqual(mission["status"], "paused")
+        self.assertEqual(mission["steps"][0]["status"], "blocked")
+
+        recovered = mission_control.run({
+            "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
+            "resolution": "retry_safe",
+            "verification": "Read-only inspection proved the target remains unchanged.",
+        })
+        self.assertIn("[MISSION_CONTINUE]", recovered)
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["status"], "active")
         self.assertEqual(mission["steps"][0]["status"], "pending")
+        self.assertIn("Read-only inspection", mission["steps"][0]["recovery_verification"])
+        self.assertEqual(mission["steps"][0]["attempts"], 1)
+
+    def test_recovery_requires_read_only_evidence(self):
+        mission_id = self.plan("One step")
+        self.start(mission_id)
+        self.begin(mission_id)
+        mission_control.run({
+            "action": "block_step", "mission_id": mission_id,
+            "step_id": "S01", "reason": "Tool result was ambiguous",
+        })
+        result = mission_control.run({
+            "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
+            "resolution": "retry_safe", "verification": "",
+        })
+        self.assertIn("read-only inspection", result)
+        mission = mission_control._read()["missions"][0]
+        self.assertEqual(mission["steps"][0]["status"], "blocked")
+        self.assertEqual(mission["status"], "paused")
+
+    def test_recovery_can_mark_already_completed_step_without_reexecution(self):
+        mission_id = self.plan("One step")
+        self.start(mission_id)
+        self.begin(mission_id)
+        mission_control.run({
+            "action": "block_step", "mission_id": mission_id,
+            "step_id": "S01", "reason": "The tool result was lost",
+        })
+        result = mission_control.run({
+            "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
+            "resolution": "completed",
+            "verification": "Read-only inspection confirmed the requested state is already present.",
+        })
+        self.assertIn("[MISSION_COMPLETE]", result)
+        mission = mission_control._read()["missions"][0]
+        self.assertEqual(mission["status"], "completed")
+        self.assertEqual(mission["steps"][0]["status"], "done")
+        self.assertEqual(mission["steps"][0]["attempts"], 1)
 
     def test_mission_cannot_be_completed_with_open_steps(self):
         mission_id = self.plan()

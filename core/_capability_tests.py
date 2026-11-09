@@ -233,10 +233,17 @@ class MissionControlTests(unittest.TestCase):
                 self.assertIn("Status: paused", blocked)
 
                 resumed = mission.run({"action": "resume", "mission_id": mission_id})
-                self.assertIn("[MISSION_CONTINUE]", resumed)
-                self.assertIn("STEP_ID=S01", resumed)
+                self.assertIn("[MISSION_RECOVERY_REQUIRED]", resumed)
+                self.assertNotIn("[MISSION_CONTINUE]", resumed)
+                recovered = mission.run({
+                    "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
+                    "resolution": "retry_safe",
+                    "verification": "Read-only inspection proves the protected setting is unchanged.",
+                })
+                self.assertIn("[MISSION_CONTINUE]", recovered)
+                self.assertIn("STEP_ID=S01", recovered)
 
-    def test_paused_mission_rejects_completion_until_resume(self):
+    def test_paused_mission_rejects_completion_until_verified_recovery(self):
         from plugins import mission_control as mission
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "missions.json"
@@ -258,14 +265,12 @@ class MissionControlTests(unittest.TestCase):
                 })
                 self.assertIn("paused or inactive", refused.lower())
 
-                resumed = mission.run({"action": "resume", "mission_id": mission_id})
-                self.assertIn("[MISSION_CONTINUE]", resumed)
-                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
-                completed = mission.run({
-                    "action": "complete_step", "mission_id": mission_id,
-                    "step_id": "S01", "verification": "User approved and the task succeeded.",
+                recovered = mission.run({
+                    "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
+                    "resolution": "completed",
+                    "verification": "Read-only inspection confirms the approved task is complete.",
                 })
-                self.assertIn("[MISSION_COMPLETE]", completed)
+                self.assertIn("[MISSION_COMPLETE]", recovered)
 
     def test_corrupt_mission_store_is_not_overwritten(self):
         from plugins import mission_control as mission
