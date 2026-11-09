@@ -68,6 +68,48 @@ class PickerDiagnosticsTests(unittest.TestCase):
         self.assertEqual(sum(line.startswith("- Calendar:") for line in clamped.splitlines()), 1)
         self.assertIn("item limit reached", clamped)
 
+
+    def test_filters_emails_phone_numbers_and_opaque_tokens(self):
+        records = [
+            {"role": "Text", "name": "owner@example.com"},
+            {"role": "Text", "name": "+48 600 123 456"},
+            {"role": "Text", "name": "Bearer token"},
+            {"role": "Spinner", "name": "Hour", "automation_id": "a" * 40},
+            {"role": "Calendar", "name": "Meeting date"},
+        ]
+        result = diag.format_picker_diagnostics(records)
+        self.assertNotIn("owner@example.com", result)
+        self.assertNotIn("+48 600 123 456", result)
+        self.assertNotIn("Bearer token", result)
+        self.assertNotIn("a" * 40, result)
+        self.assertIn("Calendar: Meeting date", result)
+        self.assertNotIn("AutomationId=", result)
+
+    def test_output_is_bounded_by_character_limit(self):
+        records = [
+            {"role": "Text", "name": f"Visible control {index} " + ("x" * 140)}
+            for index in range(100)
+        ]
+        result = diag.format_picker_diagnostics(records)
+        self.assertLessEqual(len(result), diag._MAX_OUTPUT_CHARS + 32)
+        self.assertTrue(
+            "output truncated" in result or "item limit reached" in result,
+            result[-100:],
+        )
+
+    def test_scan_limit_bounds_untrusted_iterable(self):
+        class CountingIterable:
+            def __init__(self):
+                self.count = 0
+            def __iter__(self):
+                while True:
+                    self.count += 1
+                    yield {"role": "Document", "name": "ignored"}
+        records = CountingIterable()
+        result = diag.format_picker_diagnostics(records)
+        self.assertIn("scan limit reached", result)
+        self.assertEqual(records.count, diag._MAX_SCANNED + 1)
+
     def test_non_iterable_input_is_safe(self):
         self.assertIn("No safe visible", diag.format_picker_diagnostics(123))
 
