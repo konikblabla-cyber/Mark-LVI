@@ -22,6 +22,7 @@ from actions.ui_interaction import (
     _click_and_verify,
     _matching_controls,
     _snapshot,
+    _fill_text_and_verify,
 )
 from actions import ui_sequence
 
@@ -33,6 +34,7 @@ _NOOP_BUTTON_ID = 102
 _RESET_BUTTON_ID = 103
 _OPEN_PANEL_BUTTON_ID = 104
 _FINISH_WORKFLOW_BUTTON_ID = 105
+_SAVE_TITLE_BUTTON_ID = 106
 
 if sys.platform == "win32":
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -69,6 +71,14 @@ if sys.platform == "win32":
     ]
     _user32.SetWindowTextW.restype = wintypes.BOOL
     _user32.SetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+    _user32.GetWindowTextW.restype = ctypes.c_int
+    _user32.GetWindowTextW.argtypes = [
+        wintypes.HWND, wintypes.LPWSTR, ctypes.c_int,
+    ]
+    _user32.SendMessageW.restype = ctypes.c_ssize_t
+    _user32.SendMessageW.argtypes = [
+        wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t,
+    ]
     _user32.SetForegroundWindow.restype = wintypes.BOOL
     _user32.SetForegroundWindow.argtypes = [wintypes.HWND]
     _user32.PostMessageW.restype = wintypes.BOOL
@@ -106,6 +116,7 @@ def _serve_native_window() -> int:
 
     hinstance = _kernel32.GetModuleHandleW(None)
     status_hwnd = [None]
+    project_title_hwnd = [None]
     workflow_stage = ["idle"]
 
     @_WNDPROC
@@ -116,6 +127,8 @@ def _serve_native_window() -> int:
             return 0
         if message == 0x0111 and command_id == _RESET_BUTTON_ID:
             workflow_stage[0] = "idle"
+            if project_title_hwnd[0]:
+                _user32.SetWindowTextW(project_title_hwnd[0], "")
             _user32.SetWindowTextW(status_hwnd[0], "Not saved")
             return 0
         if message == 0x0111 and command_id == _OPEN_PANEL_BUTTON_ID:
@@ -126,6 +139,18 @@ def _serve_native_window() -> int:
             if workflow_stage[0] == "panel":
                 workflow_stage[0] = "complete"
                 _user32.SetWindowTextW(status_hwnd[0], "Workflow complete")
+            return 0
+        if message == 0x0111 and command_id == _SAVE_TITLE_BUTTON_ID:
+            buffer = ctypes.create_unicode_buffer(512)
+            if project_title_hwnd[0]:
+                _user32.GetWindowTextW(
+                    project_title_hwnd[0], buffer, len(buffer),
+                )
+            if buffer.value == "Quarterly plan":
+                workflow_stage[0] = "title_saved"
+                _user32.SetWindowTextW(status_hwnd[0], "Title saved")
+            else:
+                _user32.SetWindowTextW(status_hwnd[0], "Title missing")
             return 0
         if message == 0x0002:  # WM_DESTROY
             _user32.PostQuitMessage(0)
@@ -144,7 +169,7 @@ def _serve_native_window() -> int:
             raise ctypes.WinError(error)
 
     hwnd = _user32.CreateWindowExW(
-        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 300,
+        0, _CLASS_NAME, _WINDOW_TITLE, 0x00CF0000, 100, 100, 460, 360,
         None, None, hinstance, None,
     )
     if not hwnd:
@@ -175,8 +200,22 @@ def _serve_native_window() -> int:
         0, "BUTTON", "Finish workflow", 0x50000000,
         190, 170, 160, 34, hwnd, ctypes.c_void_p(_FINISH_WORKFLOW_BUTTON_ID), hinstance, None,
     )
+    # The adjacent STATIC is the accessible label for the EDIT control.
+    title_label_hwnd = _user32.CreateWindowExW(
+        0, "STATIC", "Project title", 0x50000000,
+        20, 230, 110, 28, hwnd, None, hinstance, None,
+    )
+    project_title_hwnd[0] = _user32.CreateWindowExW(
+        0x00000200, "EDIT", "", 0x50010080,
+        140, 225, 250, 30, hwnd, ctypes.c_void_p(107), hinstance, None,
+    )
+    save_title_hwnd = _user32.CreateWindowExW(
+        0, "BUTTON", "Save title", 0x50000000,
+        20, 285, 140, 34, hwnd, ctypes.c_void_p(_SAVE_TITLE_BUTTON_ID), hinstance, None,
+    )
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
-                open_panel_hwnd, finish_workflow_hwnd)):
+                open_panel_hwnd, finish_workflow_hwnd, title_label_hwnd,
+                project_title_hwnd[0], save_title_hwnd)):
         raise ctypes.WinError(ctypes.get_last_error())
 
     _user32.ShowWindow(hwnd, 5)  # SW_SHOW
@@ -256,27 +295,11 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
                 pass
 
     def setUp(self):
-        # Tests share one native window, so restore a known state each time.
-        snapshot = _snapshot(int(self.hwnd))
-        if any(item["name"] == "Not saved" for item in snapshot["records"]):
-            return
-        matches = _matching_controls(snapshot["clickables"], "Restore baseline")
-        self.assertEqual(len(matches), 1, snapshot["clickables"])
-        item = matches[0]
-        signature = {
-            "role": item["role"],
-            "automation_id": item.get("automation_id", ""),
-            "runtime_id": item.get("runtime_id", ()),
-            "rect": item.get("rect"),
-        }
-        result = _click_and_verify(
-            "Restore baseline", "Not saved", int(self.hwnd),
-            snapshot["process_id"], signature,
+        # Reset the isolated fixture directly so tests never inherit typed data.
+        _user32.SendMessageW(
+            self.hwnd, 0x0111, _RESET_BUTTON_ID, 0,
         )
-        self.assertTrue(
-            result.startswith("status=done action=click_and_verify "),
-            result,
-        )
+        time.sleep(0.05)
 
     def test_real_native_button_without_expected_change_is_not_reported_done(self):
         snapshot = _snapshot(int(self.hwnd))
@@ -410,6 +433,57 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             after["records"],
         )
 
+
+    def test_value_pattern_fills_and_verifies_native_edit_without_returning_value(self):
+        snapshot = _snapshot(int(self.hwnd))
+        result = _fill_text_and_verify(
+            "Project title", "Quarterly plan",
+            int(self.hwnd), snapshot["process_id"],
+        )
+        self.assertTrue(
+            result.startswith("status=done action=fill_text_and_verify "),
+            result,
+        )
+        # The action compares ValuePattern.CurrentValue internally; it must
+        # never include the entered value in its result sent back to the model.
+        self.assertNotIn("Quarterly plan", result)
+
+    def test_fill_text_does_not_touch_password_or_secret_fields(self):
+        snapshot = _snapshot(int(self.hwnd))
+        result = _fill_text_and_verify(
+            "Password", "do-not-enter",
+            int(self.hwnd), snapshot["process_id"],
+        )
+        self.assertTrue(result.startswith("status=failed action=fill_text_and_verify "), result)
+        self.assertNotIn("do-not-enter", result)
+
+    def test_form_sequence_fills_edit_then_clicks_save_button(self):
+        self.assertTrue(_user32.SetForegroundWindow(self.hwnd))
+        time.sleep(0.1)
+        active = _snapshot()
+        self.assertEqual(active["handle"], int(self.hwnd), active)
+        with patch.object(ui_sequence, "_capture_active_window", return_value=active):
+            result = ui_sequence.run_ui_sequence({
+                "steps": [
+                    {
+                        "action": "fill_text",
+                        "field_label": "Project title",
+                        "text": "Quarterly plan",
+                    },
+                    {
+                        "action": "click",
+                        "button_label": "Save title",
+                        "expected_result": "Title saved",
+                    },
+                ],
+            })
+        self.assertTrue(result.startswith("status=done action=run_ui_sequence "), result)
+        self.assertIn("steps_completed=2", result)
+        after = _snapshot(int(self.hwnd))
+        self.assertTrue(
+            any(item["name"] == "Title saved" for item in after["records"]),
+            after["records"],
+        )
     def test_wrong_button_label_does_not_invoke_anything(self):
         snapshot = _snapshot(int(self.hwnd))
         matches = _matching_controls(snapshot["clickables"], "Definitely not present")
