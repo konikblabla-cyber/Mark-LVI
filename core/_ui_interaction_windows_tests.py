@@ -387,25 +387,31 @@ def _native_tree_item_handle() -> int:
     return int(root)
 
 
-def _native_tree_item_expanded(tree_hwnd, item_handle) -> bool:
-    class _TVITEMW(ctypes.Structure):
-        _fields_ = [
-            ("mask", wintypes.UINT), ("hItem", wintypes.HANDLE),
-            ("state", wintypes.UINT), ("stateMask", wintypes.UINT),
-            ("pszText", wintypes.LPWSTR), ("cchTextMax", ctypes.c_int),
-            ("iImage", ctypes.c_int), ("iSelectedImage", ctypes.c_int),
-            ("cChildren", ctypes.c_int), ("lParam", ctypes.c_ssize_t),
-        ]
-    item = _TVITEMW()
-    item.mask = 0x0008  # TVIF_STATE
-    item.hItem = ctypes.c_void_p(int(item_handle))
-    item.stateMask = 0x0020  # TVIS_EXPANDED
-    result = _user32.SendMessageW(
-        tree_hwnd, 0x113E, 0, ctypes.addressof(item),
-    )  # TVM_GETITEMW
-    if not result:
-        raise AssertionError("could not read native TreeView item state")
-    return bool(item.state & 0x0020)
+def _native_tree_item_expanded(window_handle, label: str) -> bool:
+    """Read the TreeItem state through UIA; never pass remote-process pointers."""
+    from pywinauto import Desktop
+
+    window = Desktop(backend="uia").window(handle=int(window_handle)).wrapper_object()
+    matches = []
+    wanted = " ".join(label.split()).casefold()
+    for control in window.descendants():
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != "TreeItem":
+                continue
+            name = " ".join(str(getattr(info, "name", "") or "").split()).casefold()
+            if name == wanted:
+                matches.append(control)
+        except Exception:
+            continue
+    if len(matches) != 1:
+        raise AssertionError(f"expected one native TreeItem named {label!r}, found {len(matches)}")
+    state = int(matches[0].iface_expand_collapse.CurrentExpandCollapseState)
+    if state not in (0, 1, 2, 3):
+        raise AssertionError(f"native TreeItem returned unknown ExpandCollapseState {state}")
+    return state in (1, 2)
+
+
 
 
 class WindowsUIAIntegrationTests(unittest.TestCase):
@@ -767,7 +773,7 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         tree = _user32.GetDlgItem(self.hwnd, _TREE_ID)
         self.assertTrue(tree)
         root = _native_tree_item_handle()
-        self.assertFalse(_native_tree_item_expanded(tree, root))
+        self.assertFalse(_native_tree_item_expanded(int(self.hwnd), "Projects"))
 
         snapshot = _snapshot(int(self.hwnd))
         self.assertTrue(any(
