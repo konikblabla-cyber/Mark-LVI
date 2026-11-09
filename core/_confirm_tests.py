@@ -28,25 +28,6 @@ class ConfirmationCleanupTests(unittest.TestCase):
             confirm._pending = self._old[0]
         confirm.bind(self._old[1], self._old[2], self._old[3])
 
-    def test_second_request_cannot_overwrite_existing_hud_prompt(self):
-        cleaned = []
-        first = confirm.request(
-            "first", "First action", "first detail",
-            lambda: "first action",
-        )
-        second = confirm.request(
-            "second", "Second action", "second detail",
-            lambda: "second action",
-            on_cancel=lambda: cleaned.append("second_released"),
-        )
-        self.assertIn("[CONFIRMATION_PENDING]", first)
-        self.assertIn("Another confirmation is already waiting", second)
-        self.assertEqual(confirm.pending_title(), "First action")
-        self.assertEqual(len(self.shown), 1)
-        self.assertEqual(cleaned, ["second_released"])
-        confirm.resolve(False)
-        self.assertEqual(confirm.pending_title(), "")
-
     def test_second_request_cannot_replace_existing_hud_prompt(self):
         first_cleaned = []
         second_cleaned = []
