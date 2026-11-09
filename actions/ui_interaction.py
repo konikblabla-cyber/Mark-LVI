@@ -398,6 +398,219 @@ def _invoke_on_window(window_handle: int, expected_process_id: int,
 
 
 
+def _read_checkbox_on_window(window_handle: int, expected_process_id: int,
+                               label: str) -> tuple[str, bool | None, dict | None, str]:
+    """Read one exact accessible CheckBox state without changing it."""
+    from pywinauto import Desktop
+
+    desktop = Desktop(backend="uia")
+    window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if not window.is_visible():
+        return "missing_window", None, None, "the original window is no longer visible"
+    process_id = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(process_id, expected_process_id):
+        return "changed_window", None, None, "the window handle now belongs to another process"
+
+    wanted = _normalise(label)
+    matches = []
+    for scanned, control in enumerate(window.descendants()):
+        if scanned >= _MAX_SCANNED_CONTROLS:
+            break
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != "CheckBox":
+                continue
+            if bool(getattr(info, "is_password", False)) or bool(getattr(info, "is_offscreen", False)):
+                continue
+            name = str(getattr(info, "name", "") or "")
+            if _is_sensitive_input_label(name) or _normalise(name) != wanted:
+                continue
+            rect = control.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0 or not control.is_enabled():
+                continue
+            signature = _control_signature(info, rect)
+            matches.append((control, signature))
+        except Exception:
+            continue
+
+    if not matches:
+        return "missing_checkbox", None, None, "no visible, enabled, non-sensitive CheckBox has that exact label"
+    if len(matches) != 1:
+        return "ambiguous_checkbox", None, None, "more than one CheckBox has that exact accessible label"
+
+    control, signature = matches[0]
+    try:
+        pattern = control.iface_toggle
+        state = int(pattern.CurrentToggleState)
+    except Exception:
+        return "unsupported_toggle_pattern", None, None, "the CheckBox does not expose UI Automation TogglePattern"
+    if state not in (0, 1):
+        return "mixed_state", None, None, "the CheckBox is indeterminate; MARK will not guess how to change it"
+    plain_signature = {
+        "role": "CheckBox",
+        "automation_id": signature["automation_id"],
+        "runtime_id": signature["runtime_id"],
+        "rect": signature["rect"],
+    }
+    return "found", bool(state), plain_signature, ""
+
+
+def _inspect_checkbox(label: str, window_handle: int,
+                      expected_process_id: int) -> tuple[str, bool | None, dict | None, str]:
+    """Inspect a checkbox in a bounded worker; return only state and identity."""
+    completed, result, error = _run_uia(
+        lambda: _read_checkbox_on_window(
+            window_handle, expected_process_id, label,
+        ),
+        _SNAPSHOT_TIMEOUT_SECONDS,
+        exclusive_lock=_SNAPSHOT_LOCK,
+    )
+    if not completed:
+        return "timeout", None, None, "UI Automation did not inspect the CheckBox within 4 seconds"
+    if error is not None:
+        return "error", None, None, f"UI Automation could not inspect the CheckBox ({type(error).__name__})"
+    if not isinstance(result, tuple) or len(result) != 4:
+        return "error", None, None, "UI Automation returned an invalid CheckBox state"
+    return result
+
+
+def _set_checkbox_on_window(window_handle: int, expected_process_id: int,
+                             label: str, desired: bool, signature: dict,
+                             cancelled: threading.Event) -> tuple[str, str]:
+    """Re-find the same CheckBox, toggle once, and verify its exact state."""
+    from pywinauto import Desktop
+
+    desktop = Desktop(backend="uia")
+    window = desktop.window(handle=int(window_handle)).wrapper_object()
+    if not window.is_visible():
+        return "missing_window", "the original window is no longer visible"
+    process_id = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(process_id, expected_process_id):
+        return "changed_window", "the window handle now belongs to another process"
+
+    wanted = _normalise(label)
+    matches = []
+    for scanned, control in enumerate(window.descendants()):
+        if scanned >= _MAX_SCANNED_CONTROLS:
+            break
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != "CheckBox":
+                continue
+            if bool(getattr(info, "is_password", False)) or bool(getattr(info, "is_offscreen", False)):
+                continue
+            name = str(getattr(info, "name", "") or "")
+            if _is_sensitive_input_label(name) or _normalise(name) != wanted:
+                continue
+            rect = control.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0 or not control.is_enabled():
+                continue
+            candidate_signature = _control_signature(info, rect)
+            candidate = {
+                "role": "CheckBox",
+                "automation_id": candidate_signature["automation_id"],
+                "runtime_id": candidate_signature["runtime_id"],
+                "rect": candidate_signature["rect"],
+            }
+            matches.append((control, candidate))
+        except Exception:
+            continue
+
+    if not matches:
+        return "missing_checkbox", "the original CheckBox is no longer available"
+    if len(matches) != 1:
+        return "ambiguous_checkbox", "the CheckBox label is no longer unique"
+    control, candidate = matches[0]
+    if not _same_control_identity(candidate, signature):
+        return "changed_checkbox", "the CheckBox is no longer the one originally identified"
+
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before changing the CheckBox"
+    try:
+        pattern = control.iface_toggle
+        current_state = int(pattern.CurrentToggleState)
+    except Exception:
+        return "unsupported_toggle_pattern", "the CheckBox no longer exposes TogglePattern"
+    if current_state not in (0, 1):
+        return "mixed_state", "the CheckBox is indeterminate; no change was made"
+    if bool(current_state) == desired:
+        return "already_set", ""
+
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before changing the CheckBox"
+    try:
+        pattern.Toggle()
+    except Exception:
+        return "invoke_uncertain", "the CheckBox TogglePattern raised an error; its state is unknown"
+    try:
+        final_state = int(pattern.CurrentToggleState)
+    except Exception:
+        return "invoke_uncertain", "the CheckBox was toggled but its state could not be verified"
+    if final_state not in (0, 1):
+        return "verification_mismatch", "the CheckBox became indeterminate after toggling"
+    if bool(final_state) == desired:
+        return "toggled", ""
+    return "verification_mismatch", "the CheckBox state did not match the requested state after toggling"
+
+
+def _set_checkbox_and_verify(label: str, desired: bool,
+                             window_handle: int,
+                             expected_process_id: int,
+                             signature: dict) -> str:
+    if not isinstance(desired, bool):
+        return outcome.failed(
+            "set_checkbox_and_verify",
+            "checked must be a boolean true or false",
+            checkbox=label,
+        )
+    if _is_sensitive_input_label(label):
+        return outcome.failed(
+            "set_checkbox_and_verify",
+            "credential-related CheckBoxes are not supported",
+            checkbox=label,
+        )
+
+    completed, result, error = _run_uia(
+        lambda cancelled: _set_checkbox_on_window(
+            window_handle, expected_process_id, label, desired,
+            signature, cancelled,
+        ),
+        _INVOKE_TIMEOUT_SECONDS,
+        exclusive_lock=_INVOKE_LOCK,
+        pass_cancel_event=True,
+    )
+    if not completed:
+        return outcome.unverified(
+            "set_checkbox_and_verify",
+            "UI Automation did not return within 4 seconds; the CheckBox may have changed. Do not retry blindly.",
+            checkbox=label, timed_out=True,
+        )
+    if error is not None:
+        return outcome.unverified(
+            "set_checkbox_and_verify",
+            f"UI Automation raised {type(error).__name__}; the CheckBox state is unknown. Do not retry blindly.",
+            checkbox=label,
+        )
+
+    status, reason = result
+    if status in {"toggled", "already_set"}:
+        return outcome.done(
+            "set_checkbox_and_verify", checkbox=label,
+            checked=desired, verified=True, changed=(status == "toggled"),
+        )
+    if status in {"invoke_uncertain", "verification_mismatch"}:
+        return outcome.unverified(
+            "set_checkbox_and_verify", reason, checkbox=label,
+        )
+    if status == "ambiguous_checkbox":
+        return outcome.ask(
+            "set_checkbox_and_verify", reason, checkbox=label,
+        )
+    return outcome.failed(
+        "set_checkbox_and_verify", reason or status, checkbox=label,
+    )
+
+
 def _is_sensitive_input_label(label: str) -> bool:
     normal = _normalise(label)
     if not normal:
