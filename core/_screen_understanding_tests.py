@@ -39,7 +39,7 @@ class ScreenUnderstandingTests(unittest.TestCase):
 
     def test_bounds_output_length(self):
         result = format_accessible_elements(
-            [{"role": "Text", "name": "x" * 100} for _ in range(20)],
+            [{"role": "Text", "name": f"item-{i}-" + "x" * 100} for i in range(20)],
             max_elements=4, max_chars=400,
         )
         self.assertLessEqual(len(result), 500)
