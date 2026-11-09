@@ -169,7 +169,9 @@ class CheckboxTests(unittest.TestCase):
         self.assertEqual(pattern.calls, 0)
 
     def test_consent_and_privacy_labels_require_confirmation(self):
-        for label in ("Agree to terms", "Allow notifications", "Share location"):
+        for label in ("Agree to terms", "Allow notifications", "Share location",
+                      "Zgadzam się na regulamin", "Przetwarzanie danych",
+                      "Udostępnianie lokalizacji", "Powiadomienia"):
             with self.subTest(label=label):
                 self.assertTrue(ui_checkbox._needs_confirmation(label))
         self.assertFalse(ui_checkbox._needs_confirmation("Remember this device"))
