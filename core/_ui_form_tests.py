@@ -95,6 +95,7 @@ class UIFormTests(unittest.TestCase):
             [{"field_label": "Name", "text": ""}],
             [{"field_label": "Name", "text": "x" * 2001}],
             [{"field_label": "Name", "text": "bad\\x00value"}],
+            [{"field_label": "Name", "text": "bad\x00value"}],
             self._fields(("Name", "A"), (" name ", "B")),
         ]
         for fields in invalid:

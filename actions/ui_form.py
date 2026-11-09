@@ -67,7 +67,7 @@ def _validate_fields(raw_fields) -> tuple[list[dict] | None, str]:
             return None, f"field {index} has a missing or overlong field_label"
         if not isinstance(value, str) or not value.strip() or len(value) > _MAX_FIELD_TEXT:
             return None, f"field {index} has empty or overlong text"
-        if "\\x00" in value:
+        if "\x00" in value:
             return None, f"field {index} contains an unsupported null character"
         clean_label = " ".join(label.split())
         key = _normalise_label(clean_label)
