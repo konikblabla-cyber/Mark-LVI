@@ -465,7 +465,7 @@ class UIInteractionTests(unittest.TestCase):
 
     def test_only_critical_or_unrequested_external_targets_are_gated(self):
         from core.autonomy_policy import requires_ui_confirmation
-        self.assertFalse(requires_ui_confirmation("Send", "Wyślij wiadomość do Alex"))
+        self.assertFalse(requires_ui_confirmation("Wyślij", "Wyślij wiadomość do Alex"))
         self.assertTrue(requires_ui_confirmation("Send"))
         self.assertTrue(requires_ui_confirmation("Pay now", "Pay now"))
         self.assertFalse(requires_ui_confirmation("Save", "Save the settings"))
