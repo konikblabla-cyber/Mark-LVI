@@ -153,13 +153,19 @@ def _prepare_step_for_execution(mission: dict, session_memory) -> tuple[bool, bo
 
 
 def _continue_instruction(mission: dict, recovery: bool = False) -> str:
+    blocked = next((s for s in mission.get("steps", [])
+                    if s.get("status") == "blocked"), None)
+    if blocked:
+        return ("\\n[MISSION_RECOVERY_REQUIRED] Step " + str(blocked.get("id") or "?")
+                + " may already have changed the real world. Do NOT repeat it. "
+                "Inspect only with an allowlisted read-only tool, then call resolve_step.")
     step = _next_open_step(mission)
-    if mission.get("status") == "completed" or step is None:
+    if mission.get("status") == "completed" or (
+            step is None and all(s.get("status") == "done" for s in mission.get("steps", []))):
         return ("\\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
                 "Report the completed result to the user; do not invent extra work.")
-    if step.get("status") == "blocked":
-        return ("\\n[MISSION_RECOVERY_REQUIRED] This step may already have changed the real world. "
-                "Do NOT repeat it. Inspect only with an allowlisted read-only tool, then call resolve_step.")
+    if step is None:
+        return "\\n[MISSION_PAUSED] This mission has no runnable step. Do not claim completion."
     if step.get("status") == "running" and recovery:
         return ("\\n[MISSION_RECOVERY] A persisted verified receipt already exists. "
                 "Do NOT repeat the action. Call complete_step for this exact mission and step.")
@@ -485,7 +491,11 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 step.pop("tool_evidence", None)
                 mission["updated_at"] = _now()
                 clear_step(session_memory, mission_id, sid)
-                ready, recovery = _prepare_step_for_execution(mission, session_memory)
+                if all(s.get("status") == "done" for s in mission["steps"]):
+                    mission["status"] = "completed"
+                    ready, recovery = True, False
+                else:
+                    ready, recovery = _prepare_step_for_execution(mission, session_memory)
                 mission["updated_at"] = _now()
                 _write(data)
                 result = _format(mission)
@@ -520,52 +530,6 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     "\n[MISSION_BLOCKED] Stop this mission here. Explain the exact "
                     "blocker to the user and do not attempt later steps."
                 )
-            elif action == "resolve_step":
-                sid = str(parameters.get("step_id") or "").strip()
-                resolution = str(parameters.get("resolution") or "").strip().lower()
-                verification = str(parameters.get("verification") or "").strip()
-                mission = next((m for m in missions if m.get("id") == mission_id), None)
-                if mission is None:
-                    return "Give me a valid mission_id."
-                if mission.get("status") != "paused":
-                    return "Resolve a step only after Mission Control has paused on a blocker."
-                step = next((s for s in mission.get("steps", []) if s.get("id") == sid), None)
-                if step is None or step.get("status") != "blocked":
-                    return "Give me the blocked step_id that needs recovery."
-                if resolution not in {"completed", "retry_safe"}:
-                    return "Choose resolution='completed' or resolution='retry_safe'."
-                if not verification:
-                    return ("Recovery requires evidence from a read-only inspection. "
-                            "Do not guess whether the earlier action took effect.")
-                step["recovery_verification"] = verification[:500]
-                step["recovery_resolution"] = resolution
-                step["recovery_resolved_at"] = _now()
-                step["blocked_reason"] = ""
-                step["outcome_uncertain"] = False
-                step["updated_at"] = _now()
-                if resolution == "completed":
-                    step["status"] = "done"
-                    step["verification"] = verification[:500]
-                else:
-                    # The previous attempt is retained for audit, but must not be
-                    # replayed. A fresh plan is required after read-only proof that
-                    # no externally visible effect occurred.
-                    if step.get("ui_action"):
-                        step["last_ui_action"] = step.pop("ui_action")
-                    if step.get("ui_action_planned_at"):
-                        step["last_ui_action_planned_at"] = step.pop("ui_action_planned_at")
-                    step["status"] = "pending"
-                    step["verification"] = ""
-                    step.pop("started_at", None)
-                mission["status"] = (
-                    "completed" if all(s.get("status") == "done" for s in mission["steps"])
-                    else "active"
-                )
-                mission["updated_at"] = _now()
-                _write(data)
-                result = _format(mission)
-                if mission.get("execution_mode") == "autonomous":
-                    result += _continue_instruction(mission)
             elif action == "resolve_step":
                 sid = str(parameters.get("step_id") or "").strip()
                 resolution = str(parameters.get("resolution") or "").strip().lower()
@@ -607,8 +571,12 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     step["status"] = "pending"
                     step["verification"] = ""
                     step.pop("started_at", None)
-                mission["status"] = "active"
-                ready, recovery = _prepare_step_for_execution(mission, session_memory)
+                if all(s.get("status") == "done" for s in mission["steps"]):
+                    mission["status"] = "completed"
+                    ready, recovery = True, False
+                else:
+                    mission["status"] = "active"
+                    ready, recovery = _prepare_step_for_execution(mission, session_memory)
                 mission["updated_at"] = _now()
                 _write(data)
                 result = _format(mission)
@@ -673,7 +641,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         # when a long mission plan is shown in the HUD instead of spoken.
         marker = next((tag for tag in (
             "[MISSION_CONTINUE]", "[MISSION_BLOCKED]", "[MISSION_COMPLETE]",
-            "[MISSION_RECOVERY]", "[MISSION_UI_PLAN]", "[MISSION_UI_RECOVERY]"
+            "[MISSION_RECOVERY]", "[MISSION_RECOVERY_REQUIRED]", "[MISSION_PAUSED]", "[MISSION_UI_PLAN]", "[MISSION_UI_RECOVERY]"
         ) if tag in result), "")
         tail = result[result.index(marker):] if marker else ""
         return "Mission updated. The full plan is displayed on screen. " + tail
