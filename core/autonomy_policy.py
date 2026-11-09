@@ -21,7 +21,12 @@ _NEGATED_ACTION = re.compile(
 )
 _NEGATED_SEND = re.compile(
     r"\b(?:do\s+not|don't|never|not)\s+(?:send|text|message|email|dm)\b|"
-    r"\bnie\s+(?:wysyłaj|wysylaj|wysyłać|wysylac|wyślij|wyslij|przesyłaj|przesylaj)\b",
+    r"\b(?:i\s+)?(?:don't|do\s+not|never)\s+(?:want|need|allow|let)\s+"
+    r"(?:me\s+)?(?:you\s+)?to\s+(?:send|text|message|email|dm)\b|"
+    r"\bnie\s+(?:wysyłaj|wysylaj|wysyłać|wysylac|wyślij|wyslij|przesyłaj|przesylaj)\b|"
+    r"\bnie\s+(?:chcę|chce|chciałbym|chcialbym)\s*,?\s*"
+    r"(?:żebyś|zebyś|żeby|zeby|abyś|abys)\b.{0,64}\b"
+    r"(?:wysył|wysyl|wyślij|wyslij|prześlij|przeslij|napisz|send|text|message)\w*\b",
     re.IGNORECASE,
 )
 _SEND_INTENT = re.compile(
@@ -129,7 +134,7 @@ def _target_mentioned(user_request: str, target: str) -> bool:
 def explicitly_requested_target_action(user_request: str, target: str) -> bool:
     """True only when this turn names the target and explicitly asks to act on it."""
     request = str(user_request or "")
-    if not request or _NEGATED_ACTION.search(request):
+    if not request or _NEGATED_ACTION.search(request) or _NEGATED_SEND.search(request):
         return False
     has_action_verb = bool(re.search(
         r"\b(?:click|press|select|choose|submit|send|publish|share|upload|delete|remove|erase|sign|"
@@ -186,7 +191,8 @@ def consume_explicit_send_authorization(session_memory, receiver: str,
         if session_memory.get("direct_send_used"):
             return False
         request = scope_request(session_memory)
-        if not request or _NEGATED_ACTION.search(request) or not _SEND_INTENT.search(request):
+        if (not request or _NEGATED_ACTION.search(request) or _NEGATED_SEND.search(request)
+                or not _SEND_INTENT.search(request)):
             return False
         receiver_tokens = _tokens(receiver)
         request_tokens = _tokens(request)

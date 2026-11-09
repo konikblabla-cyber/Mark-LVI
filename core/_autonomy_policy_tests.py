@@ -3,6 +3,7 @@ import unittest
 
 from core.autonomy_policy import (
     consume_explicit_send_authorization,
+    explicitly_requested_target_action,
     new_turn_authorization,
     requires_checkbox_confirmation,
     requires_ui_confirmation,
@@ -97,6 +98,22 @@ class AutonomyPolicyTests(unittest.TestCase):
                 self.assertFalse(consume_explicit_send_authorization(
                     scope, "Alex", "Send a message to Alex"
                 ))
+
+    def test_indirect_negative_send_requests_never_authorize_sending(self):
+        requests = (
+            "I don't want you to send a message to Alex: I'll be late",
+            "I do not want you to send Alex this message: I'll be late",
+            "Nie chcę, żebyś wysłał wiadomość do Alex: będę później",
+            "Nie chcę żebyś wysyłał wiadomość do Alex: będę o 18:30",
+        )
+        for request in requests:
+            with self.subTest(request=request):
+                scope = new_turn_authorization(request)
+                self.assertFalse(consume_explicit_send_authorization(
+                    scope, "Alex", "I'll be late"
+                ))
+                self.assertFalse(explicitly_requested_target_action(request, "send Alex"))
+                self.assertTrue(requires_ui_confirmation("Send", user_request=request))
 
     def test_opt_out_is_always_allowed_without_confirmation(self):
         for label in ("Allow tracking", "Share location", "Accept cookies",
