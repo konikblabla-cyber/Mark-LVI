@@ -454,7 +454,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         # Never drop the machine-readable continuation/block/completion hand-off
         # when a long mission plan is shown in the HUD instead of spoken.
         marker = next((tag for tag in (
-            "[MISSION_CONTINUE]", "[MISSION_BLOCKED]", "[MISSION_COMPLETE]"
+            "[MISSION_CONTINUE]", "[MISSION_BLOCKED]", "[MISSION_COMPLETE]",
+            "[MISSION_RECOVERY]", "[MISSION_UI_PLAN]", "[MISSION_UI_RECOVERY]"
         ) if tag in result), "")
         tail = result[result.index(marker):] if marker else ""
         return "Mission updated. The full plan is displayed on screen. " + tail

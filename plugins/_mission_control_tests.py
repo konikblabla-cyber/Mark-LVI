@@ -273,5 +273,33 @@ class MissionControlReliabilityTests(unittest.TestCase):
 
 
 
+    def test_long_ui_plan_keeps_its_machine_readable_handoff(self):
+        mission_id = self._running_mission("Click Save and verify a new confirmation label")
+        fake_plan = {
+            "status": "planned",
+            "steps": [{
+                "tool": "click_and_verify",
+                "parameters": {
+                    "button_label": "S" * 160,
+                    "expected_result": "C" * 160,
+                },
+                "risk": "low",
+                "requires_confirmation": False,
+                "reason": "R" * 240,
+                "expected_result": "E" * 320,
+            }],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=[]), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=fake_plan):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+        self.assertIn("[MISSION_UI_PLAN]", result)
+        payload = json.loads(result.split("[MISSION_UI_PLAN] ", 1)[1])
+        self.assertEqual(payload["steps"][0]["tool"], "click_and_verify")
+        self.assertEqual(payload["steps"][0]["expected_result"], "E" * 320)
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
