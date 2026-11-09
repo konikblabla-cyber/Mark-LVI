@@ -13,6 +13,8 @@ on:
       - "actions/screen_understanding.py"
       - "core/_screen_understanding_tests.py"
       - "actions/ui_interaction.py"
+      - "actions/ui_dropdown.py"
+      - "core/_ui_dropdown_tests.py"
       - "core/_ui_interaction_tests.py"
       - "core/_ui_interaction_windows_tests.py"
       - "core/confirm.py"
@@ -55,7 +57,7 @@ jobs:
         run: python -m pip install numpy
       - name: Compile changed Python modules
         run: |
-          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
+          python -m py_compile core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py actions/ui_dropdown.py core/_ui_dropdown_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py
       - name: Run offline router tests
         run: python -m core._model_router_tests
       - name: Run offline capability tests
@@ -72,6 +74,8 @@ jobs:
         run: python -m core._confirm_tests
       - name: Run verified UI sequence tests
         run: python -m core._ui_sequence_tests
+      - name: Run verified dropdown selection tests
+        run: python -m core._ui_dropdown_tests
 
   windows-uia:
     runs-on: windows-latest
