@@ -143,7 +143,8 @@ def explicitly_requested_target_action(user_request: str, target: str) -> bool:
 def requires_ui_confirmation(target: str, user_request: str = "") -> bool:
     """Critical actions always ask; other external effects ask only without scope."""
     target = str(target or "")
-    if _CRITICAL_ACTION.search(target):
+    if (_CRITICAL_ACTION.search(target)
+            or _CRITICAL_ACTION.search(str(user_request or ""))):
         return True
     if _EXTERNAL_ACTION.search(target):
         return not explicitly_requested_target_action(user_request, target)

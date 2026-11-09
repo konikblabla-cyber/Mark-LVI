@@ -55,6 +55,11 @@ class AutonomyPolicyTests(unittest.TestCase):
             ("Permanently erase", "Permanently erase these files"),
             ("Factory reset", "Factory reset this PC"),
             ("Zamknij konto", "Zamknij konto"),
+            ("Delete", "Permanently delete this selected file"),
+            ("Submit", "Submit payment"),
+            ("Save", "Change security settings"),
+            ("Reset", "Factory reset this PC"),
+            ("Sign", "Sign the contract"),
         ):
             with self.subTest(target=target):
                 self.assertTrue(requires_ui_confirmation(target, user_request=request))
