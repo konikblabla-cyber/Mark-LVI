@@ -18,6 +18,7 @@ from actions.ui_interaction import (
     _run_uia,
     _same_control_identity,
     _wait_for_expected_result,
+    _valid_window_process_id,
 )
 
 
@@ -104,6 +105,13 @@ class UIInteractionTests(unittest.TestCase):
         ]
         self.assertFalse(_has_exact_expected_text(records, "Payment completed"))
 
+    def test_original_process_identity_must_match(self):
+        self.assertTrue(_valid_window_process_id(1234, 1234))
+        self.assertTrue(_valid_window_process_id("1234", None))
+        self.assertFalse(_valid_window_process_id(4321, 1234))
+        self.assertFalse(_valid_window_process_id(0, None))
+        self.assertFalse(_valid_window_process_id(None, 1234))
+
     def test_control_identity_prefers_automation_id(self):
         original = {
             "role": "Button", "automation_id": "saveButton",
@@ -164,6 +172,21 @@ class UIInteractionTests(unittest.TestCase):
             "Saved", lambda: next(snapshots),
             attempts=3, interval=0, sleep=lambda _seconds: None,
         ))
+
+    def test_verification_stops_at_shared_deadline(self):
+        calls = []
+        sleeps = []
+        def read():
+            calls.append(1)
+            return [{"role": "Text", "name": "Still working"}]
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+        self.assertFalse(_wait_for_expected_result(
+            "Saved", read, attempts=20, interval=1,
+            sleep=fake_sleep, timeout_seconds=0,
+        ))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sleeps, [])
 
     def test_verification_fails_when_expected_text_never_appears(self):
         self.assertFalse(_wait_for_expected_result(
