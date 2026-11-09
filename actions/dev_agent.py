@@ -21,7 +21,7 @@ PROJECTS_DIR     = Path.home() / "Desktop" / "JarvisProjects"
 MAX_FIX_ATTEMPTS = 5
 # Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
-from core.project_path_policy import resolve_project_file
+from core.project_path_policy import (\n    require_new_project_file, resolve_project_file, validate_project_root,\n)
 
 MODEL_PLANNER    = gemini.SMART
 MODEL_WRITER     = gemini.SMART
@@ -251,7 +251,9 @@ Code for {file_path}:"""
         response = model.generate_content(prompt)
         code = _strip_fences(response.text)
 
-        full_path = resolve_project_file(project_dir, file_path)
+        full_path = require_new_project_file(project_dir, file_path)
+        if full_path.exists() or full_path.is_symlink():
+            raise FileExistsError(f"Refusing to overwrite existing project file: {file_path}")
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(code, encoding="utf-8")
 
@@ -495,6 +497,7 @@ def _build_project(
     proj_name    = re.sub(r"[^\w\-]", "_", proj_name)
     project_dir  = PROJECTS_DIR / proj_name
     project_dir.mkdir(parents=True, exist_ok=True)
+    project_dir = validate_project_root(PROJECTS_DIR, project_dir)
 
     files        = plan.get("files", [])
     entry_point  = plan.get("entry_point", "main.py")
