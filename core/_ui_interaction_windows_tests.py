@@ -220,7 +220,7 @@ def _serve_native_window() -> int:
         20, 285, 140, 34, hwnd, ctypes.c_void_p(_SAVE_TITLE_BUTTON_ID), hinstance, None,
     )
     checkbox_hwnd[0] = _user32.CreateWindowExW(
-        0, "BUTTON", "Enable notifications", 0x50010003,
+        0, "BUTTON", "Remember this device", 0x50010003,
         190, 288, 220, 28, hwnd, ctypes.c_void_p(_CHECKBOX_ID), hinstance, None,
     )
     if not all((status_hwnd[0], button_hwnd, noop_button_hwnd, reset_button_hwnd,
@@ -521,17 +521,17 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         checkbox = _user32.GetDlgItem(self.hwnd, _CHECKBOX_ID)
         self.assertTrue(checkbox)
         self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 0)  # BM_GETCHECK
-        status, reason = ui_checkbox._set_on_window(
-            int(self.hwnd), snapshot["process_id"], "Enable notifications",
-            True, __import__("threading").Event(),
-        )
-        self.assertEqual((status, reason), ("changed", ""), (status, reason))
+        first = ui_checkbox.set_checkbox_state({
+            "checkbox_label": "Remember this device", "checked": True,
+        })
+        self.assertIn("status=done", first)
+        self.assertIn("checked=true", first)
         self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 1)
-        status, reason = ui_checkbox._set_on_window(
-            int(self.hwnd), snapshot["process_id"], "Enable notifications",
-            True, __import__("threading").Event(),
-        )
-        self.assertEqual((status, reason), ("already_set", ""), (status, reason))
+        second = ui_checkbox.set_checkbox_state({
+            "checkbox_label": "Remember this device", "checked": True,
+        })
+        self.assertIn("status=done", second)
+        self.assertIn("changed=false", second)
         self.assertEqual(_user32.SendMessageW(checkbox, 0x00F0, 0, 0), 1)
 
     def test_wrong_button_label_does_not_invoke_anything(self):
