@@ -47,7 +47,7 @@ opencv-python>=4.8,<5
 mss>=9,<11
 
 # ── System, files & documents ─────────────────────────────────────────────────
-psutil>=5.9,<8
+psutil>=5.9,<8              # process detection, process names and desktop activity
 send2trash                   # file_controller — recoverable deletes
 python-pptx                  # file_processor — presentation reading
 
@@ -73,8 +73,8 @@ youtube-transcript-api       # youtube_video — transcript fetch for summaries
 pygetwindow                  # game_updater, chat_takeover — window geometry
 
 # ── Windows-only (pip skips these automatically on macOS / Linux) ─────────────
-comtypes;   sys_platform == "win32"
-pycaw;      sys_platform == "win32"
+comtypes;   sys_platform == "win32"  # COM initialisation for Windows audio sessions
+pycaw;      sys_platform == "win32"     # Windows audio sessions (call detection) and volume control
 win10toast; sys_platform == "win32"
 pywin32;    sys_platform == "win32"
 wmi;        sys_platform == "win32"
