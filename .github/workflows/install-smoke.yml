@@ -63,6 +63,22 @@ jobs:
           youtube_transcript_api"
       - name: Import the JARVIS application entry point
         run: python -c "import main; print('JARVIS application entry point imported successfully')"
+      - name: Verify JARVIS discovers its Windows actions and plugins
+        run: >-
+          python -c "import main; from pathlib import Path;
+          from core.action_loader import discover_actions;
+          from core.plugin_loader import discover_plugins;
+          reserved = {item['name'] for item in main.TOOL_DECLARATIONS};
+          actions = discover_actions(Path('actions'), reserved_names=reserved, logger=lambda _: None);
+          required_actions = {'desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder'};
+          missing_actions = sorted(required_actions - actions.names());
+          assert not missing_actions, f'Missing actions: {missing_actions}';
+          plugins = discover_plugins(Path('plugins'), reserved | actions.names(), logger=lambda _: None);
+          valid_plugins = {item['name'] for item in plugins.list_for_ui() if item['valid']};
+          required_plugins = {'smart_home','process_watch','mission_control'};
+          missing_plugins = sorted(required_plugins - valid_plugins);
+          assert not missing_plugins, f'Missing plugins: {missing_plugins}';
+          print('JARVIS action/plugin discovery OK')"
       - name: Verify Windows audio and UI dependencies
         run: >-
           python -c "import comtypes, pycaw.pycaw, win32api, win32gui,
