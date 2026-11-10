@@ -583,7 +583,8 @@ def _foreground_app() -> str:
 
 def _input_window_guard(target_app: str | None = None) -> str:
     """Allow input only when the explicitly named target is foreground on Windows."""
-    if _get_os() != "windows":
+    # Security checks must use the actual host OS, never an editable config value.
+    if platform.system().casefold() != "windows":
         return ""
     expected = _app_process_token(target_app)
     if not expected:

@@ -147,7 +147,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
 
     def test_input_refuses_to_type_into_jarvis_foreground_window(self):
         app = Path(sys.executable).name
-        with patch.object(control, "_get_os", return_value="windows"), \
+        with patch.object(control.platform, "system", return_value="Windows"), \
              patch("core.desktop_context.get_desktop_context",
                    return_value={"available": True, "foreground_app": app}), \
              patch.object(control.appidentity, "own_exes",
@@ -159,7 +159,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
         execute.assert_not_called()
 
     def test_input_fails_closed_when_foreground_process_is_unknown(self):
-        with patch.object(control, "_get_os", return_value="windows"), \
+        with patch.object(control.platform, "system", return_value="Windows"), \
              patch("core.desktop_context.get_desktop_context",
                    return_value={"available": True, "foreground_app": ""}), \
              patch.object(control, "_type") as execute:
@@ -286,14 +286,26 @@ class ComputerControlSafetyTests(unittest.TestCase):
         self.assertIn("status=failed action=computer_control", result)
         self.assertIn("could not be identified", result)
     def test_input_requires_an_explicit_target_application(self):
-        with patch.object(control, "_get_os", return_value="windows"), \
+        with patch.object(control.platform, "system", return_value="Windows"), \
              patch.object(control, "_type") as execute:
             result = control.computer_control({"action": "type", "text": "unsafe"})
         self.assertIn("target_app is required", result)
         execute.assert_not_called()
 
+    def test_foreground_guard_uses_real_host_os_not_config_override(self):
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_get_os", return_value="mac"), \
+             patch("core.desktop_context.get_desktop_context",
+                   return_value={"available": True, "foreground_app": "chrome.exe"}), \
+             patch.object(control.appidentity, "own_exes", return_value=set()), \
+             patch.object(control, "_type") as execute:
+            result = control.computer_control({
+                "action": "type", "text": "unsafe", "target_app": "notepad.exe",
+            })
+        self.assertIn("does not match", result)
+        execute.assert_not_called()
     def test_input_refuses_when_foreground_does_not_match_target(self):
-        with patch.object(control, "_get_os", return_value="windows"), \
+        with patch.object(control.platform, "system", return_value="Windows"), \
              patch("core.desktop_context.get_desktop_context",
                    return_value={"available": True, "foreground_app": "chrome.exe"}), \
              patch.object(control.appidentity, "own_exes", return_value=set()), \
@@ -305,7 +317,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
         execute.assert_not_called()
 
     def test_input_runs_only_when_exact_target_is_foreground(self):
-        with patch.object(control, "_get_os", return_value="windows"), \
+        with patch.object(control.platform, "system", return_value="Windows"), \
              patch("core.desktop_context.get_desktop_context",
                    return_value={"available": True, "foreground_app": "notepad.exe"}), \
              patch.object(control.appidentity, "own_exes", return_value=set()), \
