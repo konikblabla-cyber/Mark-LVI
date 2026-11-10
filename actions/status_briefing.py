@@ -84,6 +84,12 @@ def build_status_briefing() -> str:
         sections.append(f"WINDOWS AUTO-START: unavailable ({type(exc).__name__}).")
 
     try:
+        from actions.routine_mode import run as routine_status
+        sections.append("SAVED ROUTINES:\n" + routine_status({"action": "list"})[:1200])
+    except Exception as exc:
+        sections.append(f"SAVED ROUTINES: unavailable ({type(exc).__name__}).")
+
+    try:
         from actions.system_monitor import get_system_status
         status = get_system_status()
         disk = status.get("disk") or {}
