@@ -92,6 +92,51 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertEqual(locator.cleared, 0)
         self.assertEqual(locator.typed, [])
 
+    def test_type_text_preserves_existing_contents_by_default(self):
+        locator = FakeLocator()
+        session = SimpleNamespace(_get_page=lambda: _async_value(FakePage(locator)))
+        result = asyncio.run(browser._BrowserSession.type_text(session, selector="#name", text="new"))
+        self.assertIn("done", result)
+        self.assertEqual(locator.cleared, 0)
+        self.assertEqual(locator.typed, ["new"])
+
+    def test_type_text_clears_only_when_explicitly_requested(self):
+        locator = FakeLocator()
+        session = SimpleNamespace(_get_page=lambda: _async_value(FakePage(locator)))
+        result = asyncio.run(browser._BrowserSession.type_text(session, selector="#name", text="new", clear_first=True))
+        self.assertIn("done", result)
+        self.assertEqual(locator.cleared, 1)
+        self.assertEqual(locator.typed, ["new"])
+
+    def test_smart_type_preserves_existing_contents_by_default(self):
+        locator = FakeLocator()
+        session = SimpleNamespace(_get_page=lambda: _async_value(FakePage(locator)))
+        result = asyncio.run(browser._BrowserSession.smart_type(session, "Name", "new"))
+        self.assertIn("done", result)
+        self.assertEqual(locator.cleared, 0)
+        self.assertEqual(locator.typed, ["new"])
+
+    def test_smart_type_replaces_only_when_explicitly_requested(self):
+        locator = FakeLocator()
+        session = SimpleNamespace(_get_page=lambda: _async_value(FakePage(locator)))
+        result = asyncio.run(browser._BrowserSession.smart_type(session, "Name", "new", clear_first=True))
+        self.assertIn("done", result)
+        self.assertEqual(locator.cleared, 1)
+        self.assertEqual(locator.typed, ["new"])
+
+    def test_browser_text_replacement_requires_hud_confirmation(self):
+        request_args = {}
+        executed = []
+        with patch.object(browser.confirm, "request",
+                          side_effect=lambda **kwargs: request_args.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(browser, "_browser_control_execute",
+                          side_effect=lambda params, **kwargs: executed.append(dict(params)) or "done"):
+            result = browser.browser_control({"action": "smart_type", "description": "Name", "text": "New", "clear_first": True})
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            self.assertEqual(executed, [])
+            request_args["run"]()
+        self.assertEqual(len(executed), 1)
+        self.assertTrue(executed[0]["clear_first"])
     def test_fill_form_skips_sensitive_fields_and_fills_safe_fields(self):
         safe = FakeLocator()
         secret = FakeLocator(attrs={"type": "password"})

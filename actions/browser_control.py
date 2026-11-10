@@ -886,7 +886,7 @@ class _BrowserSession:
 
 
     async def type_text(self, selector: str = None, text: str = "",
-                        clear_first: bool = True) -> str:
+                        clear_first: bool = False) -> str:
         page = await self._get_page()
         try:
             locator = page.locator(selector) if selector else page.locator(":focus")
@@ -1053,7 +1053,8 @@ class _BrowserSession:
         )
 
 
-    async def smart_type(self, description: str, text: str) -> str:
+    async def smart_type(self, description: str, text: str,
+                         clear_first: bool = False) -> str:
         page = await self._get_page()
         candidates = [
             page.get_by_placeholder(description, exact=True),
@@ -1071,7 +1072,8 @@ class _BrowserSession:
                         "browser_control",
                         "sensitive fields (passwords, PINs, one-time codes and payment data) are blocked",
                     )
-                await locator.clear()
+                if clear_first:
+                    await locator.clear()
                 await locator.type(text, delay=50)
                 return outcome.done("browser_control", typed=True, verified=True)
             except Exception:
@@ -1316,7 +1318,7 @@ def _browser_control_execute(
             result = sess.run(sess.click(params.get("selector"), params.get("text")))
         elif action == "type":
             result = sess.run(sess.type_text(
-                params.get("selector"), params.get("text", ""), params.get("clear_first", True)))
+                params.get("selector"), params.get("text", ""), params.get("clear_first", False)))
         elif action == "scroll":
             result = sess.run(sess.scroll(params.get("direction", "down"), int(params.get("amount", 500))))
         elif action == "fill_form":
@@ -1324,7 +1326,10 @@ def _browser_control_execute(
         elif action == "smart_click":
             result = sess.run(sess.smart_click(params.get("description", "")))
         elif action == "smart_type":
-            result = sess.run(sess.smart_type(params.get("description", ""), params.get("text", "")))
+            result = sess.run(sess.smart_type(
+                params.get("description", ""), params.get("text", ""),
+                clear_first=params.get("clear_first", False),
+            ))
         elif action == "get_text":
             result = sess.run(sess.get_text())
         elif action == "get_url":
@@ -1400,6 +1405,21 @@ def browser_control(
     params = parameters or {}
     action = str(params.get("action") or "").strip().lower()
     target = params.get("text") or params.get("description") or params.get("selector") or ""
+    if action in {"type", "smart_type"} and bool(params.get("clear_first", False)):
+        confirmed_params = dict(params)
+        return confirm.request(
+            key="browser_control.replace_text",
+            title="Confirm replacing browser field text",
+            detail=(
+                f"Browser action: {action}\\nTarget: {str(target)[:180]}\\n\\n"
+                "This clears the current contents of the selected browser field before typing. "
+                "Confirm only if replacing that existing text is intended."
+            )[:1800],
+            run=lambda: _browser_control_execute(
+                confirmed_params, response=response, player=player,
+                session_memory=session_memory,
+            ),
+        )
     from core.autonomy_policy import requires_ui_confirmation, scope_request
     if (requires_browser_confirmation(action, target)
             and requires_ui_confirmation(target, user_request=scope_request(session_memory))):
@@ -1504,7 +1524,7 @@ TOOL = {
             },
             "clear_first": {
                 "type": "BOOLEAN",
-                "description": "Clear field before typing (default: true)"
+                "description": "False by default; typing preserves existing text. Set true only to replace the field contents; the replacement requires HUD confirmation."
             }
         },
         "required": [
