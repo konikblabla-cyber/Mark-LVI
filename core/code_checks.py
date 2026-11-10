@@ -180,10 +180,17 @@ def dropped_data(rel: str, old: str, new: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 def _walk(folder: Path, limit: int = 20_000):
     n = 0
-    for root, dirs, files in os.walk(folder):
-        dirs[:] = [d for d in dirs if d.casefold() not in _SKIP_DIRS_CASEFOLD]
+    for root, dirs, files in os.walk(folder, followlinks=False):
+        dirs[:] = [
+            d for d in dirs
+            if d.casefold() not in _SKIP_DIRS_CASEFOLD
+            and not (Path(root) / d).is_symlink()
+        ]
         for f in files:
-            yield Path(root) / f
+            path = Path(root) / f
+            if path.is_symlink():
+                continue
+            yield path
             n += 1
             if n >= limit:
                 return
@@ -193,6 +200,8 @@ def _project_python(folder: Path) -> str:
     """The project's own interpreter when it has a virtual environment —
     its dependencies live there, not in the one running this assistant."""
     for venv in (".venv", "venv", "env"):
+        if (folder / venv).is_symlink():
+            continue
         for exe in (Path(venv) / "Scripts" / "python.exe", Path(venv) / "bin" / "python"):
             if (folder / exe).is_file():
                 return str(folder / exe)
@@ -235,18 +244,18 @@ def detect_stack(folder: Path) -> dict:
     # Dependencies name the frameworks better than any guess could.
     deps: list[str] = []
     req = folder / "requirements.txt"
-    if req.is_file():
+    if req.is_file() and not req.is_symlink():
         for line in req.read_text(encoding="utf-8", errors="replace").splitlines():
             m = re.match(r"\s*([A-Za-z0-9_.\-]+)", line)
             if m and not line.strip().startswith("#"):
                 deps.append(m.group(1))
     pyproject = folder / "pyproject.toml"
-    if pyproject.is_file():
+    if pyproject.is_file() and not pyproject.is_symlink():
         deps += re.findall(r'^\s*"([A-Za-z0-9_.\-]+)', pyproject.read_text(
             encoding="utf-8", errors="replace"), re.M)
     pkg = folder / "package.json"
     pkg_data: dict = {}
-    if pkg.is_file():
+    if pkg.is_file() and not pkg.is_symlink():
         try:
             pkg_data = json.loads(pkg.read_text(encoding="utf-8"))
         except ValueError:

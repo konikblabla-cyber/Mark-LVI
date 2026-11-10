@@ -5,9 +5,36 @@ from pathlib import Path
 from unittest.mock import patch
 
 from actions.dev_agent import _classify_error, _has_error, _open_vscode
+from core.code_checks import _walk, detect_stack
 
 
 class DevAgentLaunchSafetyTests(unittest.TestCase):
+    def test_project_scan_does_not_follow_symlinked_files_or_directories(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp)
+            external = Path(outside)
+            (external / "secret.py").write_text("TOKEN = 'private'", encoding="utf-8")
+            (root / "real.py").write_text("VALUE = 1", encoding="utf-8")
+            try:
+                (root / "linked.py").symlink_to(external / "secret.py")
+                (root / "linked_dir").symlink_to(external, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is unavailable on this platform")
+            found = {p.relative_to(root).as_posix() for p in _walk(root)}
+            self.assertEqual(found, {"real.py"})
+
+    def test_stack_detection_ignores_symlinked_project_metadata(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            root = Path(temp)
+            package = Path(outside) / "package.json"
+            package.write_text('{"dependencies":{"dangerous":"1.0"}}', encoding="utf-8")
+            try:
+                (root / "package.json").symlink_to(package)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is unavailable on this platform")
+            stack = detect_stack(root)
+            self.assertEqual(stack["frameworks"], [])
+
     def test_nonzero_exit_is_not_reported_as_success(self):
         output = "Process exited with code 7."
         self.assertTrue(_has_error(output, "python main.py"))
