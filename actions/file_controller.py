@@ -14,6 +14,7 @@ except ImportError:
 
 from core import outcome
 from core.undo import push_undo
+import re
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -21,6 +22,14 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 # Above this size it does not — a 200 MB log would sit in RAM for the rest of
 # the session to protect an edit nobody is going to take back.
 _UNDO_CONTENT_LIMIT = 1_000_000
+
+_PERMANENT_DELETE_RE = re.compile(
+    r"\b(?:permanent(?:ly)?|erase|wipe|shred|irreversibl(?:e|y))\b|"
+    r"\b(?:na stałe|trwale|bezpowrotnie|na zawsze|z pominięciem kosza|"
+    r"z pominieciem kosza)\b",
+    re.IGNORECASE,
+)
+
 
 
 def _path_exists(path: Path) -> bool:
@@ -948,8 +957,7 @@ def _delete_target_was_explicitly_requested(request: str, path: str, name: str) 
 def _file_confirmation(parameters: dict, session_memory=None, player=None):
     """Gate unrequested deletion, bulk desktop moves, and non-undoable overwrites."""
     from core import confirm
-    from core.autonomy_policy import requires_ui_confirmation, scope_request
-    import re
+    from core.autonomy_policy import scope_request
     params = parameters or {}
     action = str(params.get("action") or "").strip().lower()
     path = str(params.get("path") or "desktop")
@@ -958,7 +966,10 @@ def _file_confirmation(parameters: dict, session_memory=None, player=None):
     if action == "delete":
         target = name or path
         explicit_target = _delete_target_was_explicitly_requested(request, path, name)
-        if requires_ui_confirmation("delete " + target, user_request=request) or not explicit_target:
+        permanent_delete = bool(_PERMANENT_DELETE_RE.search(request))
+        # Moving an explicitly named file to the system Trash is reversible.
+        # Permanent deletion/erasure always requires a separate human approval.
+        if permanent_delete or not explicit_target:
             return confirm.request(
                 key="file_delete", title=("Move to Trash: " + target)[:120],
                 detail=("File action: delete (move to Trash)\nTarget: " + target +
