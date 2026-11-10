@@ -48,6 +48,15 @@ class DashboardUploadPolicyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "symbolic link"):
                 upload_usage(link)
 
+    def test_usage_scan_stops_at_file_count_limit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for index in range(MAX_UPLOAD_FILES + 20):
+                (root / f"{index}.bin").touch()
+            total, count = upload_usage(root)
+            self.assertEqual(total, 0)
+            self.assertEqual(count, MAX_UPLOAD_FILES)
+
     def test_limits_are_finite(self):
         self.assertGreater(MAX_UPLOAD_TOTAL_BYTES, 0)
         self.assertGreater(MAX_UPLOAD_FILES, 0)

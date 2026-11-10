@@ -35,4 +35,8 @@ def upload_usage(directory: Path) -> tuple[int, int]:
             raise OSError("upload file reported a negative size")
         total_bytes += size
         file_count += 1
+        # The count/size caps are also scan-work caps: never walk an
+        # unexpectedly huge directory just to establish that it is over quota.
+        if file_count >= MAX_UPLOAD_FILES or total_bytes >= MAX_UPLOAD_TOTAL_BYTES:
+            break
     return total_bytes, file_count
