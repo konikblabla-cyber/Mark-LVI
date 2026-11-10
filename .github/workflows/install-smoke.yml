@@ -39,6 +39,12 @@ jobs:
         run: python -c "import pyautogui, pyperclip, mss; print('PyAutoGUI screen:', pyautogui.size())"
       - name: Verify the PortAudio runtime can be loaded
         run: python -c "import sounddevice as sd; version = sd.get_portaudio_version(); print('PortAudio:', version); assert version is not None"
+      - name: Probe Windows input and output endpoints
+        run: python -c "from core.audio_devices import list_devices; print('Microphones:', list_devices('input', refresh=True)); print('Speakers:', list_devices('output', refresh=True))"
+      - name: Smoke-test Windows WASAPI communication sessions
+        run: python -c "from core.communication_context import get_active_communication_apps; print('Active communication sessions:', get_active_communication_apps())"
+      - name: Smoke-test Windows foreground monitor detection
+        run: python -c "from core.desktop_context import get_desktop_context; result = get_desktop_context(); assert isinstance(result, dict); print('Desktop sensor:', result)"
       - name: Create and paint an offscreen Qt window
         env:
           QT_QPA_PLATFORM: offscreen

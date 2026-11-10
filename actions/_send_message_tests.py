@@ -126,8 +126,7 @@ class OutboundMessageConfirmationTests(unittest.TestCase):
             with patch.object(builtins, "print", side_effect=fake_print):
                 action._console_log("message U0001F4E8 → received ✅")
 
-        self.assertEqual(len(captured), 1)
-        self.assertIn("[SendMessage]", captured[0]) if captured[0].startswith("[SendMessage]") else self.assertTrue(captured[0])
+        self.assertEqual(captured, ["message ? ? received ?"])
 
 
 if __name__ == "__main__":
