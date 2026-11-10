@@ -10,6 +10,7 @@ from pathlib import Path
 from core.undo import push_undo
 
 UNDO_CONTENT_LIMIT = 1_000_000
+MAX_SAFE_WRITE_BYTES = 2_000_000
 
 
 def _signature(path: Path):
@@ -57,6 +58,14 @@ def safe_write_text(path: Path, content: str, *,
     directory symlink is resolved once so the write destination is explicit.
     Undo restores/removes only if the file still matches this exact write.
     """
+    if not isinstance(content, str):
+        raise ValueError("File content must be text.")
+    encoded = content.encode("utf-8")
+    if len(encoded) > MAX_SAFE_WRITE_BYTES:
+        raise ValueError(
+            f"Refusing to write {len(encoded)} bytes; the limit is {MAX_SAFE_WRITE_BYTES} bytes."
+        )
+
     requested = Path(path).expanduser()
     if not requested.name or requested.name in {".", ".."}:
         raise ValueError("A file path is required.")
@@ -80,7 +89,7 @@ def safe_write_text(path: Path, content: str, *,
         except OSError as exc:
             raise OSError("Could not safely back up the existing file; nothing was changed.") from exc
 
-    _atomic_replace(target, content.encode("utf-8"), previous_mode)
+    _atomic_replace(target, encoded, previous_mode)
     written_signature = _signature(target)
 
     if not existed or previous is not None:

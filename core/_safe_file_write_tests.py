@@ -66,6 +66,21 @@ class SafeFileWriteTests(unittest.TestCase):
             self.assertFalse(undo.can_undo())
             self.assertEqual(target.read_text(encoding="utf-8"), "new")
 
+    def test_rejects_oversized_content_without_changing_existing_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "main.py"
+            target.write_text("keep this", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                safe_write_text(target, "x" * 2_000_001)
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep this")
+
+    def test_rejects_non_text_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "main.py"
+            with self.assertRaises(ValueError):
+                safe_write_text(target, b"not text")
+            self.assertFalse(target.exists())
+
     def test_refuses_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "folder"

@@ -19,7 +19,7 @@ MAX_BUILD_ATTEMPTS = 3
 # fallback ladder. Writing a model name here is what left this file hanging
 # forever whenever that one alias was unwell.
 from core import gemini
-from core.safe_file_write import safe_write_text
+from core.safe_file_write import MAX_SAFE_WRITE_BYTES, safe_write_text
 from core import confirm as confirm_gate
 from core.timeout_policy import bounded_timeout
 from core.process_runner import run_bounded_process
@@ -74,6 +74,8 @@ def _read_file(file_path: str) -> tuple[str, str]:
     if not p.exists():
         return "", f"File not found: {file_path}"
     try:
+        if p.stat().st_size > MAX_SAFE_WRITE_BYTES:
+            return "", f"File is too large to safely edit (limit: {MAX_SAFE_WRITE_BYTES} bytes)."
         return p.read_text(encoding="utf-8"), ""
     except Exception as e:
         return "", f"Could not read file: {e}"
@@ -186,7 +188,9 @@ Code:"""
     response = model.generate_content(prompt)
     code     = _clean_code(response.text)
     path     = _resolve_save_path(output_path, lang)
-    _save_file(path, code)
+    status = _save_file(path, code)
+    if status.startswith("Could not save:"):
+        raise OSError(status)
     return code, path
 
 
@@ -287,7 +291,9 @@ def _build(description, language, output_path, args, timeout, speak=None, player
 
         try:
             code = _fix_code(code, last_output, description)
-            _save_file(path, code)
+            save_status = _save_file(path, code)
+            if save_status.startswith("Could not save:"):
+                raise OSError(save_status)
         except Exception as e:
             msg = f"Could not fix code on attempt {attempt}: {e}"
             if speak: speak(msg)
@@ -345,6 +351,8 @@ Updated code:"""
         return f"Could not edit code: {e}"
 
     status = _save_file(Path(file_path), edited)
+    if status.startswith("Could not save:"):
+        return status
     print(f"[Code] ✅ Edited: {file_path}")
     return f"File edited. {status}\n\nPreview:\n{_preview(edited)}"
 
@@ -430,6 +438,8 @@ Optimized code:"""
         save_path = _resolve_save_path(output_path, lang)
 
     status = _save_file(save_path, optimized)
+    if status.startswith("Could not save:"):
+        return status
     print(f"[Code] ✅ Optimized: {save_path}")
 
     original_lines  = len(code.splitlines())
@@ -510,9 +520,12 @@ Be specific and actionable. If you see an error message, quote it exactly."""
             if code_match:
                 fixed_code = code_match.group(1).strip()
                 save_path  = Path(file_path)
-                _save_file(save_path, fixed_code)
-                analysis += f"\n\n✅ Fixed code has been saved to: {file_path}"
-                print(f"[Code] ✅ Fixed code saved: {file_path}")
+                save_status = _save_file(save_path, fixed_code)
+                if save_status.startswith("Could not save:"):
+                    analysis += f"\n\n⚠️ The fix could not be saved: {save_status}"
+                else:
+                    analysis += f"\n\n✅ Fixed code has been saved to: {file_path}"
+                    print(f"[Code] ✅ Fixed code saved: {file_path}")
 
         return analysis
 
