@@ -101,6 +101,22 @@ class ComputerControlSafetyTests(unittest.TestCase):
             request["run"]()
             execute.assert_called_once_with("alt", "f4")
 
+    def test_shift_delete_and_run_dialog_wait_for_confirmation(self):
+        for shortcut in ("shift+delete", "win+r"):
+            with self.subTest(shortcut=shortcut):
+                request = {}
+                with patch.object(control, "_input_window_guard", return_value=""), \
+                     patch.object(control.confirm, "request",
+                                  side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+                     patch.object(control, "_hotkey") as execute:
+                    result = control.computer_control({
+                        "action": "hotkey", "keys": shortcut,
+                    })
+                    self.assertIn("[CONFIRMATION_PENDING]", result)
+                    execute.assert_not_called()
+                    request["run"]()
+                    execute.assert_called_once()
+
     def test_confirmed_hotkey_rechecks_foreground_before_execution(self):
         request = {}
         blocked = "status=failed action=computer_control reason=foreground changed"

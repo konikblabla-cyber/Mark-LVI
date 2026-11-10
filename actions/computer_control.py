@@ -681,6 +681,8 @@ def computer_control(
                 frozenset(("ctrl", "q")), frozenset(("win", "l")),
                 frozenset(("ctrl", "shift", "delete")),
                 frozenset(("ctrl", "alt", "delete")),
+                frozenset(("shift", "delete")),
+                frozenset(("win", "r")),
             }
             if isinstance(keys, list) and frozenset(keys) in dangerous:
                 return confirm.request(
