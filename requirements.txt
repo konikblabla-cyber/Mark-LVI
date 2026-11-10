@@ -76,6 +76,7 @@ pygetwindow                  # game_updater, chat_takeover — window geometry
 comtypes;   sys_platform == "win32"  # COM initialisation for Windows audio sessions
 pycaw;      sys_platform == "win32"     # Windows audio sessions (call detection) and volume control
 win10toast; sys_platform == "win32"
+setuptools>=65,<81; sys_platform == "win32"  # pkg_resources for the legacy win10toast reminder fallback
 pywin32;    sys_platform == "win32"
 wmi;        sys_platform == "win32"
 # pywinauto drives the Windows accessibility tree. Three plugins read it:
