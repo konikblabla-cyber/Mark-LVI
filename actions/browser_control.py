@@ -925,6 +925,71 @@ class _BrowserSession:
         except Exception as e:
             return f"Key error: {e}"
 
+    async def enter_submission_risk(self) -> dict:
+        """Inspect the focused control without reading field values.
+
+        Ordinary search fields are allowed. Form submissions and explicit
+        submit controls require HUD confirmation; inspection failures fail closed.
+        """
+        page = await self._get_page()
+        try:
+            info = await page.evaluate("""() => {
+                const el = document.activeElement;
+                if (!el) return {risky: false, target: ""};
+                const tag = String(el.tagName || "").toUpperCase();
+                const type = String(el.getAttribute("type") || "").toLowerCase();
+                const form = el.form || (el.closest ? el.closest("form") : null);
+                const submitters = form ? Array.from(form.querySelectorAll(
+                    'button:not([type]), button[type="submit"], input[type="submit"], input[type="image"]'
+                )) : [];
+                const labels = submitters.map(node => [
+                    node.innerText, node.getAttribute("aria-label"),
+                    node.getAttribute("title"), node.getAttribute("name"),
+                    node.getAttribute("type")
+                ].filter(Boolean).join(" ")).join(" ");
+                const formAction = form ? (form.getAttribute("action") || "") : "";
+                const elementLabel = [
+                    el.innerText, el.getAttribute("aria-label"), el.getAttribute("title"),
+                    el.getAttribute("placeholder"), el.getAttribute("name"), type
+                ].filter(Boolean).join(" ");
+                const hints = [labels, formAction, elementLabel].filter(Boolean).join(" ").slice(0, 160);
+                if (type === "search" || /\b(search|query|find|szukaj)\b/i.test(hints)) {
+                    return {risky: false, target: hints};
+                }
+                if (tag === "BUTTON" && (!type || type === "submit")) {
+                    return {risky: true, target: hints || "focused submit button"};
+                }
+                if (tag === "INPUT" && (type === "submit" || type === "image")) {
+                    return {risky: true, target: hints || "focused submit control"};
+                }
+                const implicitTypes = new Set([
+                    "", "text", "email", "url", "tel", "number", "password",
+                    "date", "month", "week", "time", "datetime-local"
+                ]);
+                if (form && tag === "INPUT" && implicitTypes.has(type)) {
+                    const blockers = form.querySelectorAll(
+                        'input:not([type]), input[type="text"], input[type="email"], input[type="url"], ' +
+                        'input[type="tel"], input[type="number"], input[type="password"], input[type="date"], ' +
+                        'input[type="month"], input[type="week"], input[type="time"], input[type="datetime-local"]'
+                    );
+                    if (submitters.length || blockers.length === 1) {
+                        return {risky: true, target: hints || "focused form field"};
+                    }
+                }
+                return {risky: false, target: hints};
+            }""")
+            if not isinstance(info, dict) or not isinstance(info.get("risky"), bool):
+                return {"risky": True, "target": "active form could not be inspected"}
+            return {
+                "risky": info["risky"],
+                "target": str(info.get("target") or "active form")[:160],
+            }
+        except Exception as exc:
+            return {
+                "risky": True,
+                "target": f"active form inspection failed ({type(exc).__name__})",
+            }
+
     async def get_text(self) -> str:
         page = await self._get_page()
         try:
@@ -1265,7 +1330,38 @@ def _browser_control_execute(
         elif action == "get_url":
             result = sess.run(sess.get_url())
         elif action == "press":
-            result = sess.run(sess.press(params.get("key", "Enter")))
+            key = str(params.get("key", "Enter") or "Enter")
+            if key.strip().lower() in {"enter", "return"}:
+                try:
+                    submit_info = sess.run(sess.enter_submission_risk())
+                except Exception as exc:
+                    submit_info = {
+                        "risky": True,
+                        "target": f"active form inspection failed ({type(exc).__name__})",
+                    }
+                if isinstance(submit_info, dict):
+                    target_info = str(submit_info.get("target") or "active form")[:160]
+                else:
+                    target_info = "active form could not be inspected"
+                needs_confirmation = (
+                    not isinstance(submit_info, dict)
+                    or submit_info.get("risky") is not False
+                    or requires_browser_confirmation("smart_click", target_info)
+                )
+                if needs_confirmation:
+                    result = confirm.request(
+                        key="browser_control.enter_submit",
+                        title="Confirm browser form submission",
+                        detail=(
+                            "Pressing Enter may submit the active form or activate a high-impact control. "
+                            f"Target: {target_info}. Confirm only if this exact submission is intended."
+                        ),
+                        run=lambda: sess.run(sess.press(key)),
+                    )
+                else:
+                    result = sess.run(sess.press(key))
+            else:
+                result = sess.run(sess.press(key))
         elif action == "close_tab":
             result = sess.run(sess.close_tab())
         elif action == "screenshot":

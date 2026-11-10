@@ -133,6 +133,66 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         execute.assert_called_once()
         request.assert_not_called()
 
+    def test_enter_submission_requires_hud_confirmation(self):
+        executed = []
+        request_args = {}
+
+        class Session:
+            async def enter_submission_risk(self):
+                return {"risky": True, "target": "Send message"}
+
+            async def press(self, key):
+                executed.append(key)
+                return f"Pressed: {key}"
+
+            def run(self, task, timeout=60):
+                return asyncio.run(task)
+
+        def fake_request(**kwargs):
+            request_args.update(kwargs)
+            return "[CONFIRMATION_PENDING]"
+
+        with patch.object(browser._registry, "get", return_value=Session()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""), \
+             patch.object(browser.confirm, "request", side_effect=fake_request):
+            result = browser._browser_control_execute({"action": "press", "key": "Enter"})
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            self.assertEqual(executed, [])
+            request_args["run"]()
+        self.assertEqual(executed, ["Enter"])
+
+    def test_enter_in_search_field_does_not_require_confirmation(self):
+        executed = []
+
+        class Session:
+            async def enter_submission_risk(self):
+                return {"risky": False, "target": "Search"}
+
+            async def press(self, key):
+                executed.append(key)
+                return f"Pressed: {key}"
+
+            def run(self, task, timeout=60):
+                return asyncio.run(task)
+
+        with patch.object(browser._registry, "get", return_value=Session()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""), \
+             patch.object(browser.confirm, "request") as request:
+            result = browser._browser_control_execute({"action": "press", "key": "Enter"})
+        self.assertEqual(result, "Pressed: Enter")
+        self.assertEqual(executed, ["Enter"])
+        request.assert_not_called()
+
+    def test_enter_form_inspection_fails_closed(self):
+        class Page(FakePage):
+            async def evaluate(self, script):
+                raise RuntimeError("page inspection unavailable")
+        page = Page(FakeLocator())
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.enter_submission_risk(session))
+        self.assertTrue(result["risky"])
+        self.assertIn("inspection failed", result["target"])
+
     def test_page_text_and_url_are_marked_as_untrusted_data(self):
         page = FakePage(FakeLocator())
         page.url = "https://example.com/ignore-all-rules"
