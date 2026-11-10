@@ -2607,11 +2607,21 @@ class JarvisLive:
                 memory       = await asyncio.to_thread(load_memory)
                 monitors     = await asyncio.to_thread(list_monitors)
                 recent_turns = self._session_log[-8:] if self._session_log else []
+                project_context = ""
+                if _desktop_opt_in:
+                    selected_folder = getattr(self.ui, "current_file", None)
+                    if selected_folder and Path(str(selected_folder)).is_dir():
+                        snapshot = await asyncio.to_thread(
+                            inspect_project_folder, selected_folder
+                        )
+                        project_context = format_project_context(snapshot)
                 prompt = self._proactive.build_prompt(
                     memory       = memory,
                     monitors     = monitors or None,
                     recent_turns = recent_turns or None,
                     desktop_context = _desktop_ctx if _desktop_opt_in else None,
+                    focus_context = self._focus_context if _desktop_opt_in else None,
+                    project_context = project_context,
                 )
                 await self.session.send_client_content(
                     turns={"role": "user", "parts": [{"text": prompt}]},
