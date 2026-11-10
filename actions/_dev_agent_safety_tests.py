@@ -84,7 +84,10 @@ class DevAgentLaunchSafetyTests(unittest.TestCase):
             executable = Path(temp) / "Code.exe"
             executable.write_text("mock executable", encoding="utf-8")
             project = Path(temp) / "workspace & echo INJECTED"
+            self.assertTrue(executable.is_file())
+            self.assertEqual(executable.suffix.casefold(), ".exe")
             with patch("actions.dev_agent.shutil.which", return_value=str(executable)), \
+                 patch("actions.dev_agent.Path.is_file", return_value=True), \
                  patch("actions.dev_agent.subprocess.Popen") as popen, \
                  patch("actions.dev_agent.time.sleep"):
                 self.assertTrue(_open_vscode(project))
