@@ -80,8 +80,8 @@ def _check_linux_desktop_tools() -> None:
     if OS != "Linux":
         return
     missing = []
-    if not (shutil.which("gnome-screenshot") or shutil.which("scrot")):
-        missing.append("gnome-screenshot (or scrot)")
+    if not shutil.which("gnome-screenshot"):
+        missing.append("gnome-screenshot (required by current PyScreeze)")
     if importlib.util.find_spec("tkinter") is None:
         missing.append("python3-tk")
     if not (shutil.which("xclip") or shutil.which("xsel")):
