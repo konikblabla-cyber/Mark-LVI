@@ -47,6 +47,8 @@ jobs:
           pdfplumber, PyPDF2, docx, pynvml, googleapiclient.discovery,
           google_auth_oauthlib.flow, tinytuya, paho.mqtt.client, openpyxl,
           youtube_transcript_api"
+      - name: Import the JARVIS application entry point
+        run: python -c "import main; print('JARVIS application entry point imported successfully')"
       - name: Verify Windows audio and UI dependencies
         if: runner.os == 'Windows'
         run: >-
