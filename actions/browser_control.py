@@ -929,13 +929,13 @@ class _BrowserSession:
         page = await self._get_page()
         try:
             text = await page.inner_text("body")
-            return text[:4_000]
+            return outcome.untrusted("browser-page", text[:4_000])
         except Exception as e:
             return f"Could not get page text: {e}"
 
     async def get_url(self) -> str:
         page = await self._get_page()
-        return page.url
+        return outcome.untrusted("browser-url", page.url)
 
     async def fill_form(self, fields: dict) -> str:
         if not isinstance(fields, dict) or not fields:
