@@ -99,4 +99,5 @@ TOOL = {
         },
         "required": [],
     },
+    "handler": run,
 }
