@@ -453,12 +453,29 @@ def reminder(
         _write_registry(entries)
     except Exception as exc:
         if os_name == "windows":
-            _cancel_windows_reminder(job_id)
-        script_path.unlink(missing_ok=True)
+            # The registry may be exactly what failed. Remove the scheduled
+            # task directly; the registry-backed cancel helper cannot find it.
+            try:
+                cleanup = subprocess.run(
+                    ["schtasks", "/Delete", "/TN", job_id, "/F"],
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=10, **_CNW,
+                )
+                if cleanup.returncode != 0:
+                    print(f"[Reminder] Could not remove orphaned task: {(cleanup.stderr or cleanup.stdout)[:160]}")
+            except Exception as cleanup_error:
+                print(f"[Reminder] Orphaned task cleanup failed: {type(cleanup_error).__name__}")
+        try:
+            script_path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return f"Windows scheduled the reminder, but its local record could not be saved: {type(exc).__name__}."
 
     if player:
-        player.write_log(f"[Reminder] ✅ {date_str} {time_str} — {safe_msg[:40]}")
+        try:
+            player.write_log(f"[Reminder] ✅ {date_str} {time_str} — {safe_msg[:40]}")
+        except Exception:
+            pass
 
     friendly_time = target_dt.strftime("%B %d at %I:%M %p")
     return f"Reminder set for {friendly_time}. ID: {job_id}."
