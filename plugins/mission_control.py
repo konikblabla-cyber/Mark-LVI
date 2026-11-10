@@ -151,6 +151,53 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
             "block the step or stop at the confirmation gate.")
 
 
+def startup_recovery_context() -> str:
+    """Describe one interrupted, user-authorized mission for the next session.
+
+    Only autonomous missions with a durably running step are eligible. Plans
+    that were never started and missions the user paused are never auto-resumed.
+    The model must use the normal resume/recovery path, which forbids replaying
+    an action whose outcome may already have happened.
+    """
+    try:
+        with _LOCK:
+            missions = list(_read().get("missions", []))
+        candidates = [
+            mission for mission in missions
+            if isinstance(mission, dict)
+            and mission.get("status") == "active"
+            and mission.get("execution_mode") == "autonomous"
+            and (step := _next_open_step(mission)) is not None
+            and step.get("status") == "running"
+        ]
+        if not candidates:
+            return ""
+
+        # Resume the oldest interrupted task first; never launch a pile of
+        # autonomous work simultaneously after a restart.
+        mission = min(candidates, key=lambda item: str(item.get("updated_at") or ""))
+        step = _next_open_step(mission)
+        if step is None:
+            return ""
+        handoff = _continue_instruction(mission, recovery=True)
+        return (
+            "[PERSISTED_MISSION_RECOVERY]\n"
+            "An autonomous task that the user previously authorized was interrupted "
+            "when JARVIS stopped. It is still active and has a running step.\n"
+            f"Mission: {str(mission.get('title') or 'Untitled')[:120]} "
+            f"(ID: {mission.get('id', '')}).\n"
+            f"Current step: {str(step.get('title') or '')[:220]} "
+            f"(ID: {step.get('id', '')}).\n"
+            f"{handoff}\n"
+            f"There are {len(candidates) - 1} other interrupted mission(s) waiting. "
+            "Do not start them until this mission is completed and the user engages again."
+        )
+    except Exception as exc:
+        # A damaged mission store must not prevent voice assistant startup.
+        print(f"[Mission] Startup recovery context unavailable: {type(exc).__name__}")
+        return ""
+
+
 def _format(mission: dict) -> str:
     lines = [
         f"MISSION {mission['id']}: {mission['title']}",
