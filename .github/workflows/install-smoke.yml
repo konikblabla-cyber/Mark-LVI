@@ -34,10 +34,6 @@ jobs:
         run: python -m playwright install chromium
       - name: Launch Chromium and render a local page
         run: python -m core._browser_runtime_smoke
-      - name: Construct and paint the JARVIS HUD offscreen
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: python -m core._ui_runtime_smoke
       - name: Check for broken or conflicting dependencies
         run: python -m pip check
       - name: Install PortAudio runtime for Linux sounddevice
@@ -81,3 +77,7 @@ jobs:
         run: >-
           python -c "import comtypes, pycaw.pycaw, win32api, win32gui,
           win32com.client, wmi, pywinauto, pygetwindow, win10toast"
+      - name: Construct and paint the JARVIS HUD offscreen
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m core._ui_runtime_smoke
