@@ -75,6 +75,7 @@ from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
+    get_desktop_awareness_enabled,
 )
 from core                     import gemini as _gemini
 from core.plugin_loader        import discover_plugins
@@ -83,6 +84,8 @@ from core                      import confirm as confirm_gate
 from core                      import audio_devices
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
+from core.communication_context import is_communication_app, should_forward_microphone
+from core.desktop_context import get_desktop_context, desktop_is_idle
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
@@ -584,6 +587,11 @@ class JarvisLive:
         self._is_speaking         = False
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
+        # In known communication apps, PC audio stays local until a local wake-word
+        # match or an explicit push-to-talk hold opens one request.
+        self._communication_app_active = False
+        self._communication_turn_open = False
+        self._communication_turn_deadline = 0.0
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
         self._vision_cam_active    = False   # True if camera was opened for vision → auto-close after response
         self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
@@ -749,7 +757,11 @@ class JarvisLive:
         return True
 
     def _on_wake_detected(self) -> None:
-        """Called from the detector thread when 'Hey Jarvis' is heard."""
+        """Open one addressed request when a local wake phrase is detected."""
+        if self._communication_app_active:
+            self._communication_turn_open = True
+            self._communication_turn_deadline = time.monotonic() + 90.0
+            self.ui.write_log("SYS: Wake phrase accepted — one request is open.")
         self.wake(reason="wake word")
 
     def wake(self, reason: str = "wake word") -> None:
@@ -781,6 +793,50 @@ class JarvisLive:
                 continue
             if (time.monotonic() - self._last_user_speech) > self._wake_sleep_timeout:
                 self.sleep(reason="no speech for 2 minutes")
+
+    async def _run_communication_guard(self) -> None:
+        """Keep mic audio local in known call/chat apps unless explicitly addressed."""
+        while True:
+            await asyncio.sleep(1.0)
+            try:
+                context = await asyncio.to_thread(get_desktop_context, include_app=True)
+                active = bool(
+                    isinstance(context, dict)
+                    and context.get("available")
+                    and is_communication_app(context.get("foreground_app", ""))
+                )
+            except Exception as exc:
+                print(f"[CommunicationGuard] context check failed: {exc}")
+                continue
+
+            if active == self._communication_app_active:
+                continue
+
+            self._communication_app_active = active
+            self._communication_turn_open = False
+            self._communication_turn_deadline = 0.0
+            if active:
+                if wake_is_ready():
+                    ready = self._ensure_wake_detector()
+                    if ready:
+                        self.ui.write_log(
+                            "SYS: Communication privacy gate active. Say 'Hey Jarvis' "
+                            "for one request, or use Push-to-Talk."
+                        )
+                    else:
+                        self.ui.write_log(
+                            "SYS: Call/chat detected. Microphone stays local because "
+                            "the wake-word model could not start; use Push-to-Talk."
+                        )
+                else:
+                    self.ui.write_log(
+                        "SYS: Call/chat detected. Microphone stays local. Install the "
+                        "local 'Hey Jarvis' wake model or use Push-to-Talk to speak."
+                    )
+            else:
+                self.ui.write_log(
+                    "SYS: Communication privacy gate off — normal microphone mode resumed."
+                )
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
@@ -1054,6 +1110,11 @@ class JarvisLive:
     def _on_ptt(self, held: bool) -> None:
         """Chord pressed or released — may arrive on the hotkey thread."""
         self._ptt_held = held
+        if self._communication_app_active:
+            # PTT is an explicit local authorization and works even if the
+            # optional wake-word model has not been installed.
+            self._communication_turn_open = bool(held)
+            self._communication_turn_deadline = 0.0
         if held:
             # Holding the key is also a way to wake it, so push-to-talk works
             # without having to say the wake word first.
@@ -1649,6 +1710,29 @@ class JarvisLive:
         loop = asyncio.get_event_loop()
 
         def callback(indata, frames, time_info, status):
+            # A foreground Discord/Teams/Zoom/phone app is treated as a private
+            # conversation zone. Audio is never forwarded there until a local
+            # wake phrase or explicit PTT hold opens a single request.
+            if self._communication_app_active:
+                if (self._communication_turn_open
+                        and self._communication_turn_deadline
+                        and time.monotonic() >= self._communication_turn_deadline
+                        and not self._ptt_held):
+                    self._communication_turn_open = False
+                    self._communication_turn_deadline = 0.0
+
+                if not should_forward_microphone(
+                        True, self._communication_turn_open, self._ptt_held):
+                    with self._speaking_lock:
+                        _assistant_speaking = self._is_speaking
+                    # Never train/trigger the local wake model on JARVIS's own
+                    # speaker output or its acoustic tail.
+                    if not _assistant_speaking and not self._tail_active():
+                        det = self._wake_detector
+                        if det is not None:
+                            det.feed(indata)
+                    return
+
             # ── Wake-word gate ───────────────────────────────────────────────
             # While asleep, the mic audio NEVER goes to Gemini (nothing is
             # streamed, so JARVIS can't respond to speech not addressed to it and
@@ -1941,6 +2025,15 @@ class JarvisLive:
                                         "text": full_out,
                                         "ts": datetime.now().isoformat(),
                                     }))
+                                if (self._communication_app_active
+                                        and self._communication_turn_open
+                                        and not self._ptt_held):
+                                    self._communication_turn_open = False
+                                    self._communication_turn_deadline = 0.0
+                                    self.ui.write_log(
+                                        "SYS: Privacy gate closed. Say 'Hey Jarvis' "
+                                        "for the next request."
+                                    )
                             out_buf = []
 
                             if self._vision_close_pending:
@@ -2275,7 +2368,8 @@ class JarvisLive:
         while True:
             await asyncio.sleep(10)
             alert = await asyncio.to_thread(self._sys_monitor.check)
-            if not alert or not self.session or not self._awake:
+            if (not alert or not self.session or not self._awake
+                    or self._communication_app_active or self._phone_active):
                 continue
             # Don't interrupt an active conversation
             with self._speaking_lock:
@@ -2296,7 +2390,8 @@ class JarvisLive:
         """Check user-configured topics once per day; speak alerts when new headlines appear."""
         await asyncio.sleep(300)          # wait 5 min after startup before first check
         while True:
-            if self.session and self._awake:
+            if (self.session and self._awake and not self._communication_app_active
+                    and not self._phone_active):
                 # Don't interrupt if user spoke recently or JARVIS is mid-sentence
                 with self._speaking_lock:
                     speaking = self._is_speaking
@@ -2334,7 +2429,8 @@ class JarvisLive:
         while True:
             await asyncio.sleep(60)   # evaluate once per minute
 
-            if not self.session or not self._awake:
+            if (not self.session or not self._awake
+                    or self._communication_app_active or self._phone_active):
                 continue
 
             with self._speaking_lock:
@@ -2703,6 +2799,7 @@ class JarvisLive:
                     tg.create_task(self._run_system_monitor())
                     tg.create_task(self._run_background_monitor())
                     tg.create_task(self._run_proactive_mode())
+                    tg.create_task(self._run_communication_guard())
                     tg.create_task(self._run_sleep_watch())
                     if self._dashboard:
                         tg.create_task(self._relay_phone_audio())
