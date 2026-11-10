@@ -84,6 +84,7 @@ from core                      import confirm as confirm_gate
 from core                      import audio_devices
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
+from core.live_session_policy import go_away_notice
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     should_auto_wake, should_forward_microphone,
@@ -1967,6 +1968,16 @@ class JarvisLive:
                             if self._resume_handle is None:
                                 print("[JARVIS] 🔗 Session resumption armed")
                             self._resume_handle = _sru.new_handle
+
+                    # The server sends GoAway before the WebSocket connection
+                    # reaches its lifetime limit. Reconnect immediately with
+                    # the newest resumable handle, keeping the same conversation
+                    # rather than waiting for an abrupt socket close.
+                    _go_away = go_away_notice(response)
+                    if _go_away is not None:
+                        _time_left = getattr(_go_away, "time_left", None)
+                        print(f"[JARVIS] 🔗 Server GoAway received (time left: {_time_left}); resuming session")
+                        raise _ReconnectSignal(keep_context=True)
 
                     if response.data:
                         if self._interrupted:
