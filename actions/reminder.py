@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 import re
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,7 @@ def _scripts_dir() -> Path:
     return d
 
 
-_REMINDER_ID = re.compile(r"^JARVISReminder_\d{8}_\d{6}$")
+_REMINDER_ID = re.compile(r"^JARVISReminder_\d{8}_\d{6}(?:_[a-f0-9]{6})?$")
 
 
 def _registry_path() -> Path:
@@ -420,7 +421,7 @@ def reminder(
 
     os_name = _get_os()
     safe_msg = _sanitise(message)
-    task_name = f"JARVISReminder_{target_dt.strftime('%Y%m%d_%H%M%S')}"
+    task_name = f"JARVISReminder_{target_dt.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
 
     try:
         script_path = _write_notify_script(task_name, safe_msg, os_name)
