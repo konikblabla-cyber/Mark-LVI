@@ -464,10 +464,9 @@ def get_providers() -> dict:
 
 
 def get_provider_mode() -> str:
-    """Which engine holds the conversation. Defaults to Gemini Live."""
-    mode = str(get_providers().get("mode", "") or "").strip().lower()
-    return mode if mode in (PROVIDER_MODE_GEMINI, PROVIDER_MODE_PIPELINE) \
-        else PROVIDER_MODE_GEMINI
+    """Which engine holds the conversation; reject corrupt explicit modes."""
+    from core.engine_policy import configured_engine_mode
+    return configured_engine_mode(get_providers())
 
 
 def get_provider_config(provider_id: str) -> dict:

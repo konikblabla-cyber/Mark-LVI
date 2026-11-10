@@ -1,0 +1,96 @@
+name: Windows install smoke checks
+
+on:
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "setup.py"
+      - ".github/workflows/install-smoke.yml"
+      - ".github/workflows/model-router.yml"
+      - "core/_browser_runtime_smoke.py"
+      - "core/_ui_runtime_smoke.py"
+      - "core/audio_devices.py"
+      - "core/_audio_devices_tests.py"
+      - "actions/**"
+      - "plugins/**"
+      - "main.py"
+      - "core/action_loader.py"
+      - "core/plugin_loader.py"
+      - "core/focus_context.py"
+      - "core/project_context.py"
+
+jobs:
+  install:
+    name: Windows / Python ${{ matrix.python-version }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+      - name: Install the declared runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Install headless Chromium
+        run: python -m playwright install chromium
+      - name: Launch Chromium and render a local page
+        run: python -m core._browser_runtime_smoke
+      - name: Check for broken or conflicting dependencies
+        run: python -m pip check
+      - name: Smoke-test Windows desktop-control imports
+        run: python -c "import pyautogui, pyperclip, mss; print('PyAutoGUI screen:', pyautogui.size())"
+      - name: Verify the PortAudio runtime can be loaded
+        run: python -c "import sounddevice as sd; version = sd.get_portaudio_version(); print('PortAudio:', version); assert version is not None"
+      - name: Probe Windows input and output endpoints
+        run: python -c "from core.audio_devices import list_devices; print('Microphones:', list_devices('input', refresh=True)); print('Speakers:', list_devices('output', refresh=True))"
+      - name: Smoke-test Windows WASAPI communication sessions
+        run: python -c "from core.communication_context import get_active_communication_apps; print('Active communication sessions:', get_active_communication_apps())"
+      - name: Smoke-test Windows foreground monitor detection
+        run: python -c "from core.desktop_context import get_desktop_context; result = get_desktop_context(); assert isinstance(result, dict); print('Desktop sensor:', result)"
+      - name: Create and paint an offscreen Qt window
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python -c "from PyQt6.QtWidgets import QApplication, QWidget;
+          app = QApplication([]); window = QWidget(); window.resize(800, 600);
+          window.show(); app.processEvents(); assert window.isVisible();
+          window.close(); app.processEvents(); print('Qt offscreen window OK')"
+      - name: Import core runtime dependencies
+        run: >-
+          python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,
+          httpx, requests, bs4, playwright, PIL, cv2, psutil, send2trash,
+          pptx, fastapi, uvicorn, cryptography, multipart, qrcode, ddgs,
+          pdfplumber, PyPDF2, docx, pynvml, googleapiclient.discovery,
+          google_auth_oauthlib.flow, tinytuya, paho.mqtt.client, openpyxl,
+          youtube_transcript_api"
+      - name: Import the JARVIS application entry point
+        run: python -c "import main; print('JARVIS application entry point imported successfully')"
+      - name: Verify JARVIS discovers its Windows actions and plugins
+        run: >-
+          python -c "import main; from pathlib import Path;
+          from core.action_loader import discover_actions;
+          from core.plugin_loader import discover_plugins;
+          reserved = {item['name'] for item in main.TOOL_DECLARATIONS};
+          actions = discover_actions(Path('actions'), reserved_names=reserved, logger=lambda _: None);
+          required_actions = {'desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
+          missing_actions = sorted(required_actions - actions.names());
+          assert not missing_actions, f'Missing actions: {missing_actions}';
+          plugins = discover_plugins(Path('plugins'), reserved | actions.names(), logger=lambda _: None);
+          valid_plugins = {item['name'] for item in plugins.list_for_ui() if item['valid']};
+          required_plugins = {'smart_home','process_watch','mission_control'};
+          missing_plugins = sorted(required_plugins - valid_plugins);
+          assert not missing_plugins, f'Missing plugins: {missing_plugins}';
+          print('JARVIS action/plugin discovery OK')"
+      - name: Verify Windows audio and UI dependencies
+        run: >-
+          python -c "import comtypes, pycaw.pycaw, win32api, win32gui,
+          win32com.client, wmi, pywinauto, pygetwindow, win10toast"
+      - name: Construct and paint the JARVIS HUD offscreen
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m core._ui_runtime_smoke

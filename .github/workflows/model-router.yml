@@ -1,15 +1,61 @@
-name: Model router checks
+name: Model router and JARVIS capability checks
 
 on:
   pull_request:
     paths:
+      - "requirements.txt"
+      - "setup.py"
       - "core/model_router.py"
+      - "dashboard/server.py"
+      - "dashboard/static/app.html"
+      - "core/dashboard_auth_policy.py"
+      - "core/_dashboard_auth_tests.py"
+      - "core/dashboard_upload_policy.py"
+      - "core/_dashboard_upload_tests.py"
       - "core/gemini.py"
       - "core/_model_router_tests.py"
       - "core/_capability_tests.py"
       - "core/echo.py"
       - "core/desktop_context.py"
       - "core/_desktop_context_tests.py"
+      - "core/audio_devices.py"
+      - "core/_audio_devices_tests.py"
+      - "core/audio_recovery.py"
+      - "core/_audio_recovery_tests.py"
+      - "core/focus_context.py"
+      - "core/_focus_context_tests.py"
+      - "core/project_context.py"
+      - "core/_project_context_tests.py"
+      - "actions/system_monitor.py"
+      - "actions/_system_monitor_tests.py"
+      - "actions/workspace_mode.py"
+      - "actions/_workspace_mode_tests.py"
+      - "actions/status_briefing.py"
+      - "actions/_status_briefing_tests.py"
+      - "plugins/smart_home.py"
+      - "plugins/_smart_home_tests.py"
+      - "actions/reminder.py"
+      - "actions/_reminder_tests.py"
+      - "actions/desktop_awareness.py"
+      - "actions/_desktop_awareness_tests.py"
+      - "actions/project_status.py"
+      - "actions/_project_status_tests.py"
+      - "actions/windows_startup.py"
+      - "actions/_windows_startup_tests.py"
+      - "actions/routine_mode.py"
+      - "actions/_routine_mode_tests.py"
+      - "plugins/process_watch.py"
+      - "plugins/_process_watch_tests.py"
+      - "actions/proactive.py"
+      - "core/_proactive_tests.py"
+      - "core/wake_word.py"
+      - "core/_wake_word_tests.py"
+      - "core/appidentity.py"
+      - "core/_appidentity_tests.py"
+      - "core/live_session_policy.py"
+      - "core/_live_session_policy_tests.py"
+      - "core/communication_context.py"
+      - "core/_communication_context_tests.py"
       - "actions/screen_understanding.py"
       - "core/_screen_understanding_tests.py"
       - "actions/ui_interaction.py"
@@ -47,6 +93,7 @@ on:
       - "plugins/_mission_control_tests.py"
       - "core/prompt.txt"
       - "plugins/knowledge_vault.py"
+      - "plugins/_knowledge_vault_tests.py"
       - "memory/config_manager.py"
       - "memory/memory_manager.py"
       - "memory/_tests.py"
@@ -61,15 +108,36 @@ on:
       - "ui.py"
       - "main.py"
       - "actions/dev_agent.py"
-      - "actions/file_controller.py"
-      - "actions/_file_controller_tests.py"
+      - "actions/_dev_agent_safety_tests.py"
       - "actions/send_message.py"
       - "actions/_send_message_tests.py"
+      - "actions/open_app.py"
+      - "actions/_open_app_tests.py"
       - "actions/browser_control.py"
       - "actions/_browser_control_tests.py"
+      - "actions/computer_control.py"
+      - "actions/file_controller.py"
+      - "actions/_file_controller_tests.py"
+      - "actions/_computer_control_safety_tests.py"
       - "core/browser_safety.py"
       - "core/autonomy_policy.py"
       - "core/_autonomy_policy_tests.py"
+      - "core/mission_evidence.py"
+      - "core/project_path_policy.py"
+      - "core/code_checks.py"
+      - "core/project_env.py"
+      - "core/project_plan.py"
+      - "core/timeout_policy.py"
+      - "core/process_runner.py"
+      - "core/_process_runner_tests.py"
+      - "core/_timeout_policy_tests.py"
+      - "core/_project_plan_tests.py"
+      - "core/safe_file_write.py"
+      - "core/_safe_file_write_tests.py"
+      - "actions/code_helper.py"
+      - "core/_project_env_tests.py"
+      - "core/_project_path_policy_tests.py"
+      - "core/_mission_evidence_tests.py"
       - "core/_browser_safety_tests.py"
       - "actions/proactive.py"
       - "core/_proactive_tests.py"
@@ -99,25 +167,85 @@ on:
 
 jobs:
   router:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install lightweight offline test dependency
-        run: python -m pip install numpy
+        run: python -m pip install numpy psutil requests
       - name: Compile changed Python modules
         run: |
-          python -m py_compile actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_slider.py core/_ui_slider_tests.py actions/ui_tree.py core/_ui_tree_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py actions/ui_reasoning.py core/ui_reasoning.py core/_ui_reasoning_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/_mission_control_tests.py plugins/knowledge_vault.py ui.py main.py actions/dev_agent.py memory/memory_manager.py memory/_tests.py core/stt.py core/_stt_tests.py actions/background_monitor.py actions/_background_monitor_tests.py actions/send_message.py actions/_send_message_tests.py actions/file_controller.py actions/_file_controller_tests.py actions/browser_control.py actions/_browser_control_tests.py core/browser_safety.py core/_browser_safety_tests.py core/autonomy_policy.py core/_autonomy_policy_tests.py
+          python -m py_compile actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_slider.py core/_ui_slider_tests.py actions/ui_tree.py core/_ui_tree_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py core/model_router.py core/gemini.py core/_model_router_tests.py core/_capability_tests.py core/_proactive_tests.py actions/proactive.py core/echo.py core/desktop_context.py core/_desktop_context_tests.py core/audio_devices.py core/_audio_devices_tests.py core/audio_recovery.py core/_audio_recovery_tests.py core/focus_context.py core/_focus_context_tests.py core/project_context.py core/_project_context_tests.py actions/system_monitor.py actions/_system_monitor_tests.py actions/workspace_mode.py actions/_workspace_mode_tests.py actions/status_briefing.py actions/_status_briefing_tests.py plugins/smart_home.py plugins/_smart_home_tests.py actions/reminder.py actions/_reminder_tests.py actions/desktop_awareness.py actions/_desktop_awareness_tests.py actions/project_status.py actions/_project_status_tests.py actions/windows_startup.py actions/_windows_startup_tests.py actions/routine_mode.py actions/_routine_mode_tests.py plugins/process_watch.py plugins/_process_watch_tests.py actions/proactive.py core/_proactive_tests.py core/wake_word.py core/_wake_word_tests.py core/appidentity.py core/_appidentity_tests.py core/live_session_policy.py core/_live_session_policy_tests.py core/communication_context.py core/_communication_context_tests.py actions/screen_understanding.py core/_screen_understanding_tests.py actions/ui_interaction.py actions/ui_reasoning.py core/ui_reasoning.py core/_ui_reasoning_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py actions/ui_sequence.py core/_ui_sequence_tests.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_confirm_tests.py memory/config_manager.py memory/conversation_history.py providers/llm_openai.py plugins/conversation_history.py plugins/mission_control.py plugins/_mission_control_tests.py plugins/knowledge_vault.py plugins/_knowledge_vault_tests.py ui.py main.py actions/dev_agent.py actions/_dev_agent_safety_tests.py memory/memory_manager.py memory/_tests.py core/stt.py core/_stt_tests.py actions/background_monitor.py actions/_background_monitor_tests.py actions/send_message.py actions/_send_message_tests.py actions/open_app.py actions/_open_app_tests.py actions/browser_control.py actions/_browser_control_tests.py actions/computer_control.py actions/_computer_control_safety_tests.py actions/file_controller.py actions/_file_controller_tests.py core/browser_safety.py core/_browser_safety_tests.py core/autonomy_policy.py core/_autonomy_policy_tests.py core/mission_evidence.py core/_mission_evidence_tests.py core/engine_policy.py core/_engine_policy_tests.py dashboard/server.py core/dashboard_policy.py core/_dashboard_policy_tests.py core/dashboard_auth_policy.py core/_dashboard_auth_tests.py core/dashboard_upload_policy.py core/_dashboard_upload_tests.py core/execution_policy.py core/_execution_policy_tests.py core/code_checks.py core/project_path_policy.py core/_project_path_policy_tests.py core/project_env.py core/_project_env_tests.py core/project_plan.py core/_project_plan_tests.py core/timeout_policy.py core/_timeout_policy_tests.py core/process_runner.py core/_process_runner_tests.py core/safe_file_write.py core/_safe_file_write_tests.py actions/code_helper.py
       - name: Run offline router tests
         run: python -m core._model_router_tests
+      - name: Run fail-closed engine policy tests
+        run: python -m core._engine_policy_tests
+      - name: Run dashboard network policy tests
+        run: python -m core._dashboard_policy_tests
+      - name: Run dashboard upload quota tests
+        run: python -m core._dashboard_upload_tests
+      - name: Run dashboard session auth tests
+        run: python -m core._dashboard_auth_tests
+      - name: Run code execution confirmation policy tests
+        run: python -m core._execution_policy_tests
+      - name: Run project file path boundary tests
+        run: python -m core._project_path_policy_tests
+      - name: Run isolated project environment tests
+        run: python -m core._project_env_tests
+      - name: Run project plan validation tests
+        run: python -m core._project_plan_tests
+      - name: Run bounded execution timeout tests
+        run: python -m core._timeout_policy_tests
+      - name: Run bounded process runner tests
+        run: python -m core._process_runner_tests
+      - name: Run offline dev-agent launch safety tests
+        run: python -m actions._dev_agent_safety_tests
+      - name: Run safe code-file write and undo tests
+        run: python -m core._safe_file_write_tests
       - name: Run offline capability tests
         run: python -m core._capability_tests
       - name: Run offline proactive tests
         run: python -m core._proactive_tests
       - name: Run offline desktop context tests
         run: python -m core._desktop_context_tests
+      - name: Run audio endpoint selection tests
+        run: python -m core._audio_devices_tests
+      - name: Run audio stream recovery tests
+        run: python -m core._audio_recovery_tests
+      - name: Run desktop focus context tests
+        run: python -m core._focus_context_tests
+      - name: Run metadata-only project context tests
+        run: python -m core._project_context_tests
+      - name: Run Windows system health tests
+        run: python -m actions._system_monitor_tests
+      - name: Run Windows workspace profile tests
+        run: python -m actions._workspace_mode_tests
+      - name: Run integrated status briefing tests
+        run: python -m actions._status_briefing_tests
+      - name: Run restricted Home Assistant light tests
+        run: python -m plugins._smart_home_tests
+      - name: Run Windows reminder management tests
+        run: python -m actions._reminder_tests
+      - name: Run on-demand desktop awareness tests
+        run: python -m actions._desktop_awareness_tests
+      - name: Run on-demand project status tests
+        run: python -m actions._project_status_tests
+      - name: Run persistent process watcher tests
+        run: python -m plugins._process_watch_tests
+      - name: Run Windows auto-start management tests
+        run: python -m actions._windows_startup_tests
+      - name: Run JARVIS multi-device routine tests
+        run: python -m actions._routine_mode_tests
+      - name: Run bounded wake-word installation tests
+        run: python -m core._wake_word_tests
+      - name: Run application process identity tests
+        run: python -m core._appidentity_tests
+      - name: Run Gemini Live GoAway reconnect policy tests
+        run: python -m core._live_session_policy_tests
+      - name: Run communication microphone privacy tests
+        run: python -m core._communication_context_tests
       - name: Run offline screen understanding tests
         run: python -m core._screen_understanding_tests
       - name: Run offline UI interaction tests
@@ -152,8 +280,8 @@ jobs:
         run: python -m core._ui_reasoning_tests
       - name: Run Mission Control reliability tests
         run: python -m plugins._mission_control_tests
-      - name: Run file-controller safety tests
-        run: python -m actions._file_controller_tests
+      - name: Run mission evidence binding tests
+        run: python -m core._mission_evidence_tests
       - name: Run outbound message confirmation tests
         run: python -m actions._send_message_tests
       - name: Run autonomy and minimal-confirmation policy tests
@@ -162,8 +290,16 @@ jobs:
         run: python -m core._browser_safety_tests
       - name: Run browser behavior safety tests
         run: python -m actions._browser_control_tests
+      - name: Run cross-platform application launcher tests
+        run: python -m actions._open_app_tests
+      - name: Run desktop-control safety tests
+        run: python -m actions._computer_control_safety_tests
+      - name: Run file-controller untrusted data tests
+        run: python -m actions._file_controller_tests
       - name: Run memory store reliability tests
         run: python -m memory._tests
+      - name: Run Knowledge Vault Undo safety tests
+        run: python -m plugins._knowledge_vault_tests
       - name: Run background monitor reliability tests
         run: python -m actions._background_monitor_tests
       - name: Run Whisper device policy tests
@@ -181,6 +317,22 @@ jobs:
       - name: Install Windows UI Automation dependencies
         run: python -m pip install pywinauto pywin32
       - name: Compile UI Automation modules
-        run: python -m py_compile actions/file_controller.py actions/_file_controller_tests.py actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_slider.py core/_ui_slider_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py actions/screen_understanding.py actions/ui_interaction.py actions/ui_reasoning.py core/ui_reasoning.py core/_ui_reasoning_tests.py actions/ui_sequence.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_screen_understanding_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py core/_confirm_tests.py core/_ui_sequence_tests.py core/autonomy_policy.py core/_autonomy_policy_tests.py core/tts.py core/tts_resource_policy.py core/_tts_resource_tests.py
+        run: python -m py_compile actions/ui_spinner.py core/_ui_spinner_tests.py actions/ui_slider.py core/_ui_slider_tests.py actions/ui_checkbox.py core/_ui_checkbox_tests.py actions/ui_radio.py core/_ui_radio_tests.py actions/ui_tab.py core/_ui_tab_tests.py actions/ui_list.py core/_ui_list_tests.py core/communication_context.py core/_communication_context_tests.py actions/screen_understanding.py actions/ui_interaction.py actions/ui_reasoning.py core/ui_reasoning.py core/_ui_reasoning_tests.py actions/ui_sequence.py actions/ui_dropdown.py core/_ui_dropdown_tests.py actions/ui_calendar.py core/_ui_calendar_tests.py actions/ui_time.py core/_ui_time_tests.py actions/ui_picker_diagnostics.py core/_ui_picker_diagnostics_tests.py core/confirm.py core/_screen_understanding_tests.py core/_ui_interaction_tests.py core/_ui_interaction_windows_tests.py core/_confirm_tests.py core/_ui_sequence_tests.py core/project_env.py core/_project_env_tests.py core/project_plan.py core/_project_plan_tests.py core/timeout_policy.py core/_timeout_policy_tests.py core/process_runner.py core/_process_runner_tests.py core/safe_file_write.py core/_safe_file_write_tests.py actions/dev_agent.py actions/_dev_agent_safety_tests.py actions/computer_control.py actions/_computer_control_safety_tests.py actions/file_controller.py actions/_file_controller_tests.py actions/code_helper.py core/autonomy_policy.py core/_autonomy_policy_tests.py core/tts.py core/tts_resource_policy.py core/_tts_resource_tests.py
       - name: Run native Windows UI Automation integration tests
         run: python -m core._ui_interaction_windows_tests
+      - name: Run isolated project environment tests on Windows
+        run: python -m core._project_env_tests
+      - name: Run project plan validation tests on Windows
+        run: python -m core._project_plan_tests
+      - name: Run bounded execution timeout tests on Windows
+        run: python -m core._timeout_policy_tests
+      - name: Run bounded process runner tests on Windows
+        run: python -m core._process_runner_tests
+      - name: Run safe code-file write and undo tests on Windows
+        run: python -m core._safe_file_write_tests
+      - name: Run dev-agent safety tests on Windows
+        run: python -m actions._dev_agent_safety_tests
+      - name: Run desktop-control safety tests on Windows
+        run: python -m actions._computer_control_safety_tests
+      - name: Run file-controller untrusted data tests on Windows
+        run: python -m actions._file_controller_tests

@@ -41,6 +41,41 @@ def _is_fullscreen_rect(left: int, top: int, right: int, bottom: int,
     )
 
 
+def _is_fullscreen_monitor_rect(
+    left: int, top: int, right: int, bottom: int,
+    monitor_left: int, monitor_top: int, monitor_right: int, monitor_bottom: int,
+) -> bool:
+    """Detect borderless fullscreen against one monitor, including negative origins."""
+    width = max(0, int(right) - int(left))
+    height = max(0, int(bottom) - int(top))
+    monitor_width = int(monitor_right) - int(monitor_left)
+    monitor_height = int(monitor_bottom) - int(monitor_top)
+    if monitor_width <= 0 or monitor_height <= 0:
+        return False
+    return (
+        int(left) <= int(monitor_left) + 5
+        and int(top) <= int(monitor_top) + 5
+        and int(right) >= int(monitor_right) - 5
+        and int(bottom) >= int(monitor_bottom) - 5
+        and width >= monitor_width * 0.95
+        and height >= monitor_height * 0.95
+    )
+
+
+def _rect_within_primary_display(
+    left: int, top: int, right: int, bottom: int,
+    screen_width: int, screen_height: int,
+) -> bool:
+    """Only use primary-screen fallback when the window is actually on it."""
+    width, height = int(screen_width), int(screen_height)
+    if width <= 0 or height <= 0:
+        return False
+    return (
+        int(left) >= -5 and int(top) >= -5
+        and int(right) <= width + 5 and int(bottom) <= height + 5
+    )
+
+
 def get_desktop_context(include_app: bool = True) -> dict:
     """Read idle time and foreground-window geometry, optionally process name.
 
@@ -52,7 +87,7 @@ def get_desktop_context(include_app: bool = True) -> dict:
     if os.name != "nt":
         return {
             "available": False, "idle_seconds": None,
-            "foreground_app": "", "fullscreen": False,
+            "foreground_app": "", "fullscreen": False, "fullscreen_known": False,
         }
 
     try:
@@ -71,6 +106,14 @@ def get_desktop_context(include_app: bool = True) -> dict:
                 ("right", wintypes.LONG), ("bottom", wintypes.LONG),
             ]
 
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", RECT),
+                ("rcWork", RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         user32.GetLastInputInfo.argtypes = [ctypes.POINTER(LASTINPUTINFO)]
@@ -82,6 +125,10 @@ def get_desktop_context(include_app: bool = True) -> dict:
         user32.GetWindowThreadProcessId.restype = wintypes.DWORD
         user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
         user32.GetWindowRect.restype = wintypes.BOOL
+        user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+        user32.MonitorFromWindow.restype = wintypes.HANDLE
+        user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
+        user32.GetMonitorInfoW.restype = wintypes.BOOL
         user32.GetSystemMetrics.argtypes = [ctypes.c_int]
         user32.GetSystemMetrics.restype = ctypes.c_int
         kernel32.GetTickCount.restype = wintypes.DWORD
@@ -91,7 +138,7 @@ def get_desktop_context(include_app: bool = True) -> dict:
         if not user32.GetLastInputInfo(ctypes.byref(info)):
             return {
                 "available": True, "idle_seconds": None,
-                "foreground_app": "", "fullscreen": False,
+                "foreground_app": "", "fullscreen": False, "fullscreen_known": False,
             }
 
         idle_seconds = _idle_seconds_from_ticks(
@@ -99,14 +146,37 @@ def get_desktop_context(include_app: bool = True) -> dict:
         )
         hwnd = user32.GetForegroundWindow()
         fullscreen = False
+        fullscreen_known = False
         app = ""
         if hwnd:
             rect = RECT()
             if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                fullscreen = _is_fullscreen_rect(
-                    rect.left, rect.top, rect.right, rect.bottom,
-                    user32.GetSystemMetrics(0), user32.GetSystemMetrics(1),
-                )
+                # GetSystemMetrics(0/1) describes only the primary display.
+                # Ask Windows for the monitor containing this window so a
+                # borderless game on a secondary/negative-origin display is
+                # recognised too.
+                monitor = user32.MonitorFromWindow(hwnd, 2)  # MONITOR_DEFAULTTONEAREST
+                monitor_info = MONITORINFO()
+                monitor_info.cbSize = ctypes.sizeof(MONITORINFO)
+                if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(monitor_info)):
+                    bounds = monitor_info.rcMonitor
+                    fullscreen_known = True
+                    fullscreen = _is_fullscreen_monitor_rect(
+                        rect.left, rect.top, rect.right, rect.bottom,
+                        bounds.left, bounds.top, bounds.right, bounds.bottom,
+                    )
+                else:
+                    screen_width = user32.GetSystemMetrics(0)
+                    screen_height = user32.GetSystemMetrics(1)
+                    if _rect_within_primary_display(
+                            rect.left, rect.top, rect.right, rect.bottom,
+                            screen_width, screen_height,
+                    ):
+                        fullscreen_known = True
+                        fullscreen = _is_fullscreen_rect(
+                            rect.left, rect.top, rect.right, rect.bottom,
+                            screen_width, screen_height,
+                        )
             if include_app:
                 pid = wintypes.DWORD()
                 if user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) and pid.value:
@@ -121,11 +191,12 @@ def get_desktop_context(include_app: bool = True) -> dict:
             "idle_seconds": idle_seconds,
             "foreground_app": app,
             "fullscreen": fullscreen,
+            "fullscreen_known": fullscreen_known,
         }
     except Exception:
         return {
             "available": True, "idle_seconds": None,
-            "foreground_app": "", "fullscreen": False,
+            "foreground_app": "", "fullscreen": False, "fullscreen_known": False,
         }
 
 
@@ -141,3 +212,30 @@ def desktop_is_idle(context: object,
     except (TypeError, ValueError):
         return False
     return seconds >= max(0.0, float(minimum_seconds))
+
+def should_run_proactive_checkin(
+    session_available: bool,
+    communication_active: bool,
+    phone_active: bool,
+    context: object,
+) -> bool:
+    """Allow a spoken check-in only with a live session and verified idle desktop.
+
+    Wake-word sleep closes only the microphone path. It must not suppress an
+    explicitly enabled proactive check-in; the local idle/context gates still
+    prevent speaking during active work or a communication session.
+    """
+    return (
+        bool(session_available)
+        and not communication_active
+        and not phone_active
+        and should_allow_proactive_interrupt(context)
+    )
+
+def should_allow_proactive_interrupt(context: object) -> bool:
+    """Allow unsolicited voice only when the desktop sensor positively confirms idle."""
+    return (
+        isinstance(context, dict)
+        and context.get("fullscreen_known") is True
+        and desktop_is_idle(context) is True
+    )

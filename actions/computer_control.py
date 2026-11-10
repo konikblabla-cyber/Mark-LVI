@@ -1,6 +1,7 @@
 #computer_control.py
 import io
 import json
+import ntpath
 import platform
 import re
 import string
@@ -15,7 +16,7 @@ import time
 import random
 from pathlib import Path
 
-from core import appidentity, outcome
+from core import appidentity, confirm, outcome
 from core.lazyimport import LazyModule, installed
 
 # pyautogui and pyperclip are imported on first USE, not at launch — see
@@ -23,6 +24,19 @@ from core.lazyimport import LazyModule, installed
 # "is it installed?" and still answer without importing anything.
 _PYAUTOGUI = installed("pyautogui")
 _PYPERCLIP = installed("pyperclip")
+
+
+def _safe_print(message: object) -> None:
+    """Write diagnostics without letting console codepages crash actions."""
+    try:
+        stream = sys.stdout
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        rendered = str(message).encode(encoding, errors="backslashreplace").decode(encoding)
+        stream.write(rendered + "\n")
+    except Exception:
+        # Logging must never break a desktop action.
+        pass
+
 
 
 def _configure_pyautogui(module) -> None:
@@ -92,10 +106,11 @@ def _require_pyautogui():
 
 
 def _require_pyperclip() -> bool:
-    """Is the clipboard usable? Returns a bool rather than raising, because
-    every caller already has a hotkey fallback written for the case where it
-    is not — turning that into an exception would break the path built to
-    survive it."""
+    """Whether the optional clipboard module is installed.
+
+    Runtime clipboard access can still fail when the OS backend (for example
+    xclip/xsel on Linux) is missing, so callers must catch backend errors too.
+    """
     return _PYPERCLIP
 
 _FIRST_NAMES = [
@@ -180,34 +195,66 @@ def _type(text: str, interval: float = 0.03) -> str:
     return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
-def _smart_type(text: str, clear_first: bool = True) -> str:
+def _smart_type(text: str, clear_first: bool = False) -> str:
     _require_pyautogui()
     if clear_first:
         _clear_field()
         time.sleep(0.1)
 
     if len(text) > 20 and _require_pyperclip():
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        paste_key = "command" if _get_os() == "mac" else "ctrl"
-        pyautogui.hotkey(paste_key, "v")
-        return f"Smart-typed (clipboard): {text[:60]}{'…' if len(text) > 60 else ''}"
+        try:
+            pyperclip.copy(text)
+            time.sleep(0.1)
+            paste_key = "command" if _get_os() == "mac" else "ctrl"
+            pyautogui.hotkey(paste_key, "v")
+            return f"Smart-typed (clipboard): {text[:60]}{'…' if len(text) > 60 else ''}"
+        except Exception as exc:
+            _safe_print(f"[ComputerControl] clipboard backend unavailable; using key typing ({type(exc).__name__})")
 
     pyautogui.typewrite(text, interval=0.04)
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
+def _screen_point(x, y) -> tuple[int, int] | None:
+    """Accept only explicit coordinates inside the current display bounds."""
+    if x is None or y is None or isinstance(x, bool) or isinstance(y, bool):
+        return None
+    try:
+        px, py = int(x), int(y)
+        if float(x) != px or float(y) != py:
+            return None
+        width, height = pyautogui.size()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+    except Exception:
+        return None
+    if width <= 0 or height <= 0 or not (0 <= px < width and 0 <= py < height):
+        return None
+    return px, py
+
+
 def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
     _require_pyautogui()
-    if x is not None and y is not None:
-        pyautogui.click(x, y, button=button, clicks=clicks)
-        return f"{'Double-c' if clicks == 2 else 'C'}licked ({x}, {y}) [{button}]"
-    pyautogui.click(button=button, clicks=clicks)
-    return f"Clicked at current position [{button}]"
+    point = _screen_point(x, y)
+    if point is None:
+        return outcome.failed(
+            "computer_control",
+            "click requires explicit x/y coordinates inside the current screen; "
+            "a click at the unknown current pointer position is refused",
+        )
+    button = str(button or "left").strip().lower()
+    if button not in {"left", "right", "middle"} or clicks not in {1, 2}:
+        return outcome.failed("computer_control", "unsupported mouse button or click count")
+    px, py = point
+    pyautogui.click(px, py, button=button, clicks=clicks)
+    return f"{'Double-c' if clicks == 2 else 'C'}licked ({px}, {py}) [{button}]"
 
 
 def _hotkey(*keys) -> str:
     _require_pyautogui()
+    if (not keys or len(keys) > 4
+            or any(not isinstance(k, str) or not k.strip() or len(k) > 24 for k in keys)):
+        return outcome.failed("computer_control", "invalid or oversized hotkey")
     pyautogui.hotkey(*keys)
     return f"Hotkey: {'+'.join(keys)}"
 
@@ -228,34 +275,48 @@ def _scroll(direction: str = "down", amount: int = 3) -> str:
 
 def _move(x: int, y: int, duration: float = 0.3) -> str:
     _require_pyautogui()
-    pyautogui.moveTo(x, y, duration=duration)
-    return f"Mouse → ({x}, {y})"
+    point = _screen_point(x, y)
+    if point is None:
+        return outcome.failed("computer_control", "mouse target is outside the current screen")
+    px, py = point
+    pyautogui.moveTo(px, py, duration=duration)
+    return f"Mouse → ({px}, {py})"
 
 
 def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.5) -> str:
     _require_pyautogui()
-    pyautogui.moveTo(x1, y1, duration=0.2)
-    pyautogui.dragTo(x2, y2, duration=duration, button="left")
-    return f"Dragged ({x1},{y1}) → ({x2},{y2})"
+    start = _screen_point(x1, y1)
+    end = _screen_point(x2, y2)
+    if start is None or end is None:
+        return outcome.failed("computer_control", "drag endpoints must be inside the current screen")
+    pyautogui.moveTo(*start, duration=0.2)
+    pyautogui.dragTo(*end, duration=duration, button="left")
+    return f"Dragged ({start[0]},{start[1]}) → ({end[0]},{end[1]})"
 
 
 def _clipboard_get() -> str:
-    if _require_pyperclip():
-        return pyperclip.paste()
-    _hotkey("ctrl", "c")
-    time.sleep(0.2)
-    return "(copied — pyperclip unavailable for read)"
+    if not _require_pyperclip():
+        return outcome.failed("computer_control", "clipboard reading is unavailable; install/repair pyperclip and the OS clipboard backend (xclip or xsel on Linux)")
+    try:
+        return str(pyperclip.paste())
+    except Exception as exc:
+        return outcome.failed("computer_control", f"clipboard read failed ({type(exc).__name__}); check the OS clipboard backend")
 
 
 def _clipboard_paste(text: str) -> str:
+    _require_pyautogui()
+    value = str(text or "")
     if _require_pyperclip():
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        _require_pyautogui()
-        paste_key = "command" if _get_os() == "mac" else "ctrl"
-        pyautogui.hotkey(paste_key, "v")
-        return f"Pasted: {text[:60]}{'…' if len(text) > 60 else ''}"
-    return "pyperclip not available"
+        try:
+            pyperclip.copy(value)
+            time.sleep(0.1)
+            paste_key = "command" if _get_os() == "mac" else "ctrl"
+            pyautogui.hotkey(paste_key, "v")
+            return f"Pasted: {value[:60]}{'…' if len(value) > 60 else ''}"
+        except Exception as exc:
+            _safe_print(f"[ComputerControl] clipboard backend unavailable; typing text instead ({type(exc).__name__})")
+    pyautogui.typewrite(value, interval=0.04)
+    return f"Typed instead of clipboard paste: {value[:60]}{'…' if len(value) > 60 else ''}"
 
 
 def _screenshot(save_path: str | None = None) -> str:
@@ -275,59 +336,38 @@ def _clear_field() -> str:
     return "Field cleared"
 
 def _focus_window(title: str) -> str:
-    os_name = _get_os()
-
-    if os_name == "windows":
-        try:
-            script = f'(New-Object -ComObject WScript.Shell).AppActivate("{title}")'
-            subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True, timeout=5, **_WIN_HIDE,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (Windows) failed: {e}"
-
-    if os_name == "mac":
-        script = (
-            f'tell application "System Events" to '
-            f'set frontmost of (first process whose name contains "{title}") to true'
+    """Focus a uniquely identified running process without interpolating user text into shell code."""
+    query = str(title or "").strip()
+    if not query:
+        return outcome.failed("computer_control", "no window or application name was supplied")
+    try:
+        matches = appidentity.running(query)
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control", f"could not safely inspect running applications ({type(exc).__name__})"
         )
-        try:
-            subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (macOS) failed: {e}"
+    if not matches:
+        return outcome.failed("computer_control", f"no visible running window matched '{query[:100]}'")
 
-    if os_name == "linux":
-        try:
-            result = subprocess.run(
-                ["wmctrl", "-a", title],
-                capture_output=True, timeout=5,
-            )
-            if result.returncode == 0:
-                time.sleep(0.3)
-                return f"Focused window: {title}"
-        except FileNotFoundError:
-            pass
-        try:
-            result = subprocess.run(
-                ["xdotool", "search", "--name", title, "windowactivate"],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except FileNotFoundError:
-            return "focus_window (Linux) requires wmctrl or xdotool"
-        except Exception as e:
-            return f"focus_window (Linux) failed: {e}"
+    best_score = matches[0].score
+    best = [item for item in matches if item.score == best_score]
+    if len(best) != 1:
+        return outcome.ask(
+            "computer_control",
+            f"more than one window matches '{query[:80]}'; name the application or window more precisely",
+            candidates=len(best),
+        )
 
-    return f"focus_window: unknown OS '{os_name}'"
+    match = best[0]
+    try:
+        focused = appidentity.focus(match)
+    except Exception as exc:
+        return outcome.failed("computer_control", f"window focus failed ({type(exc).__name__})")
+    if not focused:
+        return outcome.failed(
+            "computer_control", f"could not verify focus for {match.label}", application=match.label
+        )
+    return outcome.done("computer_control", focused=match.label, verified=True)
 
 def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
     """Close the application the user named — that one, and never this one.
@@ -421,7 +461,7 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
                 f"{', '.join(tied[:4])} - which one should be closed?",
                 app=app_name, candidates=len(tied),
             )
-        print(f"[ComputerControl] close_app: '{app_name}' -> {target_name} "
+        _safe_print(f"[ComputerControl] close_app: '{app_name}' -> {target_name} "
               f"(also matched: {', '.join(n for n, _ in ranked[1:5])})")
 
     closed, still_open, reason = 0, 0, ""
@@ -459,7 +499,7 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
 def _screen_find(description: str) -> tuple[int, int] | None:
     api_key = _get_api_key()
     if not api_key:
-        print("[ComputerControl] ⚠️ No API key for screen_find")
+        _safe_print("[ComputerControl] ⚠️ No API key for screen_find")
         return None
 
     try:
@@ -497,9 +537,105 @@ def _screen_find(description: str) -> tuple[int, int] | None:
             return int(match.group(1)), int(match.group(2))
 
     except Exception as e:
-        print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
+        _safe_print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
 
     return None
+
+_INPUT_ACTIONS = {
+    "type", "smart_type", "click", "left_click", "double_click",
+    "right_click", "move", "drag", "hotkey", "press", "scroll",
+    "copy", "paste", "screen_click", "clear_field",
+}
+
+
+def _app_process_token(value: object) -> str:
+    """Compare executable basenames, accepting an optional .exe suffix."""
+    name = ntpath.basename(str(value or "").strip()).casefold()
+    stem, suffix = ntpath.splitext(name)
+    return stem if suffix in {".exe", ".app"} else name
+
+
+def _foreground_app() -> str:
+    """Read the active executable name without capturing window titles or content."""
+    try:
+        from core.desktop_context import get_desktop_context
+        context = get_desktop_context(include_app=True)
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"could not inspect the foreground application ({type(exc).__name__})",
+        )
+    if not isinstance(context, dict) or not context.get("available"):
+        return outcome.failed(
+            "computer_control",
+            "foreground process inspection is unavailable on this operating system",
+        )
+    name = str(context.get("foreground_app") or "").strip()
+    if not name:
+        return outcome.failed(
+            "computer_control",
+            "the active application's process name could not be identified",
+        )
+    return outcome.done(
+        "computer_control", foreground_app=name, verified=True,
+        note="Use this exact process name as target_app for the next input action.",
+    )
+
+def _input_window_guard(target_app: str | None = None) -> str:
+    """Allow input only when the explicitly named target is foreground on Windows."""
+    # Security checks must use the actual host OS, never an editable config value.
+    if platform.system().casefold() != "windows":
+        return ""
+    expected = _app_process_token(target_app)
+    if not expected:
+        return outcome.failed(
+            "computer_control",
+            "target_app is required for desktop input; identify the intended application "
+            "and pass its executable name (for example notepad.exe); no input was sent",
+        )
+    try:
+        from core.desktop_context import get_desktop_context
+        context = get_desktop_context(include_app=True)
+        foreground = str(context.get("foreground_app") or "").strip()
+        if not context.get("available") or not foreground:
+            return outcome.failed(
+                "computer_control",
+                "foreground application could not be identified safely; no input was sent",
+            )
+        foreground_token = _app_process_token(foreground)
+        own_exes = {
+            _app_process_token(exe)
+            for exe in appidentity.own_exes()
+            if exe
+        }
+        own_exes.add(_app_process_token(sys.executable))
+        if foreground_token in own_exes:
+            return outcome.failed(
+                "computer_control",
+                "JARVIS is the active window; refusing synthetic input into its own interface",
+                foreground_app=foreground,
+            )
+        if foreground_token != expected:
+            return outcome.failed(
+                "computer_control",
+                "active application does not match the requested target; no input was sent",
+                foreground_app=foreground,
+                expected_app=str(target_app)[:100],
+            )
+        return ""
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"foreground safety check failed ({type(exc).__name__}); no input was sent",
+        )
+
+
+def _run_confirmed_input(action, target_app: str | None = None):
+    """Recheck the exact target application when delayed HUD approval is accepted."""
+    blocked = _input_window_guard(target_app)
+    return blocked if blocked else action()
+
+
 
 def computer_control(
     parameters: dict,
@@ -521,15 +657,16 @@ def computer_control(
       amount        : scroll amount (default: 3)
       seconds       : wait duration
       title         : window title fragment for focus_window
+      target_app    : on Windows, exact foreground executable returned by foreground_app
       description   : natural-language element description for screen_find/click
       type          : data type for random_data
       field         : memory field name for user_data
-      clear_first   : bool, clear field before typing (default: true)
+      clear_first   : bool, replace active text only after confirmation (default: false)
       path          : save path for screenshot (must be inside home dir)
 
     Actions:
       type          — type text at cursor
-      smart_type    — clear field + type (clipboard-backed)
+      smart_type    — type text; replacing all active text requires confirmation
       click         — left click
       double_click  — double left click
       right_click   — right click
@@ -542,7 +679,7 @@ def computer_control(
       paste         — write + paste clipboard
       screenshot    — capture screen (safe path only)
       wait          — sleep N seconds
-      clear_field   — select-all + delete
+      clear_field   — select-all + delete (HUD confirmation required)
       focus_window  — bring window to foreground
       screen_find   — AI element finder (returns x,y)
       screen_click  — AI element finder + click
@@ -555,24 +692,41 @@ def computer_control(
     if not action:
         return "No action specified for computer_control."
 
+    target_app = params.get("target_app")
+    if action in _INPUT_ACTIONS:
+        blocked = _input_window_guard(target_app)
+        if blocked:
+            return blocked
+
     if player:
         # Terminal, not the HUD: the activity log is for the conversation and
         # for problems, not a receipt for every keystroke. See
         # core/outcome.is_problem().
-        print(f"[ComputerControl] {action}")
+        _safe_print(f"[ComputerControl] {action}")
 
-    print(f"[ComputerControl] ▶ {action}  {params}")
+    _safe_print(f"[ComputerControl] action={action}")
 
     try:
+
+        if action == "foreground_app":
+            return _foreground_app()
 
         if action == "type":
             return _type(params.get("text", ""))
 
         if action == "smart_type":
-            return _smart_type(
-                params.get("text", ""),
-                clear_first=params.get("clear_first", True),
-            )
+            text = str(params.get("text", "") or "")
+            clear_first = bool(params.get("clear_first", False))
+            if clear_first:
+                return confirm.request(
+                    key="computer_control.smart_type.replace_text",
+                    title="Confirm replacing active text",
+                    detail="This selects all text in the active application before typing the replacement. Confirm only if the intended field or document is active.",
+                    run=lambda: _run_confirmed_input(
+                        lambda: _smart_type(text, clear_first=True), target_app
+                    ),
+                )
+            return _smart_type(text, clear_first=False)
 
         if action in ("click", "left_click"):
             return _click(params.get("x"), params.get("y"), "left", 1)
@@ -593,12 +747,37 @@ def computer_control(
             )
 
         if action == "hotkey":
-            raw  = params.get("keys", "")
-            keys = [k.strip() for k in raw.split("+")] if isinstance(raw, str) else raw
-            return _hotkey(*keys)
+            raw = params.get("keys", "")
+            keys = [k.strip().lower() for k in raw.split("+")] if isinstance(raw, str) else raw
+            dangerous = {
+                frozenset(("alt", "f4")), frozenset(("ctrl", "w")),
+                frozenset(("ctrl", "q")), frozenset(("win", "l")),
+                frozenset(("ctrl", "shift", "delete")),
+                frozenset(("ctrl", "alt", "delete")),
+                frozenset(("shift", "delete")),
+                frozenset(("win", "r")),
+            }
+            if isinstance(keys, list) and frozenset(keys) in dangerous:
+                return confirm.request(
+                    key="computer_control.dangerous_hotkey",
+                    title="Confirm potentially disruptive keyboard shortcut",
+                    detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
+                    run=lambda: _run_confirmed_input(lambda: _hotkey(*keys), target_app),
+                )
+            return _hotkey(*keys) if isinstance(keys, list) else outcome.failed(
+                "computer_control", "hotkey must be supplied as a plus-separated string"
+            )
 
         if action == "press":
-            return _press(params.get("key", "enter"))
+            key = str(params.get("key", "enter") or "enter").strip().lower()
+            if key == "delete":
+                return confirm.request(
+                    key="computer_control.delete_key",
+                    title="Confirm Delete key",
+                    detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
+                    run=lambda: _run_confirmed_input(lambda: _press(key), target_app),
+                )
+            return _press(key)
 
         if action == "scroll":
             return _scroll(
@@ -624,6 +803,12 @@ def computer_control(
             coords = _screen_find(desc)
             if coords:
                 time.sleep(0.2)
+                # Screenshot analysis may take seconds. Recheck the exact foreground
+                # process immediately before the click to avoid targeting a newly
+                # focused window with coordinates from the previous screenshot.
+                blocked = _input_window_guard(target_app)
+                if blocked:
+                    return blocked
                 _click(x=coords[0], y=coords[1])
                 return f"Clicked '{desc}' at {coords}"
             return f"Element not found on screen: '{desc}'"
@@ -635,7 +820,12 @@ def computer_control(
             return f"Waited {secs}s"
 
         if action == "clear_field":
-            return _clear_field()
+            return confirm.request(
+                key="computer_control.clear_field",
+                title="Confirm clearing active text",
+                detail="This selects all text in the active application and deletes it. Confirm only if the intended field or document is active.",
+                run=lambda: _run_confirmed_input(_clear_field, target_app),
+            )
 
         if action == "focus_window":
             return _focus_window(params.get("title", ""))
@@ -649,7 +839,7 @@ def computer_control(
         if action == "random_data":
             dt     = params.get("type", "name")
             result = _random_data(dt)
-            print(f"[ComputerControl] 🎲 random {dt} → {result}")
+            _safe_print(f"[ComputerControl] 🎲 random {dt} → {result}")
             return result
 
         if action == "user_data":
@@ -658,13 +848,13 @@ def computer_control(
             value   = profile.get(field, "")
             if not value:
                 value = _random_data(field)
-                print(f"[ComputerControl] ⚠️ No '{field}' in memory, using random: {value}")
+                _safe_print(f"[ComputerControl] ⚠️ No '{field}' in memory, using random: {value}")
             return value
 
         return f"Unknown action: '{action}'"
 
     except Exception as e:
-        print(f"[ComputerControl] ❌ {action}: {e}")
+        _safe_print(f"[ComputerControl] ❌ {action}: {e}")
         return f"computer_control '{action}' failed: {e}"
 
 
@@ -672,7 +862,11 @@ def computer_control(
 TOOL = {
     "name": "computer_control",
     "description": (
-        "Direct computer control: type, click, hotkeys, scroll, move mouse, "
+        "Direct computer control: type, click, hotkeys, scroll, move mouse. "
+        "On Windows, before typing or clicking, call action='foreground_app' and pass its exact "
+        "executable name as target_app; the active window is checked before input. "
+        "This foreground-identity guard is Windows-only. On macOS/Linux, do not call "
+        "foreground_app as a prerequisite; attempt only actions the OS actually permits. "
         "screenshots, find elements on screen, and CLOSE an application. "
         "Use action='close_app' with 'app_name' whenever the user asks to "
         "close, quit or exit a program - 'close Spotify', 'quit Chrome'. "
@@ -687,14 +881,14 @@ TOOL = {
     # Used in place of `description` only when a small model is on a tool
     # budget - Gemini still gets the full text. See providers/schema.py.
     "brief": (
-        "Controls the computer: type, click, hotkeys, scroll, screenshots, and close_app to close a named application (put its name in 'app_name'). Use open_app to open one."
+        "Controls the computer. On Windows, inspect foreground_app and pass target_app before typing or clicking; on macOS/Linux, use only OS-permitted input actions. Use close_app to close a named app and open_app to launch one."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | random_data | user_data"
+                "description": "foreground_app | type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | random_data | user_data"
             },
             "app_name": {
                 "type": "STRING",
@@ -711,6 +905,10 @@ TOOL = {
                     "application was meant AND the user answered. Pass their "
                     "answer in 'app_name'."
                 )
+            },
+            "target_app": {
+                "type": "STRING",
+                "description": "Windows only: exact foreground executable name returned by foreground_app; required for mouse/keyboard/clipboard actions. This parameter is not used for the macOS/Linux input path."
             },
             "text": {
                 "type": "STRING",
@@ -762,7 +960,7 @@ TOOL = {
             },
             "clear_first": {
                 "type": "BOOLEAN",
-                "description": "Clear field before typing (default: true)"
+                "description": "False by default. Set true only when the user explicitly asks to replace the entire active field or document; HUD confirmation is then required."
             },
             "path": {
                 "type": "STRING",

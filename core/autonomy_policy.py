@@ -14,14 +14,27 @@ import time
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 _NEGATED_ACTION = re.compile(
     r"\b(?:do\s+not|don't|never|not)\s+(?:click|press|select|choose|submit|"
-    r"send|text|message|publish|post|share|upload|delete|remove)\b|"
-    r"\bnie\s+(?:klikaj|kliknij|naciskaj|naciskaj|wybieraj|wybierz|"
-    r"wysyłaj|wysylaj|wyślij|wyslij|usuwaj|usun|kasuj|publikuj|opublikuj)\b",
+    r"send|text|message|publish|post|share|upload|delete|remove|erase|sign)\b|"
+    r"\b(?:i\s+)?(?:don't|do\s+not|never)\s+(?:want|need|allow|let)\s+"
+    r"(?:me\s+)?(?:you\s+)?to\s+(?:click|press|select|choose|submit|send|text|"
+    r"message|publish|post|share|upload|delete|remove|erase|sign)\b|"
+    r"\bnie\s+(?:klikaj|kliknij|naciskaj|wybieraj|wybierz|wysyłaj|wysylaj|"
+    r"wyślij|wyslij|usuwaj|usuń|usun|kasuj|publikuj|opublikuj|udostępniaj|"
+    r"udostepniaj|podpisuj|podpisz)\b|"
+    r"\bnie\s+(?:chcę|chce|chciałbym|chcialbym|pozwalam)\s*,?\s*"
+    r"(?:żebyś|zebyś|żeby|zeby|abyś|abys)\b.{0,64}\b"
+    r"(?:klik|naciś|nacis|wybier|zatwierd|wysył|wysyl|wyślij|wyslij|"
+    r"usuń|usun|kas|publik|udostępn|udostepn|podpis)\w*\b",
     re.IGNORECASE,
 )
 _NEGATED_SEND = re.compile(
     r"\b(?:do\s+not|don't|never|not)\s+(?:send|text|message|email|dm)\b|"
-    r"\bnie\s+(?:wysyłaj|wysylaj|wysyłać|wysylac|wyślij|wyslij|przesyłaj|przesylaj)\b",
+    r"\b(?:i\s+)?(?:don't|do\s+not|never)\s+(?:want|need|allow|let)\s+"
+    r"(?:me\s+)?(?:you\s+)?to\s+(?:send|text|message|email|dm)\b|"
+    r"\bnie\s+(?:wysyłaj|wysylaj|wysyłać|wysylac|wyślij|wyslij|przesyłaj|przesylaj)\b|"
+    r"\bnie\s+(?:chcę|chce|chciałbym|chcialbym)\s*,?\s*"
+    r"(?:żebyś|zebyś|żeby|zeby|abyś|abys)\b.{0,64}\b"
+    r"(?:wysył|wysyl|wyślij|wyslij|prześlij|przeslij|napisz|send|text|message)\w*\b",
     re.IGNORECASE,
 )
 _SEND_INTENT = re.compile(
@@ -129,7 +142,7 @@ def _target_mentioned(user_request: str, target: str) -> bool:
 def explicitly_requested_target_action(user_request: str, target: str) -> bool:
     """True only when this turn names the target and explicitly asks to act on it."""
     request = str(user_request or "")
-    if not request or _NEGATED_ACTION.search(request):
+    if not request or _NEGATED_ACTION.search(request) or _NEGATED_SEND.search(request):
         return False
     has_action_verb = bool(re.search(
         r"\b(?:click|press|select|choose|submit|send|publish|share|upload|delete|remove|erase|sign|"
@@ -186,7 +199,8 @@ def consume_explicit_send_authorization(session_memory, receiver: str,
         if session_memory.get("direct_send_used"):
             return False
         request = scope_request(session_memory)
-        if not request or _NEGATED_ACTION.search(request) or not _SEND_INTENT.search(request):
+        if (not request or _NEGATED_ACTION.search(request) or _NEGATED_SEND.search(request)
+                or not _SEND_INTENT.search(request)):
             return False
         receiver_tokens = _tokens(receiver)
         request_tokens = _tokens(request)

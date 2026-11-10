@@ -12,7 +12,9 @@ try:
 except ImportError:
     _SEND2TRASH = False
 
+from core import outcome
 from core.undo import push_undo
+import re
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 
@@ -20,6 +22,14 @@ _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
 # Above this size it does not — a 200 MB log would sit in RAM for the rest of
 # the session to protect an edit nobody is going to take back.
 _UNDO_CONTENT_LIMIT = 1_000_000
+
+_PERMANENT_DELETE_RE = re.compile(
+    r"\b(?:permanent(?:ly)?|erase|wipe|shred|irreversibl(?:e|y))\b|"
+    r"\b(?:na stałe|trwale|bezpowrotnie|na zawsze|z pominięciem kosza|"
+    r"z pominieciem kosza)\b",
+    re.IGNORECASE,
+)
+
 
 
 def _path_exists(path: Path) -> bool:
@@ -792,6 +802,20 @@ def get_file_info(path: str, name: str = "") -> str:
     except Exception as e:
         return f"Could not get file info: {e}"
 
+def _filesystem_read_result(result: str, error_prefixes: tuple[str, ...] = ()) -> str:
+    """Mark filenames and file contents as untrusted while preserving action status."""
+    text = str(result or "")
+    if error_prefixes and text.startswith(error_prefixes):
+        return outcome.failed(
+            "file_controller", outcome.untrusted("local-filesystem", text)
+        )
+    return (
+        outcome.done("file_controller", verified=True)
+        + "\n"
+        + outcome.untrusted("local-filesystem", text)
+    )
+
+
 def _file_controller_execute(
     parameters: dict = None,
     response=None,
@@ -808,7 +832,11 @@ def _file_controller_execute(
 
     try:
         if action == "list":
-            return list_files(path)
+            return _filesystem_read_result(
+                list_files(path),
+                ("Access denied:", "Path not found:", "Not a directory:",
+                 "Permission denied:", "Error listing files:"),
+            )
 
         elif action == "create_file":
             return create_file(path, name=name, content=params.get("content", ""))
@@ -829,7 +857,10 @@ def _file_controller_execute(
             return rename_file(path, name=name, new_name=params.get("new_name", ""))
 
         elif action == "read":
-            return read_file(path, name=name)
+            return _filesystem_read_result(
+                read_file(path, name=name),
+                ("Access denied:", "File not found:", "Not a file:", "Could not read file:"),
+            )
 
         elif action == "write":
             return write_file(
@@ -839,27 +870,39 @@ def _file_controller_execute(
             )
 
         elif action == "find":
-            return find_files(
-                name=name or params.get("name", ""),
-                extension=params.get("extension", ""),
-                path=path,
-                max_results=min(int(params.get("max_results", 20)), 50),
+            return _filesystem_read_result(
+                find_files(
+                    name=name or params.get("name", ""),
+                    extension=params.get("extension", ""),
+                    path=path,
+                    max_results=min(int(params.get("max_results", 20)), 50),
+                ),
+                ("Access denied:", "Search path not found:", "Search error:"),
             )
 
         elif action == "largest":
-            return get_largest_files(
-                path=path,
-                count=int(params.get("count", 10)),
+            return _filesystem_read_result(
+                get_largest_files(
+                    path=path,
+                    count=int(params.get("count", 10)),
+                ),
+                ("Access denied:", "Path not found:", "Error:"),
             )
 
         elif action == "disk_usage":
-            return get_disk_usage(path)
+            return _filesystem_read_result(
+                get_disk_usage(path),
+                ("Access denied:", "Could not get disk usage:"),
+            )
 
         elif action == "organize_desktop":
             return organize_desktop()
 
         elif action == "info":
-            return get_file_info(path, name=name)
+            return _filesystem_read_result(
+                get_file_info(path, name=name),
+                ("Access denied:", "Not found:", "Could not get file info:"),
+            )
 
         else:
             return f"Unknown action: '{action}'"
@@ -914,8 +957,7 @@ def _delete_target_was_explicitly_requested(request: str, path: str, name: str) 
 def _file_confirmation(parameters: dict, session_memory=None, player=None):
     """Gate unrequested deletion, bulk desktop moves, and non-undoable overwrites."""
     from core import confirm
-    from core.autonomy_policy import requires_ui_confirmation, scope_request
-    import re
+    from core.autonomy_policy import scope_request
     params = parameters or {}
     action = str(params.get("action") or "").strip().lower()
     path = str(params.get("path") or "desktop")
@@ -924,7 +966,10 @@ def _file_confirmation(parameters: dict, session_memory=None, player=None):
     if action == "delete":
         target = name or path
         explicit_target = _delete_target_was_explicitly_requested(request, path, name)
-        if requires_ui_confirmation("delete " + target, user_request=request) or not explicit_target:
+        permanent_delete = bool(_PERMANENT_DELETE_RE.search(request))
+        # Moving an explicitly named file to the system Trash is reversible.
+        # Permanent deletion/erasure always requires a separate human approval.
+        if permanent_delete or not explicit_target:
             return confirm.request(
                 key="file_delete", title=("Move to Trash: " + target)[:120],
                 detail=("File action: delete (move to Trash)\nTarget: " + target +

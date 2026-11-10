@@ -6,11 +6,13 @@ import concurrent.futures
 import importlib.util
 import os
 import platform
+import re
 import shutil
 import subprocess
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import TYPE_CHECKING, Optional
 
 from core import appidentity, confirm, outcome
@@ -110,19 +112,39 @@ async def _locator_is_sensitive(locator) -> bool:
 
 
 def _normalize_url(url: str) -> str:
-    """
-    Bare words like "instagram" → "https://instagram.com"
-    Domains like "instagram.com" → "https://instagram.com"
-    Full URLs pass through unchanged.
-    """
-    url = url.strip()
-    if not url:
+    """Normalise a web address and reject active/local-file URL schemes."""
+    raw = str(url or "").strip()
+    if not raw:
         return "about:blank"
-    if "://" in url:
-        return url
-    if "." not in url:
-        url = url + ".com"
-    return "https://" + url
+    if raw.lower() == "about:blank":
+        return "about:blank"
+    if any(ch.isspace() or ord(ch) < 32 for ch in raw) or "\\" in raw:
+        raise ValueError("URL contains whitespace, control characters or backslashes")
+    if raw.startswith("//"):
+        raise ValueError("Protocol-relative URLs are not accepted")
+
+    is_web_url = bool(re.match(r"^https?://", raw, re.IGNORECASE))
+    host_port = bool(re.match(
+        r"^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]+(?:/|$)", raw
+    ))
+    explicit_scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*):", raw)
+    if explicit_scheme and not is_web_url and not host_port:
+        raise ValueError(f"URL scheme '{explicit_scheme.group(1).lower()}' is blocked; use HTTP or HTTPS")
+
+    candidate = raw if is_web_url else "https://" + (
+        raw + ".com" if "." not in raw.split("/", 1)[0] and ":" not in raw.split("/", 1)[0]
+        else raw
+    )
+    try:
+        parsed = urlsplit(candidate)
+        _ = parsed.port  # Force malformed ports to fail during validation.
+    except ValueError as exc:
+        raise ValueError("URL host or port is malformed") from exc
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Only HTTP and HTTPS web addresses are allowed")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("URLs containing embedded credentials are blocked")
+    return candidate
 
 
 def _user_agent() -> str:
@@ -463,7 +485,10 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
     session restore) — exactly as if the user had opened it themselves.
     Works on all three of Windows / macOS / Linux.
     """
-    url = _normalize_url(url) if url and url.strip() else ""
+    try:
+        url = _normalize_url(url) if url and str(url).strip() else ""
+    except ValueError as exc:
+        return outcome.failed("browser_control", str(exc), url=str(url or "")[:160])
     if url == "about:blank":
         url = ""
 
@@ -772,8 +797,11 @@ class _BrowserSession:
 
     async def go_to(self, url: str) -> str:
 
-        url      = _normalize_url(url)
-        page     = await self._get_page()
+        try:
+            url = _normalize_url(url)
+        except ValueError as exc:
+            return outcome.failed("browser_control", str(exc), url=str(url or "")[:160])
+        page = await self._get_page()
         prev_url = page.url
 
         async def _do_goto(p: Page) -> str:
@@ -858,7 +886,7 @@ class _BrowserSession:
 
 
     async def type_text(self, selector: str = None, text: str = "",
-                        clear_first: bool = True) -> str:
+                        clear_first: bool = False) -> str:
         page = await self._get_page()
         try:
             locator = page.locator(selector) if selector else page.locator(":focus")
@@ -897,17 +925,82 @@ class _BrowserSession:
         except Exception as e:
             return f"Key error: {e}"
 
+    async def enter_submission_risk(self) -> dict:
+        """Inspect the focused control without reading field values.
+
+        Ordinary search fields are allowed. Form submissions and explicit
+        submit controls require HUD confirmation; inspection failures fail closed.
+        """
+        page = await self._get_page()
+        try:
+            info = await page.evaluate("""() => {
+                const el = document.activeElement;
+                if (!el) return {risky: false, target: ""};
+                const tag = String(el.tagName || "").toUpperCase();
+                const type = String(el.getAttribute("type") || "").toLowerCase();
+                const form = el.form || (el.closest ? el.closest("form") : null);
+                const submitters = form ? Array.from(form.querySelectorAll(
+                    'button:not([type]), button[type="submit"], input[type="submit"], input[type="image"]'
+                )) : [];
+                const labels = submitters.map(node => [
+                    node.innerText, node.getAttribute("aria-label"),
+                    node.getAttribute("title"), node.getAttribute("name"),
+                    node.getAttribute("type")
+                ].filter(Boolean).join(" ")).join(" ");
+                const formAction = form ? (form.getAttribute("action") || "") : "";
+                const elementLabel = [
+                    el.innerText, el.getAttribute("aria-label"), el.getAttribute("title"),
+                    el.getAttribute("placeholder"), el.getAttribute("name"), type
+                ].filter(Boolean).join(" ");
+                const hints = [labels, formAction, elementLabel].filter(Boolean).join(" ").slice(0, 160);
+                if (type === "search" || /\b(search|query|find|szukaj)\b/i.test(hints)) {
+                    return {risky: false, target: hints};
+                }
+                if (tag === "BUTTON" && (!type || type === "submit")) {
+                    return {risky: true, target: hints || "focused submit button"};
+                }
+                if (tag === "INPUT" && (type === "submit" || type === "image")) {
+                    return {risky: true, target: hints || "focused submit control"};
+                }
+                const implicitTypes = new Set([
+                    "", "text", "email", "url", "tel", "number", "password",
+                    "date", "month", "week", "time", "datetime-local"
+                ]);
+                if (form && tag === "INPUT" && implicitTypes.has(type)) {
+                    const blockers = form.querySelectorAll(
+                        'input:not([type]), input[type="text"], input[type="email"], input[type="url"], ' +
+                        'input[type="tel"], input[type="number"], input[type="password"], input[type="date"], ' +
+                        'input[type="month"], input[type="week"], input[type="time"], input[type="datetime-local"]'
+                    );
+                    if (submitters.length || blockers.length === 1) {
+                        return {risky: true, target: hints || "focused form field"};
+                    }
+                }
+                return {risky: false, target: hints};
+            }""")
+            if not isinstance(info, dict) or not isinstance(info.get("risky"), bool):
+                return {"risky": True, "target": "active form could not be inspected"}
+            return {
+                "risky": info["risky"],
+                "target": str(info.get("target") or "active form")[:160],
+            }
+        except Exception as exc:
+            return {
+                "risky": True,
+                "target": f"active form inspection failed ({type(exc).__name__})",
+            }
+
     async def get_text(self) -> str:
         page = await self._get_page()
         try:
             text = await page.inner_text("body")
-            return text[:4_000]
+            return outcome.untrusted("browser-page", text[:4_000])
         except Exception as e:
             return f"Could not get page text: {e}"
 
     async def get_url(self) -> str:
         page = await self._get_page()
-        return page.url
+        return outcome.untrusted("browser-url", page.url)
 
     async def fill_form(self, fields: dict) -> str:
         if not isinstance(fields, dict) or not fields:
@@ -960,7 +1053,8 @@ class _BrowserSession:
         )
 
 
-    async def smart_type(self, description: str, text: str) -> str:
+    async def smart_type(self, description: str, text: str,
+                         clear_first: bool = False) -> str:
         page = await self._get_page()
         candidates = [
             page.get_by_placeholder(description, exact=True),
@@ -978,7 +1072,8 @@ class _BrowserSession:
                         "browser_control",
                         "sensitive fields (passwords, PINs, one-time codes and payment data) are blocked",
                     )
-                await locator.clear()
+                if clear_first:
+                    await locator.clear()
                 await locator.type(text, delay=50)
                 return outcome.done("browser_control", typed=True, verified=True)
             except Exception:
@@ -1223,7 +1318,7 @@ def _browser_control_execute(
             result = sess.run(sess.click(params.get("selector"), params.get("text")))
         elif action == "type":
             result = sess.run(sess.type_text(
-                params.get("selector"), params.get("text", ""), params.get("clear_first", True)))
+                params.get("selector"), params.get("text", ""), params.get("clear_first", False)))
         elif action == "scroll":
             result = sess.run(sess.scroll(params.get("direction", "down"), int(params.get("amount", 500))))
         elif action == "fill_form":
@@ -1231,13 +1326,47 @@ def _browser_control_execute(
         elif action == "smart_click":
             result = sess.run(sess.smart_click(params.get("description", "")))
         elif action == "smart_type":
-            result = sess.run(sess.smart_type(params.get("description", ""), params.get("text", "")))
+            result = sess.run(sess.smart_type(
+                params.get("description", ""), params.get("text", ""),
+                clear_first=params.get("clear_first", False),
+            ))
         elif action == "get_text":
             result = sess.run(sess.get_text())
         elif action == "get_url":
             result = sess.run(sess.get_url())
         elif action == "press":
-            result = sess.run(sess.press(params.get("key", "Enter")))
+            key = str(params.get("key", "Enter") or "Enter")
+            if key.strip().lower() in {"enter", "return"}:
+                try:
+                    submit_info = sess.run(sess.enter_submission_risk())
+                except Exception as exc:
+                    submit_info = {
+                        "risky": True,
+                        "target": f"active form inspection failed ({type(exc).__name__})",
+                    }
+                if isinstance(submit_info, dict):
+                    target_info = str(submit_info.get("target") or "active form")[:160]
+                else:
+                    target_info = "active form could not be inspected"
+                needs_confirmation = (
+                    not isinstance(submit_info, dict)
+                    or submit_info.get("risky") is not False
+                    or requires_browser_confirmation("smart_click", target_info)
+                )
+                if needs_confirmation:
+                    result = confirm.request(
+                        key="browser_control.enter_submit",
+                        title="Confirm browser form submission",
+                        detail=(
+                            "Pressing Enter may submit the active form or activate a high-impact control. "
+                            f"Target: {target_info}. Confirm only if this exact submission is intended."
+                        ),
+                        run=lambda: sess.run(sess.press(key)),
+                    )
+                else:
+                    result = sess.run(sess.press(key))
+            else:
+                result = sess.run(sess.press(key))
         elif action == "close_tab":
             result = sess.run(sess.close_tab())
         elif action == "screenshot":
@@ -1276,6 +1405,21 @@ def browser_control(
     params = parameters or {}
     action = str(params.get("action") or "").strip().lower()
     target = params.get("text") or params.get("description") or params.get("selector") or ""
+    if action in {"type", "smart_type"} and bool(params.get("clear_first", False)):
+        confirmed_params = dict(params)
+        return confirm.request(
+            key="browser_control.replace_text",
+            title="Confirm replacing browser field text",
+            detail=(
+                f"Browser action: {action}\nTarget: {str(target)[:180]}\n\n"
+                "This clears the current contents of the selected browser field before typing. "
+                "Confirm only if replacing that existing text is intended."
+            )[:1800],
+            run=lambda: _browser_control_execute(
+                confirmed_params, response=response, player=player,
+                session_memory=session_memory,
+            ),
+        )
     from core.autonomy_policy import requires_ui_confirmation, scope_request
     if (requires_browser_confirmation(action, target)
             and requires_ui_confirmation(target, user_request=scope_request(session_memory))):
@@ -1318,7 +1462,10 @@ TOOL = {
         "should be told. 'unverified' means the address was handed to the "
         "system's default browser, which never reports back: say it was opened "
         "but not confirmed, never that the page is up. 'failed' means nothing "
-        "happened."
+        "happened. Typing into a field preserves its existing contents by "
+        "default; set clear_first=true only when the user explicitly asks to "
+        "replace field contents, because that operation requires HUD "
+        "confirmation. smart_type follows the same rule."
     ),
     "brief": (
         "Controls the web browser: open a URL, navigate, click, read the page."
@@ -1380,7 +1527,7 @@ TOOL = {
             },
             "clear_first": {
                 "type": "BOOLEAN",
-                "description": "Clear field before typing (default: true)"
+                "description": "False by default; typing preserves existing text. Set true only to replace the field contents; the replacement requires HUD confirmation."
             }
         },
         "required": [

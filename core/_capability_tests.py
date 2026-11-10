@@ -134,32 +134,48 @@ class ConversationHistoryPluginTests(unittest.TestCase):
 
 
 class MissionControlTests(unittest.TestCase):
+    def _new_scope(self, request="Run the test mission"):
+        from core.autonomy_policy import new_turn_authorization
+        return new_turn_authorization(request)
+
+    def _record_done(self, mission, scope, tool_name="test_tool"):
+        result = f"status=done action={tool_name} verified=true"
+        self.assertTrue(mission.record_tool_result(scope, tool_name, result))
+        return result
+
     def test_plan_progress_pause_and_resume_persist(self):
         from plugins import mission_control as mission
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "missions.json"
             with patch.object(mission, "_DATA_PATH", path):
                 created = mission.run({
-                    "action": "plan",
-                    "title": "Build the assistant",
+                    "action": "plan", "title": "Build the assistant",
                     "goal": "Create a safe multi-step assistant",
                     "steps": "Audit capabilities\nAdd persistent task tracking",
                 })
                 self.assertIn("MISSION M-", created)
                 mission_id = created.split("MISSION ", 1)[1].split(":", 1)[0]
+                scope = self._new_scope()
 
                 next_step = mission.run({"action": "next"})
                 self.assertIn("S01", next_step)
-                mission.run({"action": "start", "mission_id": mission_id})
-                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
+                started = mission.run(
+                    {"action": "start", "mission_id": mission_id},
+                    session_memory=scope,
+                )
+                self.assertIn("[MISSION_CONTINUE]", started)
+                self._record_done(mission, scope, "audit_action")
                 done = mission.run({
-                    "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
-                    "verification": "Created the notes file and verified it exists."
-                })
-                self.assertIn("[done]", done)
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "Audit completed.",
+                }, session_memory=scope)
+                self.assertIn("[MISSION_CONTINUE]", done)
                 paused = mission.run({"action": "pause", "mission_id": mission_id})
                 self.assertIn("Status: paused", paused)
-                resumed = mission.run({"action": "resume", "mission_id": mission_id})
+                resumed = mission.run(
+                    {"action": "resume", "mission_id": mission_id},
+                    session_memory=scope,
+                )
                 self.assertIn("Status: active", resumed)
 
                 stored = json.loads(path.read_text(encoding="utf-8"))
@@ -179,24 +195,27 @@ class MissionControlTests(unittest.TestCase):
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
                 self.assertNotIn("[MISSION_CONTINUE]", planned)
+                scope = self._new_scope("Create both project files")
 
-                started = mission.run({"action": "start", "mission_id": mission_id})
+                started = mission.run(
+                    {"action": "start", "mission_id": mission_id},
+                    session_memory=scope,
+                )
                 self.assertIn("[MISSION_CONTINUE]", started)
                 self.assertIn("STEP_ID=S01", started)
-
-                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
+                self._record_done(mission, scope, "create_file")
                 first = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
-                    "step_id": "S01", "verification": "First file exists and was read back.",
-                })
+                    "step_id": "S01", "verification": "First file exists.",
+                }, session_memory=scope)
                 self.assertIn("[MISSION_CONTINUE]", first)
                 self.assertIn("STEP_ID=S02", first)
 
-                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S02"})
+                self._record_done(mission, scope, "create_file")
                 final = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
-                    "step_id": "S02", "verification": "Second file exists and was read back.",
-                })
+                    "step_id": "S02", "verification": "Second file exists.",
+                }, session_memory=scope)
                 self.assertIn("[MISSION_COMPLETE]", final)
                 self.assertIn("Status: completed", final)
                 stored = json.loads(path.read_text(encoding="utf-8"))
@@ -217,33 +236,34 @@ class MissionControlTests(unittest.TestCase):
                     "steps": "First step\nSecond step",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
-                mission.run({"action": "start", "mission_id": mission_id})
-                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
+                scope = self._new_scope("Run ordered job")
+                mission.run(
+                    {"action": "start", "mission_id": mission_id},
+                    session_memory=scope,
+                )
                 out_of_order = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
                     "step_id": "S02", "verification": "Attempted second step",
-                })
+                }, session_memory=scope)
                 self.assertIn("Out-of-order", out_of_order)
 
                 blocked = mission.run({
                     "action": "block_step", "mission_id": mission_id,
                     "step_id": "S01", "reason": "A required permission is missing.",
-                })
+                }, session_memory=scope)
                 self.assertIn("[MISSION_BLOCKED]", blocked)
                 self.assertIn("Status: paused", blocked)
 
-                resumed = mission.run({"action": "resume", "mission_id": mission_id})
-                self.assertIn("[MISSION_RECOVERY_REQUIRED]", resumed)
+                resumed = mission.run(
+                    {"action": "resume", "mission_id": mission_id},
+                    session_memory=scope,
+                )
+                self.assertIn("[MISSION_RECOVERY]", resumed)
+                self.assertIn("Do NOT repeat", resumed)
                 self.assertNotIn("[MISSION_CONTINUE]", resumed)
-                recovered = mission.run({
-                    "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
-                    "resolution": "retry_safe",
-                    "verification": "Read-only inspection proves the protected setting is unchanged.",
-                })
-                self.assertIn("[MISSION_CONTINUE]", recovered)
-                self.assertIn("STEP_ID=S01", recovered)
+                self.assertIn("STEP_ID=S01", resumed)
 
-    def test_paused_mission_rejects_completion_until_verified_recovery(self):
+    def test_paused_mission_rejects_completion_until_resume(self):
         from plugins import mission_control as mission
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "missions.json"
@@ -253,24 +273,34 @@ class MissionControlTests(unittest.TestCase):
                     "goal": "Do one task safely", "steps": "Do the task",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
-                mission.run({"action": "start", "mission_id": mission_id})
-                mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
+                scope = self._new_scope("Complete paused task")
+                mission.run(
+                    {"action": "start", "mission_id": mission_id},
+                    session_memory=scope,
+                )
                 mission.run({
                     "action": "block_step", "mission_id": mission_id,
                     "step_id": "S01", "reason": "Waiting for user approval.",
-                })
+                }, session_memory=scope)
                 refused = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
                     "step_id": "S01", "verification": "This must not be accepted.",
-                })
+                }, session_memory=scope)
                 self.assertIn("paused or inactive", refused.lower())
 
-                recovered = mission.run({
-                    "action": "resolve_step", "mission_id": mission_id, "step_id": "S01",
-                    "resolution": "completed",
-                    "verification": "Read-only inspection confirms the approved task is complete.",
-                })
-                self.assertIn("[MISSION_COMPLETE]", recovered)
+                resumed = mission.run(
+                    {"action": "resume", "mission_id": mission_id},
+                    session_memory=scope,
+                )
+                self.assertIn("[MISSION_RECOVERY]", resumed)
+                self.assertIn("Do NOT repeat", resumed)
+                self.assertNotIn("[MISSION_CONTINUE]", resumed)
+                self._record_done(mission, scope, "approved_task")
+                completed = mission.run({
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "User approved and task succeeded.",
+                }, session_memory=scope)
+                self.assertIn("[MISSION_COMPLETE]", completed)
 
     def test_corrupt_mission_store_is_not_overwritten(self):
         from plugins import mission_control as mission
@@ -282,8 +312,6 @@ class MissionControlTests(unittest.TestCase):
             self.assertIn("unreadable", result.lower())
             self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
 
-
-
     def test_interrupted_running_step_is_not_replayed_after_resume(self):
         from plugins import mission_control as mission
         with tempfile.TemporaryDirectory() as tmp:
@@ -294,38 +322,57 @@ class MissionControlTests(unittest.TestCase):
                     "goal": "Perform one side effect exactly once", "steps": "Create a marker file",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
-                mission.run({"action": "start", "mission_id": mission_id})
-                started = mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
-                self.assertIn("[MISSION_STEP_STARTED]", started)
-                duplicate = mission.run({"action": "begin_step", "mission_id": mission_id, "step_id": "S01"})
+                scope = self._new_scope("Create marker once")
+                started = mission.run(
+                    {"action": "start", "mission_id": mission_id},
+                    session_memory=scope,
+                )
+                self.assertIn("[MISSION_CONTINUE]", started)
+                duplicate = mission.run({
+                    "action": "begin_step", "mission_id": mission_id, "step_id": "S01",
+                }, session_memory=scope)
                 self.assertIn("[MISSION_RECOVERY]", duplicate)
                 self.assertIn("Do not repeat side effects", duplicate)
                 mission.run({"action": "pause", "mission_id": mission_id})
-                resumed = mission.run({"action": "resume", "mission_id": mission_id})
+                next_scope = self._new_scope("Resume marker task")
+                resumed = mission.run(
+                    {"action": "resume", "mission_id": mission_id},
+                    session_memory=next_scope,
+                )
                 self.assertIn("[MISSION_RECOVERY]", resumed)
                 self.assertNotIn("[MISSION_CONTINUE]", resumed)
                 refused = mission.run({
-                    "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
-                    "verification": "",
-                })
-                self.assertIn("Give me the verified result", refused)
+                    "action": "complete_step", "mission_id": mission_id,
+                    "step_id": "S01", "verification": "",
+                }, session_memory=next_scope)
+                self.assertIn("No matching verified tool result", refused)
 
-    def test_step_must_be_started_before_completion(self):
+    def test_step_completion_requires_a_started_step_and_tool_evidence(self):
         from plugins import mission_control as mission
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "missions.json"
             with patch.object(mission, "_DATA_PATH", path):
                 planned = mission.run({
                     "action": "plan", "title": "Guard test",
-                    "goal": "Require explicit step start", "steps": "Do one thing",
+                    "goal": "Require a verified step", "steps": "Do one thing",
                 })
                 mission_id = planned.split("MISSION ", 1)[1].split(":", 1)[0]
-                mission.run({"action": "start", "mission_id": mission_id})
-                refused = mission.run({
+                scope = self._new_scope("Do one thing")
+                refused_before_start = mission.run({
                     "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
                     "verification": "Forged success",
-                })
-                self.assertIn("Call begin_step", refused)
+                }, session_memory=scope)
+                self.assertIn("currently running step", refused_before_start)
+                mission.run(
+                    {"action": "start", "mission_id": mission_id},
+                    session_memory=scope,
+                )
+                refused_without_receipt = mission.run({
+                    "action": "complete_step", "mission_id": mission_id, "step_id": "S01",
+                    "verification": "Forged success",
+                }, session_memory=scope)
+                self.assertIn("No matching verified tool result", refused_without_receipt)
+
 
 class KnowledgeVaultTests(unittest.TestCase):
     def setUp(self):

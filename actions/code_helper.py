@@ -19,6 +19,10 @@ MAX_BUILD_ATTEMPTS = 3
 # fallback ladder. Writing a model name here is what left this file hanging
 # forever whenever that one alias was unwell.
 from core import gemini
+from core.safe_file_write import MAX_SAFE_WRITE_BYTES, safe_write_text
+from core import confirm as confirm_gate
+from core.timeout_policy import bounded_timeout
+from core.process_runner import run_bounded_process
 
 
 def _get_api_key() -> str:
@@ -70,16 +74,21 @@ def _read_file(file_path: str) -> tuple[str, str]:
     if not p.exists():
         return "", f"File not found: {file_path}"
     try:
+        if p.stat().st_size > MAX_SAFE_WRITE_BYTES:
+            return "", f"File is too large to safely edit (limit: {MAX_SAFE_WRITE_BYTES} bytes)."
         return p.read_text(encoding="utf-8"), ""
     except Exception as e:
         return "", f"Could not read file: {e}"
 
 
-def _save_file(path: Path, content: str) -> str:
+def _save_file(path: Path, content: str, *,
+               expected_text: str | None = None,
+               verify_expected: bool = False) -> str:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        return f"Saved to: {path}"
+        return safe_write_text(
+            path, content, undo_label=f"code file {path.name}",
+            expected_text=expected_text, verify_expected=verify_expected,
+        )
     except Exception as e:
         return f"Could not save: {e}"
 
@@ -92,8 +101,11 @@ def _preview(code: str, lines: int = 10) -> str:
 
 
 def _has_error(output: str) -> bool:
-    error_signals = ["error", "exception", "traceback", "syntaxerror",
-                     "nameerror", "typeerror", "stderr", "failed", "crash"]
+    error_signals = [
+        "error", "exception", "traceback", "syntaxerror", "nameerror",
+        "typeerror", "stderr", "failed", "crash", "exit code",
+        "timed out", "output truncated", "output limit",
+    ]
     return any(s in output.lower() for s in error_signals)
 
 
@@ -184,7 +196,9 @@ Code:"""
     response = model.generate_content(prompt)
     code     = _clean_code(response.text)
     path     = _resolve_save_path(output_path, lang)
-    _save_file(path, code)
+    status = _save_file(path, code)
+    if status.startswith("Could not save:"):
+        raise OSError(status)
     return code, path
 
 
@@ -210,12 +224,12 @@ Fixed code:"""
 
 def _run_file(path: Path, args: list, timeout: int) -> str:
     interpreters = {
-        ".py":  [sys.executable],
-        ".js":  ["node"],
-        ".ts":  ["ts-node"],
-        ".sh":  ["bash"],
+        ".py": [sys.executable],
+        ".js": ["node"],
+        ".ts": ["ts-node"],
+        ".sh": ["bash"],
         ".ps1": ["powershell", "-File"],
-        ".rb":  ["ruby"],
+        ".rb": ["ruby"],
         ".php": ["php"],
     }
     interp = interpreters.get(path.suffix.lower())
@@ -223,27 +237,30 @@ def _run_file(path: Path, args: list, timeout: int) -> str:
         return f"No interpreter for {path.suffix}."
 
     try:
-        result = subprocess.run(
+        result = run_bounded_process(
             interp + [str(path)] + (args or []),
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout, cwd=str(path.parent)
+            cwd=path.parent,
+            timeout=timeout,
         )
-        output = result.stdout.strip()
-        error  = result.stderr.strip()
-        parts  = []
-        if output: parts.append(f"Output:\n{output}")
-        if error:  parts.append(f"Stderr:\n{error}")
+        if result.timed_out:
+            return f"Timed out after {timeout}s."
+        if result.returncode is None:
+            return "Process status unknown; termination could not be confirmed."
+        parts = []
+        if result.stdout.strip():
+            parts.append(f"Output:\n{result.stdout.strip()}")
+        if result.stderr.strip():
+            parts.append(f"Stderr:\n{result.stderr.strip()}")
+        if result.returncode not in (0, None):
+            parts.append(f"Exit code: {result.returncode}")
+        if result.output_limited:
+            parts.append("Output truncated at the 1 MB safety limit; process stopped.")
         return "\n\n".join(parts) if parts else "Executed with no output."
 
-    except subprocess.TimeoutExpired:
-        return f"Timed out after {timeout}s."
     except FileNotFoundError:
         return f"Interpreter not found: {interp[0]}."
     except Exception as e:
         return f"Execution error: {e}"
-
-
 def _build(description, language, output_path, args, timeout, speak=None, player=None) -> str:
     if not description:
         return "Please describe what you want me to build, sir."
@@ -269,6 +286,12 @@ def _build(description, language, output_path, args, timeout, speak=None, player
 
         last_output = _run_file(path, args, timeout)
 
+        low_output = last_output.lower()
+        if "timed out" in low_output or "output truncated" in low_output or "output limit" in low_output:
+            msg = f"Build stopped by an execution safety limit. {last_output[:240]}"
+            if speak: speak(msg)
+            return msg
+
         if not _has_error(last_output):
             msg = (
                 f"Build complete, sir. "
@@ -283,8 +306,13 @@ def _build(description, language, output_path, args, timeout, speak=None, player
             player.write_log(f"[Code] Fixing (attempt {attempt})...")
 
         try:
-            code = _fix_code(code, last_output, description)
-            _save_file(path, code)
+            fixed_code = _fix_code(code, last_output, description)
+            save_status = _save_file(
+                path, fixed_code, expected_text=code, verify_expected=True
+            )
+            if save_status.startswith("Could not save:"):
+                raise OSError(save_status)
+            code = fixed_code
         except Exception as e:
             msg = f"Could not fix code on attempt {attempt}: {e}"
             if speak: speak(msg)
@@ -341,7 +369,11 @@ Updated code:"""
     except Exception as e:
         return f"Could not edit code: {e}"
 
-    status = _save_file(Path(file_path), edited)
+    status = _save_file(
+        Path(file_path), edited, expected_text=content, verify_expected=True
+    )
+    if status.startswith("Could not save:"):
+        return status
     print(f"[Code] ✅ Edited: {file_path}")
     return f"File edited. {status}\n\nPreview:\n{_preview(edited)}"
 
@@ -387,10 +419,13 @@ def _run_action(file_path, args, timeout, player) -> str:
 
 def _optimize_action(file_path, code, language, output_path, player) -> str:
 
-    if file_path and not code:
-        code, err = _read_file(file_path)
+    disk_content = None
+    if file_path:
+        disk_content, err = _read_file(file_path)
         if err:
             return err
+        if not code:
+            code = disk_content
     if not code:
         return "Please provide code or a file path to optimize, sir."
 
@@ -426,7 +461,13 @@ Optimized code:"""
     else:
         save_path = _resolve_save_path(output_path, lang)
 
-    status = _save_file(save_path, optimized)
+    status = _save_file(
+        save_path, optimized,
+        expected_text=disk_content if file_path else None,
+        verify_expected=bool(file_path),
+    )
+    if status.startswith("Could not save:"):
+        return status
     print(f"[Code] ✅ Optimized: {save_path}")
 
     original_lines  = len(code.splitlines())
@@ -464,7 +505,6 @@ def _screen_debug_action(description, file_path, player, speak=None) -> str:
         from google.genai import types
 
         image_bytes  = screenshot_path.read_bytes()
-        image_base64 = _image_to_base64(screenshot_path)
 
         user_question = description or "What error or problem do you see on the screen? How can it be fixed?"
 
@@ -491,6 +531,10 @@ Be specific and actionable. If you see an error message, quote it exactly."""
 
         response = gemini.call(contents, tier=gemini.SMART, timeout_ms=45_000)
         if response is None:
+            try:
+                screenshot_path.unlink()
+            except OSError:
+                pass
             return "Sir, I couldn't reach Gemini to analyse that screenshot."
 
         analysis = (response.text or "").strip()
@@ -507,9 +551,15 @@ Be specific and actionable. If you see an error message, quote it exactly."""
             if code_match:
                 fixed_code = code_match.group(1).strip()
                 save_path  = Path(file_path)
-                _save_file(save_path, fixed_code)
-                analysis += f"\n\n✅ Fixed code has been saved to: {file_path}"
-                print(f"[Code] ✅ Fixed code saved: {file_path}")
+                save_status = _save_file(
+                    save_path, fixed_code,
+                    expected_text=file_content, verify_expected=True,
+                )
+                if save_status.startswith("Could not save:"):
+                    analysis += f"\n\n⚠️ The fix could not be saved: {save_status}"
+                else:
+                    analysis += f"\n\n✅ Fixed code has been saved to: {file_path}"
+                    print(f"[Code] ✅ Fixed code saved: {file_path}")
 
         return analysis
 
@@ -550,11 +600,27 @@ def code_helper(
     file_path   = p.get("file_path", "").strip()
     code        = p.get("code", "").strip()
     args        = p.get("args", [])
-    timeout     = int(p.get("timeout", 30))
+    timeout     = bounded_timeout(p.get("timeout", 30))
 
     if action == "auto":
         action = _detect_intent(description, file_path, code)
         print(f"[Code] 🤖 Auto-detected: {action}")
+
+    from core.execution_policy import requires_code_helper_confirmation
+    if requires_code_helper_confirmation(action):
+        if action == "run":
+            return confirm_gate.request(
+                key="code_helper.run",
+                title="Run code file",
+                detail=f"This executes {file_path or 'the selected code file'} with your user permissions.",
+                run=lambda: _run_action(file_path, args, timeout, player),
+            )
+        return confirm_gate.request(
+            key="code_helper.build",
+            title="Build and run generated code",
+            detail="This writes a code file and executes it with your user permissions.",
+            run=lambda: _build(description, language, output_path, args, timeout, speak, player),
+        )
 
     if action == "write":
         return _write_action(description, language, output_path, player)

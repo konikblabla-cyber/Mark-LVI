@@ -19,6 +19,12 @@ import string
 import threading
 import time
 from pathlib import Path
+from core.dashboard_auth_policy import (
+    SESSION_COOKIE_NAME, session_cookie_options, websocket_origin_matches,
+)
+from core.dashboard_upload_policy import (
+    MAX_UPLOAD_FILES, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_TOTAL_MB, upload_usage,
+)
 
 _DEPS_OK = False
 try:
@@ -586,8 +592,8 @@ def _ensure_certs() -> bool:
     present a certificate that matches it. Generating locally gives each install
     its own key, costs about a second, and happens exactly once.
 
-    Returns True when a usable pair exists afterwards; False leaves the caller on
-    plain HTTP, which still works — the QR code simply encodes http:// instead.
+    Returns True when a usable pair exists afterwards. Failure must leave the
+    dashboard bound to loopback only; remote control is never served in clear.
     """
     certs = BASE_DIR / "config" / "certs"
     key_p = certs / "jarvis.key"
@@ -735,6 +741,7 @@ class DashboardServer:
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._uploads_dir                 = UPLOADS_DIR
+        self._upload_lock                 = asyncio.Lock()
         # Set by serve() when the port could not be taken, so the UI can say
         # why the QR code leads nowhere instead of showing it regardless.
         self._bind_error: str = ""
@@ -753,48 +760,27 @@ class DashboardServer:
 
     @staticmethod
     def _ssl_enabled() -> bool:
-        """Is HTTPS switched on? Off unless the user asked for it.
-
-        WHY THE DEFAULT IS PLAIN HTTP, AFTER A RELEASE THAT MADE TLS MANDATORY
-            The certificate has to be self-signed — there is no certificate
-            authority on earth that will vouch for 192.168.1.108 — and a phone
-            treats a self-signed certificate as an attack. Chrome shows a
-            full-page interstitial; a QR scanner that opens links in its own
-            in-app browser often shows nothing at all and offers no way to
-            proceed, because those views deliberately have no "Advanced" button.
-
-            So the practical result of requiring TLS was a dashboard nobody
-            could reach, which is not a more secure product than one they can.
-            The pairing key, the rate limit, the token expiry and the
-            revoke-all-devices fix are all unaffected and all still apply.
-
-            What IS lost over plain HTTP is the AES-GCM layer, because
-            `crypto.subtle` does not exist outside a secure context. The page
-            says so on its own badge rather than pretending, and commands then
-            travel the local network in clear — which is what this dashboard
-            did for every release before this one.
-
-            Turn it on with "dashboard_https": true in config/api_keys.json if
-            the network is one where that matters; the certificate is generated
-            automatically and you will have to accept it once per device.
-        """
+        """HTTPS is the default; an explicit opt-out is loopback-only."""
         try:
             import json as _json
+            from core.dashboard_policy import dashboard_https_requested
             with open(BASE_DIR / "config" / "api_keys.json", "r",
                       encoding="utf-8") as f:
-                if not _json.load(f).get("dashboard_https"):
-                    return False
+                requested = dashboard_https_requested(_json.load(f))
         except Exception:
-            return False
+            requested = False
         certs = BASE_DIR / "config" / "certs"
-        return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
+        return requested and (certs / "jarvis.key").exists() \
+            and (certs / "jarvis.crt").exists()
 
     def get_url(self) -> str:
         """The full URL the QR code carries — always with its scheme, so a
         scanner never has to guess."""
         if self._ssl_enabled():
             return f"https://{self._ip}:{SECURE_PORT}"
-        return f"http://{self._ip}:{PORT}"
+        from core.dashboard_policy import dashboard_display_host
+        host = dashboard_display_host(False, self._ip)
+        return f"http://{host}:{PORT}"
 
     def get_manual_url(self) -> str:
         """What to type into a phone browser by hand.
@@ -804,7 +790,9 @@ class DashboardServer:
         looks exactly like the server being switched off. The redirector speaks
         HTTP, so it answers, and sends the browser on to the secure page.
         """
-        return f"{self._ip}:{PORT}"
+        from core.dashboard_policy import dashboard_display_host
+        host = dashboard_display_host(self._ssl_enabled(), self._ip)
+        return f"{host}:{PORT}"
 
     def _aes_key(self, session_key: str) -> bytes:
         if session_key not in self._aes_cache:
@@ -865,6 +853,15 @@ class DashboardServer:
             return _valid(req.headers.get("authorization", "")
                           .removeprefix("Bearer ").strip())
 
+        def _set_session_cookie(response, token: str):
+            response.set_cookie(
+                SESSION_COOKIE_NAME, token,
+                **session_cookie_options(self._ssl_enabled()),
+            )
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            return response
+
         def _who(req: Request) -> str:
             """The client address a throttle counts against."""
             return (getattr(getattr(req, "client", None), "host", "") or "unknown")
@@ -872,6 +869,13 @@ class DashboardServer:
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():
             return HTMLResponse(self._login_html)
+
+        @app.post("/api/session-cookie")
+        async def session_cookie(req: Request):
+            token = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            if not _valid(token):
+                return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+            return _set_session_cookie(JSONResponse({"ok": True}), token)
 
         @app.get("/", response_class=HTMLResponse)
         async def index():
@@ -912,8 +916,9 @@ class DashboardServer:
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Remote connection established."}
                 ))
-                # Bearer token in response body — no cookies needed (works on any browser/HTTP)
-                return JSONResponse({"ok": True, "token": tok})
+                return _set_session_cookie(
+                    JSONResponse({"ok": True, "token": tok}), tok,
+                )
             self._throttle.record_failure(who)
             return JSONResponse({"ok": False, "error": "Invalid or expired key"},
                                 status_code=401)
@@ -948,7 +953,7 @@ class DashboardServer:
                 {"type": "sys", "text": "Remote connection established via QR code."}
             ))
 
-            return HTMLResponse(f"""<!DOCTYPE html>
+            response = HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
   body{{background:#07090f;color:#dde3ed;font-family:sans-serif;
@@ -964,6 +969,7 @@ class DashboardServer:
 </script>
 <p>Connecting to JARVIS…</p>
 </body></html>""")
+            return _set_session_cookie(response, tok)
 
         @app.post("/api/device-login")
         async def device_login_ep(req: Request):
@@ -985,7 +991,9 @@ class DashboardServer:
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Known device reconnected automatically."}
             ))
-            return JSONResponse({"ok": True, "token": tok, "key": session_key})
+            return _set_session_cookie(
+                JSONResponse({"ok": True, "token": tok, "key": session_key}), tok,
+            )
 
         @app.post("/api/revoke-devices")
         async def revoke_devices(req: Request):
@@ -1042,8 +1050,14 @@ class DashboardServer:
         # ── Phone mic real-time audio → Gemini Live ──────────────────────────
 
         @app.websocket("/ws/phone-audio")
-        async def phone_audio_ws(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+        async def phone_audio_ws(websocket: WebSocket):
+            if not websocket_origin_matches(
+                websocket.headers.get("origin", ""),
+                websocket.headers.get("host", ""),
+            ):
+                await websocket.close(code=4003)
+                return
+            tok = str(websocket.cookies.get(SESSION_COOKIE_NAME) or "").strip()
             if not _valid(tok):
                 await websocket.close(code=4001)
                 return
@@ -1080,45 +1094,96 @@ class DashboardServer:
                 if not _auth(req):
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-                safe = _safe_filename(file.filename or "upload")
-                dest = self._uploads_dir / safe
-                stem, suffix = Path(safe).stem, Path(safe).suffix
-                counter = 1
-                while dest.exists():
-                    dest = self._uploads_dir / f"{stem}_{counter}{suffix}"
-                    counter += 1
-
-                size = 0
-                max_bytes = MAX_UPLOAD_MB * 1024 * 1024
-                try:
-                    with open(dest, "wb") as fout:
-                        while True:
-                            chunk = await file.read(65536)
-                            if not chunk:
-                                break
-                            size += len(chunk)
-                            if size > max_bytes:
-                                fout.close()
-                                dest.unlink(missing_ok=True)
-                                return JSONResponse(
-                                    {"error": f"File too large (max {MAX_UPLOAD_MB} MB)"},
-                                    status_code=413,
-                                )
-                            fout.write(chunk)
-                except Exception as exc:
+                # Serialize uploads so concurrent phone requests cannot race
+                # aggregate quota checks or choose/truncate the same filename.
+                async with self._upload_lock:
                     try:
-                        dest.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                        self._uploads_dir.mkdir(parents=True, exist_ok=True)
+                        used_bytes, file_count = upload_usage(self._uploads_dir)
+                    except (OSError, ValueError) as exc:
+                        print(f"[Dashboard] Upload storage check failed: {type(exc).__name__}")
+                        return JSONResponse(
+                            {"error": "Upload storage is unavailable or unsafe"},
+                            status_code=503,
+                        )
 
-                asyncio.create_task(self.broadcast({
-                    "type": "file_received",
-                    "name": dest.name,
-                    "size": size,
-                    "saved_to": str(self._uploads_dir),
-                }))
-                return JSONResponse({"ok": True, "name": dest.name, "size": size})
+                    if file_count >= MAX_UPLOAD_FILES:
+                        return JSONResponse(
+                            {"error": f"Upload limit reached ({MAX_UPLOAD_FILES} files)"},
+                            status_code=413,
+                        )
+                    remaining_total = MAX_UPLOAD_TOTAL_BYTES - used_bytes
+                    per_file_limit = MAX_UPLOAD_MB * 1024 * 1024
+                    max_bytes = min(per_file_limit, remaining_total)
+                    if max_bytes <= 0:
+                        return JSONResponse(
+                            {"error": f"Upload storage limit reached ({MAX_UPLOAD_TOTAL_MB} MB total)"},
+                            status_code=413,
+                        )
+
+                    safe = _safe_filename(file.filename or "upload")
+                    stem, suffix = Path(safe).stem, Path(safe).suffix
+                    dest = self._uploads_dir / safe
+                    fout = None
+                    # Exclusive create protects files created by another process.
+                    for counter in range(1000):
+                        try:
+                            fout = open(dest, "xb")
+                            break
+                        except FileExistsError:
+                            dest = self._uploads_dir / f"{stem}_{counter + 1}{suffix}"
+                    if fout is None:
+                        return JSONResponse(
+                            {"error": "Could not allocate a unique upload name"},
+                            status_code=409,
+                        )
+
+                    size = 0
+                    too_large = False
+                    try:
+                        with fout as output:
+                            while True:
+                                chunk = await file.read(65536)
+                                if not chunk:
+                                    break
+                                if size + len(chunk) > max_bytes:
+                                    too_large = True
+                                    break
+                                output.write(chunk)
+                                size += len(chunk)
+                    except Exception as exc:
+                        try:
+                            if not dest.is_symlink():
+                                dest.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        print(f"[Dashboard] Upload failed: {type(exc).__name__}")
+                        return JSONResponse({"error": "Upload failed"}, status_code=500)
+                    finally:
+                        try:
+                            await file.close()
+                        except Exception:
+                            pass
+
+                    if too_large:
+                        try:
+                            dest.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        reason = (
+                            f"Upload exceeds the per-file limit ({MAX_UPLOAD_MB} MB)"
+                            if max_bytes == per_file_limit
+                            else f"Upload exceeds the total storage limit ({MAX_UPLOAD_TOTAL_MB} MB)"
+                        )
+                        return JSONResponse({"error": reason}, status_code=413)
+
+                    asyncio.create_task(self.broadcast({
+                        "type": "file_received",
+                        "name": dest.name,
+                        "size": size,
+                        "saved_to": str(self._uploads_dir),
+                    }))
+                    return JSONResponse({"ok": True, "name": dest.name, "size": size})
         else:
             @app.post("/api/upload")
             async def upload_unavailable(req: Request):
@@ -1144,9 +1209,8 @@ class DashboardServer:
             return JSONResponse({"files": files})
 
         @app.get("/uploads/{filename}")
-        async def download_file(filename: str, token: str = ""):
-            # Auth via query param — browser <a download> can't send custom headers
-            tok = token.strip()
+        async def download_file(filename: str, req: Request):
+            tok = str(req.cookies.get(SESSION_COOKIE_NAME) or "").strip()
             if not _valid(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             safe = re.sub(r'[/\\]', '', filename)
@@ -1156,8 +1220,14 @@ class DashboardServer:
             return FileResponse(str(path), filename=safe)
 
         @app.websocket("/ws")
-        async def ws_ep(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+        async def ws_ep(websocket: WebSocket):
+            if not websocket_origin_matches(
+                websocket.headers.get("origin", ""),
+                websocket.headers.get("host", ""),
+            ):
+                await websocket.close(code=4003)
+                return
+            tok = str(websocket.cookies.get(SESSION_COOKIE_NAME) or "").strip()
             if not _valid(tok):
                 await websocket.close(code=4001)
                 return
@@ -1235,45 +1305,36 @@ class DashboardServer:
         asyncio.get_running_loop().run_in_executor(
             None, report_network_access, PORT, SECURE_PORT)
 
-        # Only make a certificate if HTTPS was actually asked for. Generating
-        # one nobody uses just leaves a private key on disk.
+        # HTTPS is the default. If the config cannot be read, or certificate
+        # creation fails, the dashboard is restricted to this computer.
         try:
             import json as _json
+            from core.dashboard_policy import dashboard_https_requested
             with open(BASE_DIR / "config" / "api_keys.json", "r",
                       encoding="utf-8") as f:
-                if _json.load(f).get("dashboard_https"):
-                    _ensure_certs()
+                https_requested = dashboard_https_requested(_json.load(f))
         except Exception:
-            pass
+            https_requested = False
+        if https_requested:
+            _ensure_certs()
 
         use_ssl  = self._ssl_enabled()
+        from core.dashboard_policy import dashboard_bind_host
+        bind_host = dashboard_bind_host(use_ssl)
         ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
         ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
 
-        # TLS IS WANTED, BUT NOT AT THE COST OF NOT STARTING.
-        #
-        # An earlier version returned here when certificates could not be made,
-        # on the argument that serving a remote-control channel in clear is a
-        # different product. The argument is right and the behaviour was wrong:
-        # a dashboard that does not start is not more secure, it is absent, and
-        # the user is left with "refused to connect" and nothing to act on.
-        #
-        # So: HTTPS whenever it can be had — which is almost always, since the
-        # certificate is generated locally on first run — and plain HTTP with a
-        # loud, repeated warning when it cannot. The page keeps working either
-        # way; without a secure context it simply cannot encrypt, and it says
-        # so on screen rather than pretending.
+        # Remote access is permitted only over HTTPS. If TLS is disabled or
+        # certificate creation failed, serve on loopback and never expose
+        # credentials or remote-control commands to the LAN in clear text.
         if use_ssl:
             asyncio.create_task(self._serve_redirector())
         else:
-            print("[Dashboard] Plain HTTP on your local network. Commands are "
-                  "not encrypted; the pairing key still gates access.")
-            print('[Dashboard] For HTTPS set "dashboard_https": true in '
-                  'config/api_keys.json (your phone will ask you to trust the '
-                  'certificate once).')
+            print("[Dashboard] HTTPS unavailable or disabled; dashboard is "
+                  "available on this PC only (127.0.0.1).")
 
         cfg = uvicorn.Config(
-            self.app, host="0.0.0.0",
+            self.app, host=bind_host,
             port=SECURE_PORT if use_ssl else PORT, log_level="warning",
             **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)}
                if use_ssl else {}),
@@ -1295,7 +1356,7 @@ class DashboardServer:
         # being tested for, so setting it made the probe always succeed.
         _probe = _socket.socket()
         try:
-            _probe.bind(("0.0.0.0", SECURE_PORT if use_ssl else PORT))
+            _probe.bind((bind_host, SECURE_PORT if use_ssl else PORT))
         except OSError as exc:
             _probe.close()
             self._bind_error = (

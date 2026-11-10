@@ -75,17 +75,31 @@ from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
+    get_desktop_awareness_enabled,
 )
 from core                     import gemini as _gemini
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
+from core.audio_recovery import callback_is_stalled, stream_is_active
+from core.focus_context import FocusContextTracker
+from core.project_context import (
+    inspect_project_folder, format_project_context, remember_project_snapshot,
+)
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
+from core.live_session_policy import go_away_notice, live_turn_is_active
+from core.communication_context import (
+    get_active_communication_apps, is_communication_context,
+    communication_context_unchanged, initial_communication_gate,
+    should_auto_wake, should_forward_microphone,
+)
+from core.desktop_context import get_desktop_context, should_run_proactive_checkin
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
+    should_feed_while_asleep, dispatch_to_loop,
 )
 
 # How long the assistant stays awake with no user speech before it auto-sleeps
@@ -373,9 +387,9 @@ TOOL_DECLARATIONS = [
     {
         "name": "system_status",
         "description": (
-            "Returns real-time system metrics: CPU usage, RAM, GPU load, CPU temperature, "
-            "uptime, and process count. Use when the user asks about computer performance, "
-            "temperature, memory, or resource usage."
+            "Returns live Windows diagnostics: CPU, RAM, GPU, temperature, disk space, "
+            "battery, active network adapters, uptime, and the top memory-consuming processes. "
+            "Use when the user asks about performance, storage, battery, connectivity, or system health."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -584,6 +598,16 @@ class JarvisLive:
         self._is_speaking         = False
         self._speaking_lock       = threading.Lock()
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
+        # In known communication apps, PC audio stays local until a local wake-word
+        # match or an explicit push-to-talk hold opens one request.
+        # Fail closed until the first Windows audio-session probe confirms there is no call.
+        self._communication_app_active = initial_communication_gate()
+        self._communication_context_known = False
+        # Foreground categories stay local unless desktop awareness is opted in.
+        self._focus_tracker = FocusContextTracker(stable_seconds=8.0)
+        self._focus_context = None
+        self._communication_turn_open = False
+        self._communication_turn_deadline = 0.0
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
         self._vision_cam_active    = False   # True if camera was opened for vision → auto-close after response
         self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
@@ -662,8 +686,20 @@ class JarvisLive:
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
+        self._queued_process_alerts: list[dict] = []
+        self._startup_mission_recovery_injected = False
         from core.autonomy_policy import new_turn_authorization
         self._turn_authorization = new_turn_authorization("")
+        def _mission_confirmation_result(tool_name):
+            scope = self._turn_authorization
+            def _record_confirmed_result(result):
+                try:
+                    from plugins.mission_control import record_tool_result
+                    record_tool_result(scope, tool_name, result)
+                except Exception as _evidence_error:
+                    print(f"[Mission] Confirmed-action evidence failed closed: {_evidence_error}")
+            return _record_confirmed_result
+        confirm_gate.set_result_observer_factory(_mission_confirmation_result)
 
         self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
@@ -739,7 +775,16 @@ class JarvisLive:
         return True
 
     def _on_wake_detected(self) -> None:
-        """Called from the detector thread when 'Hey Jarvis' is heard."""
+        """Marshal wake-word results from the detector thread onto the app loop."""
+        if not dispatch_to_loop(self._loop, self._handle_wake_detected):
+            print("[Wake] Detection ignored: the application event loop is unavailable.")
+
+    def _handle_wake_detected(self) -> None:
+        """Open one addressed request and update Qt only on its owning loop."""
+        if self._communication_app_active:
+            self._communication_turn_open = True
+            self._communication_turn_deadline = time.monotonic() + 90.0
+            self.ui.write_log("SYS: Wake phrase accepted — one request is open.")
         self.wake(reason="wake word")
 
     def wake(self, reason: str = "wake word") -> None:
@@ -771,6 +816,91 @@ class JarvisLive:
                 continue
             if (time.monotonic() - self._last_user_speech) > self._wake_sleep_timeout:
                 self.sleep(reason="no speech for 2 minutes")
+
+    async def _run_communication_guard(self) -> None:
+        """Keep mic audio local in known call/chat apps unless explicitly addressed."""
+        while True:
+            await asyncio.sleep(0.25)
+            try:
+                context = await asyncio.to_thread(get_desktop_context, include_app=True)
+                foreground_app = (
+                    context.get("foreground_app", "")
+                    if isinstance(context, dict) else ""
+                )
+                # A running chat client alone is not a call. Use active WASAPI
+                # sessions to keep privacy while a real call runs in background.
+                active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
+                active = is_communication_context(foreground_app, active_audio_apps)
+                # The executable is already read locally for call privacy. A
+                # stable category provides broad context, never window contents.
+                focus_change = self._focus_tracker.observe(foreground_app, time.monotonic())
+                if focus_change is not None:
+                    self._focus_context = focus_change
+            except Exception as exc:
+                # A failed privacy probe is not evidence that no call is active.
+                # Close the mic gate immediately; the next successful poll may
+                # reopen it after the local Windows audio state is known again.
+                self._communication_turn_open = False
+                self._communication_turn_deadline = 0.0
+                self._communication_app_active = True
+                self._communication_context_known = False
+                print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
+                continue
+
+            if communication_context_unchanged(
+                    active, self._communication_app_active,
+                    self._communication_context_known):
+                # This remains a local decision. Recent keyboard/mouse input can
+                # wake a sleeping JARVIS for a direct command, but never in a
+                # known communication context.
+                if (not active and self._wake_enabled and not self._awake
+                        and should_auto_wake(
+                            context.get("idle_seconds") if isinstance(context, dict) else None,
+                            active,
+                        )):
+                    self.wake(reason="desktop activity")
+                continue
+
+            # Close any one-shot request before publishing a new context state.
+            # When entering a call, the audio callback must never observe the
+            # call gate open while a stale wake-word turn is still marked open.
+            self._communication_turn_open = False
+            self._communication_turn_deadline = 0.0
+            self._communication_app_active = active
+            self._communication_context_known = True
+            if not active and self._wake_enabled and not self._awake:
+                if should_auto_wake(
+                        context.get("idle_seconds") if isinstance(context, dict) else None,
+                        active):
+                    self.wake(reason="desktop activity")
+            if active:
+                if active_audio_apps is None and sys.platform == "win32":
+                    self.ui.write_log(
+                        "SYS: Windows audio-session detection is unavailable. "
+                        "Microphone stays local; repair pycaw/comtypes or use "
+                        "Push-to-Talk / the local wake phrase."
+                    )
+                elif wake_is_ready():
+                    ready = self._ensure_wake_detector()
+                    if ready:
+                        self.ui.write_log(
+                            "SYS: Communication privacy gate active. Say 'Hey Jarvis' "
+                            "for one request, or use Push-to-Talk."
+                        )
+                    else:
+                        self.ui.write_log(
+                            "SYS: Call/chat detected. Microphone stays local because "
+                            "the wake-word model could not start; use Push-to-Talk."
+                        )
+                else:
+                    self.ui.write_log(
+                        "SYS: Call/chat detected. Microphone stays local. Install the "
+                        "local 'Hey Jarvis' wake model or use Push-to-Talk to speak."
+                    )
+            else:
+                self.ui.write_log(
+                    "SYS: Communication privacy gate off — normal microphone mode resumed."
+                )
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
@@ -973,6 +1103,8 @@ class JarvisLive:
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+        from core.autonomy_policy import new_turn_authorization
+        self._turn_authorization = new_turn_authorization(text)
         # Respect wake-word sleep: a typed command must not be answered while
         # asleep either (the sleep gate is not just for the mic). Wake first with
         # "Hey Jarvis" or the WAKE NOW button.
@@ -1010,7 +1142,7 @@ class JarvisLive:
         if value:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
-            self.ui.set_state("LISTENING")
+            self.ui.set_state("LISTENING" if self._awake else "SLEEPING")
 
     def set_push_to_talk(self, enabled: bool) -> str:
         """Turn hold-to-talk on or off. Returns the scope actually achieved."""
@@ -1042,6 +1174,11 @@ class JarvisLive:
     def _on_ptt(self, held: bool) -> None:
         """Chord pressed or released — may arrive on the hotkey thread."""
         self._ptt_held = held
+        if self._communication_app_active:
+            # PTT is an explicit local authorization and works even if the
+            # optional wake-word model has not been installed.
+            self._communication_turn_open = bool(held)
+            self._communication_turn_deadline = 0.0
         if held:
             # Holding the key is also a way to wake it, so push-to-talk works
             # without having to say the wake word first.
@@ -1059,21 +1196,20 @@ class JarvisLive:
                     self._engine.flush_microphone(SEND_SAMPLE_RATE), self._loop)
             except Exception as e:
                 print(f"[JARVIS] PTT flush failed: {e}")
+        # The global hotkey listener runs on its own thread. Qt widgets must
+        # only be touched from the application's event-loop thread.
+        dispatch_to_loop(self._loop, lambda: self._update_ptt_ui(held))
+
+    def _update_ptt_ui(self, held: bool) -> None:
+        """Paint PTT state on the Qt/asyncio owner thread."""
+        if held:
+            state = "LISTENING"
+        else:
+            # Releasing PTT does not put JARVIS to sleep unless wake-word
+            # mode is enabled and the assistant is actually asleep.
+            state = ("SLEEPING" if (self._wake_enabled and not self._awake)
+                     else "LISTENING")
         try:
-            if held:
-                state = "LISTENING"
-            else:
-                # Releasing the key does NOT mean the assistant went to sleep.
-                #
-                # This used to paint SLEEPING unconditionally, and SLEEPING in
-                # this app means one specific thing — the wake-word gate is
-                # closed, the lids are down, nothing is being listened to at all.
-                # With push-to-talk on, every key release asserted that, so
-                # tapping WAKE NOW appeared to do nothing: the assistant really
-                # did wake, and the next release immediately painted it asleep
-                # again. Two different ideas were sharing one state.
-                state = ("SLEEPING" if (self._wake_enabled and not self._awake)
-                         else "LISTENING")
             self.ui.set_state(state)
         except Exception:
             pass
@@ -1242,6 +1378,15 @@ class JarvisLive:
         parts = [time_ctx, identity_ctx]
         if mem_str:
             parts.append(mem_str)
+        if not self._startup_mission_recovery_injected:
+            self._startup_mission_recovery_injected = True
+            try:
+                from plugins.mission_control import startup_recovery_context
+                recovery_context = startup_recovery_context()
+                if recovery_context:
+                    parts.append(recovery_context)
+            except Exception as recovery_error:
+                print(f"[Mission] Startup recovery check unavailable: {type(recovery_error).__name__}")
         parts.append(sys_prompt)
 
         cfg = dict(
@@ -1364,6 +1509,11 @@ class JarvisLive:
             if key and value:
                 update_memory({category: {key: {"value": value}}})
                 print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+            try:
+                from plugins.mission_control import record_tool_result
+                record_tool_result(self._turn_authorization, name, "")
+            except Exception:
+                pass
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
@@ -1530,8 +1680,23 @@ class JarvisLive:
                     args["mode"] = "improve"
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": self._turn_authorization}
-                r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
-                result = r or "Done."
+                if name == "dev_agent":
+                    from core.execution_policy import requires_dev_agent_confirmation
+                    if requires_dev_agent_confirmation(args):
+                        result = confirm_gate.request(
+                            key="dev_agent.execute",
+                            title="Run the coding agent",
+                            detail=("This writes project files, may install dependencies, and executes generated code. "
+                                    "Continue only if you trust this project and want it run."),
+                            run=lambda: self._action_registry.run(name, args, _ctx),
+                        )
+                    else:
+                        result = await loop.run_in_executor(
+                            None, lambda: self._action_registry.run(name, args, _ctx))
+                else:
+                    result = await loop.run_in_executor(
+                        None, lambda: self._action_registry.run(name, args, _ctx))
+                result = result or "Done."
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
                         and not r.startswith("No results")
@@ -1548,7 +1713,10 @@ class JarvisLive:
                 if self._plugin_registry.has(name):
                     r = await loop.run_in_executor(
                         None,
-                        lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
+                        lambda: self._plugin_registry.run(
+                            name, args, player=self.ui,
+                            session_memory=self._turn_authorization,
+                        )
                     )
                     result = r or "Done."
                 else:
@@ -1558,6 +1726,17 @@ class JarvisLive:
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
             self.speak_error(name, e)
+
+        # Mission completion is bound to the actual dispatcher result, not a
+        # verification sentence supplied by the model. Mission Control itself
+        # manages the active mission/step scope; every other tool call replaces
+        # the evidence for the currently running step.
+        if name != "mission_control":
+            try:
+                from plugins.mission_control import record_tool_result
+                record_tool_result(self._turn_authorization, name, result)
+            except Exception as _mission_evidence_error:
+                print(f"[Mission] Evidence recording failed closed: {_mission_evidence_error}")
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
@@ -1601,8 +1780,36 @@ class JarvisLive:
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
+        last_input_callback = [time.monotonic()]
 
         def callback(indata, frames, time_info, status):
+            # PortAudio can leave a stream object present after a USB endpoint
+            # disappears. A callback heartbeat lets the owner task detect that
+            # silent failure without doing device enumeration on the audio thread.
+            last_input_callback[0] = time.monotonic()
+            # A foreground Discord/Teams/Zoom/phone app is treated as a private
+            # conversation zone. Audio is never forwarded there until a local
+            # wake phrase or explicit PTT hold opens a single request.
+            if self._communication_app_active:
+                if (self._communication_turn_open
+                        and self._communication_turn_deadline
+                        and time.monotonic() >= self._communication_turn_deadline
+                        and not self._ptt_held):
+                    self._communication_turn_open = False
+                    self._communication_turn_deadline = 0.0
+
+                if not should_forward_microphone(
+                        True, self._communication_turn_open, self._ptt_held):
+                    with self._speaking_lock:
+                        _assistant_speaking = self._is_speaking
+                    # Never train/trigger the local wake model on JARVIS's own
+                    # speaker output or its acoustic tail.
+                    if not _assistant_speaking and not self._tail_active():
+                        det = self._wake_detector
+                        if det is not None:
+                            det.feed(indata)
+                    return
+
             # ── Wake-word gate ───────────────────────────────────────────────
             # While asleep, the mic audio NEVER goes to Gemini (nothing is
             # streamed, so JARVIS can't respond to speech not addressed to it and
@@ -1611,8 +1818,11 @@ class JarvisLive:
             # only a queue push, so the audio path is never slowed. When wake word
             # is off (default) or we're awake, this is a single boolean check.
             if self._wake_enabled and not self._awake:
+                with self._speaking_lock:
+                    assistant_speaking = self._is_speaking
                 det = self._wake_detector
-                if det is not None:
+                if (det is not None and should_feed_while_asleep(
+                        assistant_speaking, self._tail_active())):
                     det.feed(indata)
                 return
             with self._speaking_lock:
@@ -1725,7 +1935,20 @@ class JarvisLive:
             with _mic_stream:
                 print("[JARVIS] 🎤 Mic stream open")
                 while True:
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.25)
+                    if not stream_is_active(_mic_stream):
+                        self.ui.write_log(
+                            "SYS: Microphone stream stopped — restoring audio connection."
+                        )
+                        raise _ReconnectSignal(keep_context=True)
+                    if callback_is_stalled(
+                            last_input_callback[0], time.monotonic(), stall_after=5.0):
+                        self.ui.write_log(
+                            "SYS: Microphone stopped delivering audio — restoring connection."
+                        )
+                        raise _ReconnectSignal(keep_context=True)
+        except _ReconnectSignal:
+            raise
         except Exception as e:
             print(f"[JARVIS] ❌ Mic: {e}")
             raise
@@ -1776,6 +1999,23 @@ class JarvisLive:
     async def _receive_audio(self):
         print("[JARVIS] 👂 Recv started")
         out_buf, in_buf = [], []
+        _go_away_pending = False
+
+        async def _drain_before_session_resume():
+            # Preserve the current reply on speakers. Do not let a server-side
+            # session lifetime warning cut off audio that is already queued.
+            _deadline = time.monotonic() + 15.0
+            while time.monotonic() < _deadline:
+                with self._speaking_lock:
+                    _still_speaking = self._is_speaking
+                if self.audio_in_queue.empty() and not _still_speaking:
+                    break
+                await asyncio.sleep(0.05)
+            with self._speaking_lock:
+                _still_speaking = self._is_speaking
+            if _still_speaking or not self.audio_in_queue.empty():
+                print("[JARVIS] ⚠️ Audio did not drain before session resume; continuing reconnect")
+            raise _ReconnectSignal(keep_context=True)
 
         try:
             while True:
@@ -1798,6 +2038,30 @@ class JarvisLive:
                             if self._resume_handle is None:
                                 print("[JARVIS] 🔗 Session resumption armed")
                             self._resume_handle = _sru.new_handle
+
+                    # GoAway announces the session lifetime boundary. Record it
+                    # now, but let an active response/tool call finish before
+                    # reconnecting; an idle session can be resumed immediately.
+                    _go_away = go_away_notice(response)
+                    if _go_away is not None:
+                        _go_away_pending = True
+                        _time_left = getattr(_go_away, "time_left", None)
+                        print(f"[JARVIS] 🔗 Server GoAway received (time left: {_time_left}); scheduling session resume")
+                        _server_content = getattr(response, "server_content", None)
+                        _input_part = getattr(_server_content, "input_transcription", None)
+                        _output_part = getattr(_server_content, "output_transcription", None)
+                        with self._speaking_lock:
+                            _assistant_speaking = self._is_speaking
+                        _active_turn = live_turn_is_active(
+                            input_pending=bool(in_buf) or bool(getattr(_input_part, "text", None)),
+                            output_pending=bool(out_buf) or bool(getattr(_output_part, "text", None)),
+                            response_payload=bool(response.data),
+                            audio_pending=not self.audio_in_queue.empty(),
+                            assistant_speaking=_assistant_speaking,
+                            tool_call_pending=bool(response.tool_call),
+                        )
+                        if not _active_turn:
+                            raise _ReconnectSignal(keep_context=True)
 
                     if response.data:
                         if self._interrupted:
@@ -1849,6 +2113,9 @@ class JarvisLive:
                                 in_buf  = []
                                 out_buf = []
                                 self._visemes.reset()
+                                if (_go_away_pending and sc.turn_complete
+                                        and not response.tool_call):
+                                    await _drain_before_session_resume()
                                 continue
 
                             full_in = " ".join(in_buf).strip()
@@ -1895,6 +2162,15 @@ class JarvisLive:
                                         "text": full_out,
                                         "ts": datetime.now().isoformat(),
                                     }))
+                                if (self._communication_app_active
+                                        and self._communication_turn_open
+                                        and not self._ptt_held):
+                                    self._communication_turn_open = False
+                                    self._communication_turn_deadline = 0.0
+                                    self.ui.write_log(
+                                        "SYS: Privacy gate closed. Say 'Hey Jarvis' "
+                                        "for the next request."
+                                    )
                             out_buf = []
 
                             if self._vision_close_pending:
@@ -1916,6 +2192,13 @@ class JarvisLive:
                             function_responses=fn_responses
                         )
                         await self._flush_pending_vision()
+
+                    if (_go_away_pending and response.server_content
+                            and response.server_content.turn_complete
+                            and not response.tool_call):
+                        await _drain_before_session_resume()
+        except _ReconnectSignal:
+            raise
         except Exception as e:
             print(f"[JARVIS] ❌ Recv: {e}")
             traceback.print_exc()
@@ -1967,6 +2250,11 @@ class JarvisLive:
 
         try:
             while True:
+                if not stream_is_active(stream):
+                    self.ui.write_log(
+                        "SYS: Speaker stream stopped — restoring audio connection."
+                    )
+                    raise _ReconnectSignal(keep_context=True)
                 try:
                     chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(),
@@ -2046,15 +2334,28 @@ class JarvisLive:
 
                 try:
                     await asyncio.to_thread(stream.write, bytes(batch))
-                except (RuntimeError, asyncio.CancelledError):
-                    break   # executor shutting down — exit cleanly
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self.ui.write_log(
+                        "SYS: Speaker write failed — restoring audio connection."
+                    )
+                    raise _ReconnectSignal(keep_context=True) from e
+        except _ReconnectSignal:
+            raise
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise
         finally:
             self.set_speaking(False)
-            stream.stop()
-            stream.close()
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
 
     # ── Morning briefing ────────────────────────────────────────────────────────
 
@@ -2229,7 +2530,8 @@ class JarvisLive:
         while True:
             await asyncio.sleep(10)
             alert = await asyncio.to_thread(self._sys_monitor.check)
-            if not alert or not self.session or not self._awake:
+            if (not alert or not self.session or not self._awake
+                    or self._communication_app_active or self._phone_active):
                 continue
             # Don't interrupt an active conversation
             with self._speaking_lock:
@@ -2244,13 +2546,65 @@ class JarvisLive:
             except Exception as e:
                 print(f"[Monitor] ⚠️ Could not send alert: {e}")
 
+    async def _run_process_watchers(self) -> None:
+        """Watch explicitly requested processes and deliver saved alerts safely."""
+        while True:
+            await asyncio.sleep(5)
+            try:
+                from plugins.process_watch import check_all, acknowledge_alerts
+                found = await asyncio.to_thread(check_all)
+                known = {str(item.get("id")) for item in self._queued_process_alerts}
+                for item in found:
+                    if str(item.get("id")) not in known:
+                        self._queued_process_alerts.append(item)
+                        known.add(str(item.get("id")))
+            except Exception as exc:
+                print(f"[ProcessWatch] Poll failed: {type(exc).__name__}")
+                continue
+
+            if (not self._queued_process_alerts or not self.session
+                    or not self._awake or self._communication_app_active
+                    or self._phone_active):
+                continue
+
+            with self._speaking_lock:
+                speaking = self._is_speaking
+            if speaking or (time.monotonic() - self._last_user_speech) < 10:
+                continue
+
+            batch = self._queued_process_alerts[:5]
+            ids = [str(item.get("id")) for item in batch if item.get("id")]
+            messages = [str(item.get("message") or "")[:180] for item in batch]
+            if not ids or not messages:
+                continue
+            prompt = (
+                "[PROCESS_WATCH_ALERT]\n"
+                "The user explicitly asked JARVIS to monitor these processes. "
+                "Report the verified changes briefly in the user's current language. "
+                "Do not claim to have inspected files or process command lines.\n"
+                + "\n".join(f"- {message}" for message in messages)
+            )
+            try:
+                await self.session.send_client_content(
+                    turns={"role": "user", "parts": [{"text": prompt}]},
+                    turn_complete=True,
+                )
+                await asyncio.to_thread(acknowledge_alerts, ids)
+                self._queued_process_alerts = [
+                    item for item in self._queued_process_alerts
+                    if str(item.get("id")) not in set(ids)
+                ]
+            except Exception as exc:
+                print(f"[ProcessWatch] Alert delivery deferred: {type(exc).__name__}")
+
     # ── Background monitor ──────────────────────────────────────────────────────
 
     async def _run_background_monitor(self) -> None:
         """Check user-configured topics once per day; speak alerts when new headlines appear."""
         await asyncio.sleep(300)          # wait 5 min after startup before first check
         while True:
-            if self.session and self._awake:
+            if (self.session and self._awake and not self._communication_app_active
+                    and not self._phone_active):
                 # Don't interrupt if user spoke recently or JARVIS is mid-sentence
                 with self._speaking_lock:
                     speaking = self._is_speaking
@@ -2288,7 +2642,7 @@ class JarvisLive:
         while True:
             await asyncio.sleep(60)   # evaluate once per minute
 
-            if not self.session or not self._awake:
+            if (not self.session or self._communication_app_active or self._phone_active):
                 continue
 
             with self._speaking_lock:
@@ -2306,7 +2660,9 @@ class JarvisLive:
             _desktop_ctx = await asyncio.to_thread(
                 get_desktop_context, include_app=_desktop_opt_in
             )
-            if desktop_is_idle(_desktop_ctx) is False:
+            if not should_run_proactive_checkin(
+                    bool(self.session), self._communication_app_active,
+                    self._phone_active, _desktop_ctx):
                 continue
 
             self._proactive.mark_attempted()
@@ -2315,11 +2671,23 @@ class JarvisLive:
                 memory       = await asyncio.to_thread(load_memory)
                 monitors     = await asyncio.to_thread(list_monitors)
                 recent_turns = self._session_log[-8:] if self._session_log else []
+                project_context = ""
+                if _desktop_opt_in:
+                    selected_folder = getattr(self.ui, "current_file", None)
+                    if selected_folder and Path(str(selected_folder)).is_dir():
+                        snapshot = await asyncio.to_thread(
+                            inspect_project_folder, selected_folder
+                        )
+                        project_context = format_project_context(snapshot)
+                        if snapshot:
+                            await asyncio.to_thread(remember_project_snapshot, snapshot)
                 prompt = self._proactive.build_prompt(
                     memory       = memory,
                     monitors     = monitors or None,
                     recent_turns = recent_turns or None,
                     desktop_context = _desktop_ctx if _desktop_opt_in else None,
+                    focus_context = self._focus_context if _desktop_opt_in else None,
+                    project_context = project_context,
                 )
                 await self.session.send_client_content(
                     turns={"role": "user", "parts": [{"text": prompt}]},
@@ -2398,11 +2766,11 @@ class JarvisLive:
     # "providers are not installed" — the assistant then runs exactly as it did
     # before any of this existed.
     def _engine_mode(self) -> str:
-        try:
-            from memory.config_manager import get_provider_mode
-            return get_provider_mode()
-        except Exception:
-            return "gemini"
+        # A configuration read failure must not silently switch a local-only
+        # setup to Gemini Live. The config manager returns the legacy default
+        # only when no engine mode has ever been configured.
+        from memory.config_manager import get_provider_mode
+        return get_provider_mode()
 
     def _resolve_engine_caps(self):
         """What the chosen engine can do — or None for Gemini Live.
@@ -2451,13 +2819,13 @@ class JarvisLive:
             caps["audio_out"] = bool(str(pipe.get("tts") or "").strip())
             return caps
         except Exception as e:
-            # A local engine that will not start must never mean no assistant.
-            # Falling back to Live is the whole reason the ladder exists, and
-            # the reason is said out loud rather than left in a console.
-            self.ui.write_log(f"SYS: local engine unavailable ({e}) — "
-                              f"using Gemini Live.")
-            print(f"[JARVIS] Pipeline engine unavailable: {e}")
-            return None
+            # Never send a supposedly local conversation to Gemini Live when
+            # its selected pipeline is unavailable or misconfigured.
+            from core.engine_policy import local_engine_unavailable
+            self.ui.write_log(
+                f"SYS: local engine unavailable ({e}) — cloud fallback disabled.")
+            print(f"[JARVIS] Pipeline engine unavailable; refusing cloud fallback: {e}")
+            raise local_engine_unavailable(e) from e
 
     @asynccontextmanager
     async def _open_session(self, live_model: str, config):
@@ -2655,8 +3023,10 @@ class JarvisLive:
                     tg.create_task(self._receive_audio())
                     tg.create_task(self._play_audio())
                     tg.create_task(self._run_system_monitor())
+                    tg.create_task(self._run_process_watchers())
                     tg.create_task(self._run_background_monitor())
                     tg.create_task(self._run_proactive_mode())
+                    tg.create_task(self._run_communication_guard())
                     tg.create_task(self._run_sleep_watch())
                     if self._dashboard:
                         tg.create_task(self._relay_phone_audio())

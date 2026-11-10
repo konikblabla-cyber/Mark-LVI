@@ -34,5 +34,31 @@ class ProactiveRetryTests(unittest.TestCase):
             self.assertFalse(engine.should_trigger(500.0))
 
 
+    def test_prompt_uses_opted_in_broad_focus_context(self):
+        prompt = ProactiveEngine().build_prompt(
+            memory={},
+            focus_context={
+                "application": "code",
+                "category": "development",
+                "activity": "programming",
+            },
+        )
+        self.assertIn("Stable foreground context: programming", prompt)
+        self.assertIn("coarse process-name classification", prompt)
+        self.assertNotIn("window title", prompt.lower())
+
+    def test_prompt_can_use_metadata_only_selected_project_context(self):
+        prompt = ProactiveEngine().build_prompt(
+            memory={},
+            project_context=(
+                "[LOCAL PROJECT CONTEXT] Selected project folder: Jarvis. "
+                "Detected file types: Python (12)."
+            ),
+        )
+        self.assertIn("Selected project folder: Jarvis", prompt)
+        self.assertIn("Python (12)", prompt)
+
+
+
 if __name__ == "__main__":
     unittest.main()

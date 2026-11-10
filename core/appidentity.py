@@ -152,6 +152,15 @@ ALIASES: dict[str, dict[str, str]] = {
     "epic games":         {"Windows": "EpicGamesLauncher", "Darwin": "Epic Games Launcher",  "Linux": "legendary"},
 }
 
+# Process names are not always the same as the command used to launch an app.
+# Keep these separate from ALIASES so launcher_name() continues returning a
+# real executable/desktop entry while process matching accepts the runtime.
+_PROCESS_NAME_ALIASES: dict[str, dict[str, tuple[str, ...]]] = {
+    "libreoffice": {
+        "Linux": ("soffice", "soffice.bin", "oosplash"),
+    },
+}
+
 
 def _contains_word(phrase: str, word: str) -> bool:
     """Is `word` in `phrase` as a whole word, not as a fragment of a longer one?
@@ -214,7 +223,13 @@ def spelling_variants(spoken: str) -> list[str]:
     is called `Code`. Deduplicated, empties dropped.
     """
     out: list[str] = []
-    for candidate in (spoken, launcher_name(spoken)):
+    candidates = [spoken, launcher_name(spoken)]
+    # A launcher may spawn a different executable. Linux Office launchers
+    # use "libreoffice --writer" but run soffice.bin/oosplash processes.
+    for candidate in tuple(candidates):
+        key = fold(candidate)
+        candidates.extend(_PROCESS_NAME_ALIASES.get(key, {}).get(_OS, ()))
+    for candidate in candidates:
         folded = fold(candidate)
         if folded and folded not in out:
             out.append(folded)

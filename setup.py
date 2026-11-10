@@ -13,6 +13,9 @@ Two things it deliberately does NOT install:
     PyQt6 and numpy already listed here. No GPU, no OpenGL, no extra packages.
 """
 import platform
+import importlib.util
+import shutil
+from ctypes.util import find_library
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +58,55 @@ def _check_python() -> None:
         sys.exit(1)
 
 
+def _check_linux_portaudio() -> None:
+    """Fail with the missing system package before the app fails at import time."""
+    if OS != "Linux":
+        return
+    if find_library("portaudio"):
+        return
+
+    print(
+        "\n❌ PortAudio was not found. The sounddevice Python package needs "
+        "the system PortAudio library on Linux."
+    )
+    print("   Debian / Ubuntu: sudo apt-get install libportaudio2")
+    print("   Fedora:          sudo dnf install portaudio")
+    print("   Arch:             sudo pacman -S portaudio")
+    print("   Then run setup.py again.")
+    sys.exit(1)
+
+def _check_linux_qt_runtime() -> None:
+    """Fail clearly when Linux lacks the EGL runtime required by PyQt6."""
+    if OS != "Linux" or find_library("EGL"):
+        return
+    print("\n❌ Qt requires the Linux EGL runtime (`libEGL.so.1`), which is missing.")
+    print("   Debian / Ubuntu: sudo apt-get install libegl1")
+    print("   Fedora:          sudo dnf install mesa-libEGL")
+    print("   Arch:             sudo pacman -S libglvnd")
+    print('   Then run setup.py again.')
+    sys.exit(1)
+
+def _check_linux_desktop_tools() -> None:
+    """Warn when Linux desktop automation lacks its native X11 helpers."""
+    if OS != "Linux":
+        return
+    missing = []
+    if not shutil.which("gnome-screenshot"):
+        missing.append("gnome-screenshot (required by current PyScreeze)")
+    if importlib.util.find_spec("tkinter") is None:
+        missing.append("python3-tk")
+    if not (shutil.which("xclip") or shutil.which("xsel")):
+        missing.append("xclip or xsel")
+    if not find_library("EGL"):
+        missing.append("libegl1 (Qt display runtime)")
+    if not missing:
+        return
+    print("\n⚠️  Some Linux desktop-control features need system packages: " + ", ".join(missing))
+    print("   Debian / Ubuntu: sudo apt-get install libegl1 gnome-screenshot scrot python3-tk xclip")
+    print("   Fedora:          sudo dnf install mesa-libEGL gnome-screenshot scrot python3-tkinter xclip")
+    print("   Arch:             sudo pacman -S libglvnd gnome-screenshot scrot tk xclip")
+    print("   Then restart JARVIS. Voice, memory and other features remain available.")
+
 def _check_assets() -> None:
     """The avatar's face is a shipped file; a truncated clone should say so."""
     face = HERE / "core" / "face_model.obj"
@@ -74,6 +126,11 @@ def main() -> None:
     # requirements.txt filters OS-specific extras by itself via pip markers.
     _run("Installing Python dependencies (OS-specific extras auto-filtered)…",
          [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+
+    # Linux sounddevice wheels do not bundle PortAudio; check before browsers.
+    _check_linux_portaudio()
+    _check_linux_qt_runtime()
+    _check_linux_desktop_tools()
 
     # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.
     # (Safari automation additionally needs: python -m playwright install webkit)

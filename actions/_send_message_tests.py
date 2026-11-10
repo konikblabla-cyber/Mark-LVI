@@ -110,6 +110,24 @@ class OutboundMessageConfirmationTests(unittest.TestCase):
         self.assertIn("not installed", result)
         request.assert_not_called()
 
+    def test_console_logging_survives_legacy_windows_encoding(self):
+        import builtins
+        from types import SimpleNamespace
+
+        captured = []
+
+        def fake_print(value):
+            value = str(value)
+            if any(ord(char) > 127 for char in value):
+                raise UnicodeEncodeError("cp1252", value, 0, 1, "not encodable")
+            captured.append(value)
+
+        with patch.object(action.sys, "stdout", SimpleNamespace(encoding="cp1252")):
+            with patch.object(builtins, "print", side_effect=fake_print):
+                action._console_log("message " + chr(0x1F4E8) + " → received ✅")
+
+        self.assertEqual(captured, ["message ? ? received ?"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

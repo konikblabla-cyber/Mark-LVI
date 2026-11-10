@@ -64,8 +64,12 @@ It's not just an assistant — it's an extension of your digital life.
 | 🗣️ Voice Interruption | Optional local barge-in — EchoGuard learns the room's speaker echo and stops JARVIS only after sustained human speech is detected; off by default |
 | 🧾 Conversation History | Optional local text transcript archive with retention controls, secret-pattern redaction, search and HUD-confirmed deletion; audio and screenshots are never saved |
 | 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
+| 🔁 Mission Recovery | After a restart, JARVIS finds the oldest interrupted authorised mission and resumes through read-only recovery; it never blindly repeats the in-flight action |
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
 | 🖱️ Verified UI Workflows | Run 2–8 exact clicks in one application, verify every visible result before continuing, stop on ambiguity and pause critical steps for HUD confirmation |
+| 🎯 Foreground-Aware Input | On Windows, read the active executable locally before sending mouse/keyboard input and verify the same target again before delayed clicks. macOS/Linux use their OS accessibility path without this Windows-only guard |
+| 🛡️ Non-Destructive Text Entry | `smart_type` appends at the cursor by default; replacing existing text and clearing a field require explicit HUD confirmation |
+| 🌐 Browser Text Preservation | Browser `type` and `smart_type` insert at the current cursor by default; replacing existing field contents requires explicit HUD confirmation |
 | 📝 Safe UI Text Entry | Fill one explicitly requested, labelled non-sensitive field locally; verify without returning the field value; never submits the form |
 | 🎚️ Verified UI Sliders | Set one exact visible Windows slider value, check its live range, and verify the result locally without returning the value |
 | 🌳 Verified Tree Navigation | Expand or collapse one exact visible Windows TreeItem and verify the resulting state |
@@ -74,8 +78,23 @@ It's not just an assistant — it's an extension of your digital life.
 | ↩️ Undo | Take back what the assistant did — files it moved, renamed, created or wrote, and settings it changed |
 | ⚠️ Real Confirmation | Shutdown, restart and WiFi wait for a button **you** press — the model cannot confirm its own irreversible actions |
 | 🎧 Audio Device Picker | Choose the microphone and speakers by name, filtered to the short list your OS shows — and measured, so every entry actually works |
+| 🩺 Audio Self-Recovery | Detect a stopped speaker stream or a microphone callback stalled for 5 seconds; reconnect the voice session while preserving conversation context |
+| 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. Shared with check-ins only when desktop awareness is enabled; no window titles or screen contents |
+| 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
+| 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
+| 🧰 Windows Workspace Profiles | Save named app groups (work, study, gaming, etc.), list/delete them and launch a whole setup through the existing verified app launcher |
+| 🎛️ JARVIS Routines | Save one named routine that launches verified applications and runs selected, allowlisted Home Assistant actions; useful for work, study, gaming or cinema modes |
+| 🚀 Windows Auto-Start | Opt-in Task Scheduler entry starts JARVIS at the current user's sign-in with limited privileges; can be checked or disabled from voice commands |
+| 📋 Integrated Status Briefing | One local report combines active missions, pending reminders, monitored topics, saved workspaces and Windows health without changing anything |
+| 🧪 On-demand PC Diagnostics | Ask JARVIS for a read-only Windows health report with resource pressure, disk space, battery, uptime and top memory users; no automatic cleanup or process killing |
+| 🏠 Home Assistant | Optional HTTPS integration for explicitly mapped lights, switches, fans and climate targets; verifies reported state. No locks, doors, alarms or arbitrary services |
+| 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only; no window titles or screen capture |
+| 📁 Project Overview | On request, inspect the selected project folder's file types, entry points and Git branch; remember metadata without reading source code or storing its path |
+| ⏱️ Process Watch | Watch a named Windows process start or exit; keep the alert on disk until JARVIS can safely deliver it |
+| ⏰ Reminder Management | Set, list and cancel scheduled Windows reminders by their exact ID |
 | 🔗 Session Continuity | A dropped connection, a voice change or a device change no longer wipes the conversation |
 | 🧩 Plugin System | Drop a single `.py` file into `plugins/` — JARVIS learns a new skill on next launch |
+| 📄 Linux Office Aliases | Say Word, Excel or PowerPoint to open LibreOffice Writer, Calc or Impress when LibreOffice is installed; process verification recognises the actual runtime executable |
 | 📺 Video on the HUD | Plays YouTube, a local file or any video URL **where the avatar sits** — starts muted, sound on request |
 | 🪜 Model Ladder | Nine Gemini models in one measured order — a quota, a timeout or an outage steps to the next rung instead of failing |
 | 🔌 Choose Your Engine | Gemini Live, or your own STT + LLM + TTS — picked in the UI, no file editing |
@@ -91,6 +110,19 @@ It is filtered on the stream rather than with a pattern, because a tag is regula
 Gemini Live ends a turn itself. A chat API does not: every tool result is a fresh request, and if the model answers it with the same tool call again, the loop has no floor. The tool worked, returned *"Opened WhatsApp"*, and a small model asked for it again rather than replying — launching the application on top of the copy already running.
 
 Two limits, because they catch different faults. A **repeated** call means the model did not understand the result it got, and re-running the tool is actively harmful — so it is answered from what the tool already returned and never reaches the application twice. A long chain of **different** calls is a model wandering: not harmful, not converging either, so it is capped and the model is told to answer with what it has.
+
+### 🧰 Safer coding agent and project builder
+
+The coding agent validates a project plan before it writes anything. New builds use a **new project folder only**; an existing folder is left untouched. Generated paths cannot escape the project or follow symlinks. A plan is limited to 40 files, 25 dependencies and 2 MB per generated source file.
+
+Python dependencies stay inside that project's local `.venv`; JavaScript and TypeScript dependencies use local npm installs with lifecycle scripts disabled. Other languages use their native dependency manifests rather than installing packages into global Python.
+
+Running or building code still requires an on-screen confirmation. A process is limited to 5 minutes and 1 MB of captured output; exceeding either limit stops it. The regular code helper writes atomically and supports Undo for files up to 1 MB, without undoing later edits made by the user.
+
+Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit entity map for `light.*`, `switch.*`, `fan.*` or `climate.*` under **Settings → Plugin Settings**. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint. Climate control changes the target temperature only; it does not change HVAC mode.
+Routines store only application names and Home Assistant aliases/actions. Activation uses the existing app launcher and the enabled smart-home plugin; every device action is checked against the current allowlist and read back from Home Assistant.
+
+Process Watch records only executable basenames and start/exit events in a local JSON file. Pending notices remain saved until delivered. It never records command lines, file contents or window text. Reminder cancellation uses the ID returned when a reminder is created or listed.
 
 ### What it costs when you do not use it
 
@@ -235,35 +267,23 @@ There is also an **output volume slider**, and it belongs to the device chosen t
 
 ### 📱 The phone dashboard
 
-**It is plain HTTP on your local network, and that is a decision rather than an
-oversight.** This release tried making TLS mandatory and it was a mistake worth
-writing down: the certificate has to be self-signed, because no certificate
-authority will vouch for `192.168.1.108`, and a phone treats a self-signed
-certificate as an attack. Chrome shows a full-page interstitial. A QR scanner
-that opens links in its own in-app browser often shows a blank page and offers
-no way through at all, because those views have no "Advanced" button by design.
+**HTTPS is now the default for remote access.** JARVIS generates a machine-specific
+self-signed certificate on first run. Accept it once on the phone when prompted.
+The dashboard listens on the LAN only when TLS is active; if HTTPS is explicitly
+disabled, the certificate cannot be created, or the config cannot be read, it
+binds to `127.0.0.1` instead. Remote control commands and pairing credentials
+are never exposed over plain HTTP on the local network.
 
-A dashboard nobody can reach is not a more secure product than one they can.
-HTTPS is opt-in — `"dashboard_https": true` in `config/api_keys.json`, and the
-certificate is generated for you — and everything else that actually guards the
-door stayed:
+The dashboard keeps its other protections:
 
-* The pairing key is **eight characters through PBKDF2 at 200,000 rounds**,
-  not six through a single round of SHA-256. That was an offline search
-  measured in seconds on a GPU once one encrypted command had been captured;
-  it is now about a hundred thousand times more expensive per guess, for 80 ms
-  paid once at pairing time.
+* The pairing key is **eight characters through PBKDF2 at 200,000 rounds**.
 * `/login` is **rate limited** — six wrong keys and the address waits five
-  minutes. There was no limit at all before.
-* **Tokens expire.** One issued once used to work until the process ended.
-* **"Revoke all devices" now ends the live sessions** it always claimed to. It
-  cleared the remembered devices and left every session those devices had
-  already opened working, which is the one case anybody presses it for.
-* When HTTPS *is* switched on, commands are **AES-256-GCM**, not AES-CBC. CBC
-  concealed a message and did nothing to stop one being changed; an attacker on
-  the same network could flip bits and the assistant would act on whatever fell
-  out. Over plain HTTP there is no `crypto.subtle` and so no encryption at all —
-  the page says `NO ENC` on its own badge rather than pretending otherwise.
+  minutes.
+* **Tokens expire** after twelve hours.
+* **"Revoke all devices" ends their live sessions** as well as remembered
+  device tokens.
+* Over HTTPS, commands use **AES-256-GCM**. The plain-HTTP loopback-only mode
+  is for this computer and does not provide remote phone access.
 
 **And Windows was blocking it, per executable, invisibly.** This produced the
 strangest report of the release: the dashboard worked when JARVIS was started
@@ -543,13 +563,13 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/FatihMakes/Mark-LVI.git
+git clone https://github.com/konikblabla-cyber/Mark-LVI.git
 cd Mark-LVI
 python setup.py        # installs deps for YOUR OS + the browser automation engine
 python main.py
 ```
 
-`setup.py` only ever installs what your operating system needs — the Windows-only libraries are skipped automatically on macOS and Linux, and vice-versa. It also checks your Python version up front, so a wrong interpreter fails with a sentence instead of a wall of pip output. Prefer to do it by hand? `pip install -r requirements.txt` works too.
+`setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. Install `libegl1` for the Qt interface. For full X11 desktop input, screenshots and clipboard, also install `gnome-screenshot`, `python3-tk` and `xclip` (Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip`). `scrot` alone is not sufficient for the current PyScreeze screenshot backend. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
 
 > ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. The optional **wake word** engine is *not* installed here — grab it in one click from **⚙ → WAKE WORD** inside the app.
 
@@ -561,9 +581,11 @@ python main.py
 |---|---|
 | **OS** | Windows 10/11, macOS, or Linux |
 | **Linux display server** | Everything works on **X11**. On **Wayland** — the default on Ubuntu 22.04+, Fedora and current GNOME/KDE — the system does not permit any program to type, click, capture the screen or raise another window, so those features are unavailable and JARVIS says so at startup instead of pretending. Voice, memory, files, the web and opening applications are unaffected. Log out and pick an Xorg session to get the rest |
+| **Linux desktop tools** | The installer requires `libegl1` for the Qt interface. On X11, install `gnome-screenshot`, `python3-tk` and `xclip` (or `xsel`) for PyAutoGUI screenshots, Tk support and clipboard. `scrot` alone is not sufficient for current PyScreeze. Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip` |
 | **macOS permissions** | Accessibility (to type and click) and Screen Recording (to see the screen), both under System Settings → Privacy & Security. Until granted, those actions silently do nothing — the OS reports success either way |
 | **Python** | 3.11, 3.12 or 3.13 |
-| **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word) |
+| **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word). Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
+| **Proactive check-ins** | After 15 minutes without user speech, JARVIS may speak when Windows positively confirms the desktop is idle and no fullscreen window, call or phone session is active. This can happen while the wake-word microphone remains asleep; microphone audio stays local. Without a verified idle sensor, check-ins stay silent |
 | **Speakers** | Required for voice replies |
 | **API Key** | Free Gemini API key (entered on first launch → `config/api_keys.json`). Only for the Gemini engine — a fully local setup needs no key and no account |
 | **GPU** | **Not required, anywhere.** The avatar and HUD video are rendered in software; local speech recognition and the neural voice both run on the CPU by default |
@@ -657,7 +679,7 @@ Mark LVI/
 │   ├── config_manager.py     # api_keys.json access — key, OS, name, voice, colour, toggles
 │   └── long_term.json        # Persistent store — created on first run
 ├── dashboard/                # Phone control — paired by QR code, one-time key
-│   ├── server.py             # FastAPI + uvicorn; HTTP by default, HTTPS opt-in
+│   ├── server.py             # FastAPI + uvicorn; HTTPS remote access, loopback-only otherwise
 │   └── static/               # The phone page and its login screen
 ├── core/
 │   ├── outcome.py            # What a tool tells the model: done / unverified / failed /

@@ -45,6 +45,8 @@ import os
 import re
 import shutil
 import subprocess
+
+from core.process_runner import run_bounded_process
 import sys
 from pathlib import Path
 
@@ -55,6 +57,7 @@ _HARNESS = Path(__file__).with_name("_smoke_harness.py")
 _SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
               "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build",
               ".idea", ".vscode", ".next", "target", ".jarvis_backup"}
+_SKIP_DIRS_CASEFOLD = {name.casefold() for name in _SKIP_DIRS}
 _TEST_TIMEOUT = 180
 
 
@@ -177,10 +180,17 @@ def dropped_data(rel: str, old: str, new: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 def _walk(folder: Path, limit: int = 20_000):
     n = 0
-    for root, dirs, files in os.walk(folder):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+    for root, dirs, files in os.walk(folder, followlinks=False):
+        dirs[:] = [
+            d for d in dirs
+            if d.casefold() not in _SKIP_DIRS_CASEFOLD
+            and not (Path(root) / d).is_symlink()
+        ]
         for f in files:
-            yield Path(root) / f
+            path = Path(root) / f
+            if path.is_symlink():
+                continue
+            yield path
             n += 1
             if n >= limit:
                 return
@@ -190,6 +200,8 @@ def _project_python(folder: Path) -> str:
     """The project's own interpreter when it has a virtual environment —
     its dependencies live there, not in the one running this assistant."""
     for venv in (".venv", "venv", "env"):
+        if (folder / venv).is_symlink():
+            continue
         for exe in (Path(venv) / "Scripts" / "python.exe", Path(venv) / "bin" / "python"):
             if (folder / exe).is_file():
                 return str(folder / exe)
@@ -232,18 +244,18 @@ def detect_stack(folder: Path) -> dict:
     # Dependencies name the frameworks better than any guess could.
     deps: list[str] = []
     req = folder / "requirements.txt"
-    if req.is_file():
+    if req.is_file() and not req.is_symlink():
         for line in req.read_text(encoding="utf-8", errors="replace").splitlines():
             m = re.match(r"\s*([A-Za-z0-9_.\-]+)", line)
             if m and not line.strip().startswith("#"):
                 deps.append(m.group(1))
     pyproject = folder / "pyproject.toml"
-    if pyproject.is_file():
+    if pyproject.is_file() and not pyproject.is_symlink():
         deps += re.findall(r'^\s*"([A-Za-z0-9_.\-]+)', pyproject.read_text(
             encoding="utf-8", errors="replace"), re.M)
     pkg = folder / "package.json"
     pkg_data: dict = {}
-    if pkg.is_file():
+    if pkg.is_file() and not pkg.is_symlink():
         try:
             pkg_data = json.loads(pkg.read_text(encoding="utf-8"))
         except ValueError:
@@ -475,14 +487,22 @@ def runtime_problems(folder: Path, written: dict[str, str], originals: dict[str,
                OPENBLAS_NUM_THREADS="1", PYTHONDONTWRITEBYTECODE="1")
     limit = min(timeout, 30 + 10 * len(plugin_runs))
     try:
-        r = subprocess.run(
-            [stack["python"], str(_HARNESS), str(folder),
-             json.dumps({"imports": imports, "plugins": plugin_runs,
-                         "profile": "jarvis" if "jarvis" in stack["profiles"] else ""})],
-            cwd=str(folder), env=env, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=limit)
+        command = [
+            stack["python"], str(_HARNESS), str(folder),
+            json.dumps({"imports": imports, "plugins": plugin_runs,
+                        "profile": "jarvis" if "jarvis" in stack["profiles"] else ""}),
+        ]
+        r = run_bounded_process(command, cwd=folder, env=env, timeout=limit)
     except subprocess.TimeoutExpired as e:
         return _froze(e, plugin_runs or py[:1], limit)
+    except OSError as e:
+        return {(plugin_runs or py)[0]: f"Could not start the isolated test process: {str(e)[:200]}"}
+    if r.timed_out:
+        timed_out = subprocess.TimeoutExpired(command, limit, output=r.stdout, stderr=r.stderr)
+        return _froze(timed_out, plugin_runs or py[:1], limit)
+    if r.output_limited:
+        return {rel: "The isolated test process exceeded the 1 MB output limit and was stopped."
+                for rel in (plugin_runs or py[:1])}
     raw = r.stdout.rpartition("@@REPORT@@")[2].strip()
     try:
         report = json.loads(raw)
@@ -558,15 +578,19 @@ def run_tests(folder: Path, stack: dict) -> dict | None:
     env = dict(os.environ, CI="1", PYTHONDONTWRITEBYTECODE="1", QT_QPA_PLATFORM="offscreen",
                PYTHONIOENCODING="utf-8")
     try:
-        r = subprocess.run(cmd, cwd=str(folder), env=env, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=_TEST_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "failed": ["(the test run timed out)"],
-                "output": f"Tests did not finish within {_TEST_TIMEOUT}s."}
+        r = run_bounded_process(
+            cmd, cwd=folder, env=env, timeout=_TEST_TIMEOUT
+        )
     except OSError as e:
         return None if "not found" in str(e).lower() else \
             {"ok": False, "failed": ["(could not start)"], "output": str(e)}
+    if r.timed_out:
+        return {"ok": False, "failed": ["(the test run timed out)"],
+                "output": f"Tests did not finish within {_TEST_TIMEOUT}s."}
     output = (r.stdout or "") + "\n" + (r.stderr or "")
+    if r.output_limited:
+        return {"ok": False, "failed": ["(test output exceeded the 1 MB safety limit)"],
+                "output": output[-3000:] + "\nTest process was stopped after 1 MB of output."}
     failed = sorted({m for rx in _FAIL_RE for m in rx.findall(output)})
     # "no tests ran" (pytest 5, unittest "Ran 0 tests") is not a failure.
     if r.returncode == 5 or re.search(r"Ran 0 tests", output):
