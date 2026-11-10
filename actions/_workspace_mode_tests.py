@@ -65,6 +65,14 @@ class WorkspaceModeTests(unittest.TestCase):
         self.assertIn("Deleted", result)
         self.assertNotIn("Study", workspace_mode.run({"action": "list"}))
 
+    def test_corrupt_profile_store_is_not_overwritten(self):
+        self.path.write_text("{broken", encoding="utf-8")
+        result = workspace_mode.run({
+            "action": "save", "profile_name": "Work", "applications": ["Code"],
+        })
+        self.assertIn("refusing to overwrite", result.lower())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{broken")
+
     def test_non_windows_is_explicitly_unsupported(self):
         with patch.object(workspace_mode.platform, "system", return_value="Linux"):
             result = workspace_mode.run({"action": "list"})
