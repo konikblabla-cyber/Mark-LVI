@@ -19,6 +19,9 @@ import string
 import threading
 import time
 from pathlib import Path
+from core.dashboard_upload_policy import (
+    MAX_UPLOAD_FILES, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_TOTAL_MB, upload_usage,
+)
 
 _DEPS_OK = False
 try:
@@ -735,6 +738,7 @@ class DashboardServer:
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
         self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
         self._uploads_dir                 = UPLOADS_DIR
+        self._upload_lock                 = asyncio.Lock()
         # Set by serve() when the port could not be taken, so the UI can say
         # why the QR code leads nowhere instead of showing it regardless.
         self._bind_error: str = ""
@@ -1061,45 +1065,96 @@ class DashboardServer:
                 if not _auth(req):
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-                safe = _safe_filename(file.filename or "upload")
-                dest = self._uploads_dir / safe
-                stem, suffix = Path(safe).stem, Path(safe).suffix
-                counter = 1
-                while dest.exists():
-                    dest = self._uploads_dir / f"{stem}_{counter}{suffix}"
-                    counter += 1
-
-                size = 0
-                max_bytes = MAX_UPLOAD_MB * 1024 * 1024
-                try:
-                    with open(dest, "wb") as fout:
-                        while True:
-                            chunk = await file.read(65536)
-                            if not chunk:
-                                break
-                            size += len(chunk)
-                            if size > max_bytes:
-                                fout.close()
-                                dest.unlink(missing_ok=True)
-                                return JSONResponse(
-                                    {"error": f"File too large (max {MAX_UPLOAD_MB} MB)"},
-                                    status_code=413,
-                                )
-                            fout.write(chunk)
-                except Exception as exc:
+                # Serialize uploads so concurrent phone requests cannot race
+                # aggregate quota checks or choose/truncate the same filename.
+                async with self._upload_lock:
                     try:
-                        dest.unlink(missing_ok=True)
-                    except Exception:
-                        pass
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                        self._uploads_dir.mkdir(parents=True, exist_ok=True)
+                        used_bytes, file_count = upload_usage(self._uploads_dir)
+                    except (OSError, ValueError) as exc:
+                        print(f"[Dashboard] Upload storage check failed: {type(exc).__name__}")
+                        return JSONResponse(
+                            {"error": "Upload storage is unavailable or unsafe"},
+                            status_code=503,
+                        )
 
-                asyncio.create_task(self.broadcast({
-                    "type": "file_received",
-                    "name": dest.name,
-                    "size": size,
-                    "saved_to": str(self._uploads_dir),
-                }))
-                return JSONResponse({"ok": True, "name": dest.name, "size": size})
+                    if file_count >= MAX_UPLOAD_FILES:
+                        return JSONResponse(
+                            {"error": f"Upload limit reached ({MAX_UPLOAD_FILES} files)"},
+                            status_code=413,
+                        )
+                    remaining_total = MAX_UPLOAD_TOTAL_BYTES - used_bytes
+                    per_file_limit = MAX_UPLOAD_MB * 1024 * 1024
+                    max_bytes = min(per_file_limit, remaining_total)
+                    if max_bytes <= 0:
+                        return JSONResponse(
+                            {"error": f"Upload storage limit reached ({MAX_UPLOAD_TOTAL_MB} MB total)"},
+                            status_code=413,
+                        )
+
+                    safe = _safe_filename(file.filename or "upload")
+                    stem, suffix = Path(safe).stem, Path(safe).suffix
+                    dest = self._uploads_dir / safe
+                    fout = None
+                    # Exclusive create protects files created by another process.
+                    for counter in range(1000):
+                        try:
+                            fout = open(dest, "xb")
+                            break
+                        except FileExistsError:
+                            dest = self._uploads_dir / f"{stem}_{counter + 1}{suffix}"
+                    if fout is None:
+                        return JSONResponse(
+                            {"error": "Could not allocate a unique upload name"},
+                            status_code=409,
+                        )
+
+                    size = 0
+                    too_large = False
+                    try:
+                        with fout as output:
+                            while True:
+                                chunk = await file.read(65536)
+                                if not chunk:
+                                    break
+                                if size + len(chunk) > max_bytes:
+                                    too_large = True
+                                    break
+                                output.write(chunk)
+                                size += len(chunk)
+                    except Exception as exc:
+                        try:
+                            if not dest.is_symlink():
+                                dest.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        print(f"[Dashboard] Upload failed: {type(exc).__name__}")
+                        return JSONResponse({"error": "Upload failed"}, status_code=500)
+                    finally:
+                        try:
+                            await file.close()
+                        except Exception:
+                            pass
+
+                    if too_large:
+                        try:
+                            dest.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        reason = (
+                            f"Upload exceeds the per-file limit ({MAX_UPLOAD_MB} MB)"
+                            if max_bytes == per_file_limit
+                            else f"Upload exceeds the total storage limit ({MAX_UPLOAD_TOTAL_MB} MB)"
+                        )
+                        return JSONResponse({"error": reason}, status_code=413)
+
+                    asyncio.create_task(self.broadcast({
+                        "type": "file_received",
+                        "name": dest.name,
+                        "size": size,
+                        "saved_to": str(self._uploads_dir),
+                    }))
+                    return JSONResponse({"ok": True, "name": dest.name, "size": size})
         else:
             @app.post("/api/upload")
             async def upload_unavailable(req: Request):
