@@ -119,7 +119,7 @@ def _system_disk_usage() -> dict | None:
     try:
         root = os.environ.get("SystemDrive", "").strip()
         if root:
-            root = root.rstrip("\\\\") + "\\\\"
+            root = os.path.join(root, os.sep)
         else:
             root = Path.home().anchor or str(Path.home())
         usage = psutil.disk_usage(root)
