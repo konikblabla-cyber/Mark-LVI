@@ -815,9 +815,9 @@ class JarvisLive:
                 # A failed privacy probe is not evidence that no call is active.
                 # Close the mic gate immediately; the next successful poll may
                 # reopen it after the local Windows audio state is known again.
-                self._communication_app_active = True
                 self._communication_turn_open = False
                 self._communication_turn_deadline = 0.0
+                self._communication_app_active = True
                 print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
                 continue
 
@@ -833,9 +833,12 @@ class JarvisLive:
                     self.wake(reason="desktop activity")
                 continue
 
-            self._communication_app_active = active
+            # Close any one-shot request before publishing a new context state.
+            # When entering a call, the audio callback must never observe the
+            # call gate open while a stale wake-word turn is still marked open.
             self._communication_turn_open = False
             self._communication_turn_deadline = 0.0
+            self._communication_app_active = active
             if not active and self._wake_enabled and not self._awake:
                 if should_auto_wake(
                         context.get("idle_seconds") if isinstance(context, dict) else None,
