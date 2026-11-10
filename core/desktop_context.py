@@ -62,6 +62,20 @@ def _is_fullscreen_monitor_rect(
     )
 
 
+def _rect_within_primary_display(
+    left: int, top: int, right: int, bottom: int,
+    screen_width: int, screen_height: int,
+) -> bool:
+    """Only use primary-screen fallback when the window is actually on it."""
+    width, height = int(screen_width), int(screen_height)
+    if width <= 0 or height <= 0:
+        return False
+    return (
+        int(left) >= -5 and int(top) >= -5
+        and int(right) <= width + 5 and int(bottom) <= height + 5
+    )
+
+
 def get_desktop_context(include_app: bool = True) -> dict:
     """Read idle time and foreground-window geometry, optionally process name.
 
@@ -154,7 +168,10 @@ def get_desktop_context(include_app: bool = True) -> dict:
                 else:
                     screen_width = user32.GetSystemMetrics(0)
                     screen_height = user32.GetSystemMetrics(1)
-                    if screen_width > 0 and screen_height > 0:
+                    if _rect_within_primary_display(
+                            rect.left, rect.top, rect.right, rect.bottom,
+                            screen_width, screen_height,
+                    ):
                         fullscreen_known = True
                         fullscreen = _is_fullscreen_rect(
                             rect.left, rect.top, rect.right, rect.bottom,

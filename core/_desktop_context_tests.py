@@ -13,6 +13,7 @@ from core.desktop_context import (
     should_run_proactive_checkin,
     _is_fullscreen_rect,
     _is_fullscreen_monitor_rect,
+    _rect_within_primary_display,
 )
 
 
@@ -100,6 +101,17 @@ class DesktopContextTests(unittest.TestCase):
         ))
         self.assertFalse(_is_fullscreen_monitor_rect(
             -1800, 100, -100, 900, -1920, 0, 0, 1080,
+        ))
+
+    def test_primary_display_fallback_never_guesses_for_secondary_monitors(self):
+        self.assertTrue(_rect_within_primary_display(
+            0, 0, 1920, 1080, 1920, 1080,
+        ))
+        self.assertFalse(_rect_within_primary_display(
+            -1920, 0, 0, 1080, 1920, 1080,
+        ))
+        self.assertFalse(_rect_within_primary_display(
+            1920, 0, 3840, 1080, 1920, 1080,
         ))
 
     def test_missing_windows_sensor_preserves_other_platform_behaviour(self):
