@@ -124,7 +124,7 @@ class OutboundMessageConfirmationTests(unittest.TestCase):
 
         with patch.object(action.sys, "stdout", SimpleNamespace(encoding="cp1252")):
             with patch.object(builtins, "print", side_effect=fake_print):
-                action._console_log("message U0001F4E8 → received ✅")
+                action._console_log("message " + chr(0x1F4E8) + " → received ✅")
 
         self.assertEqual(captured, ["message ? ? received ?"])
 

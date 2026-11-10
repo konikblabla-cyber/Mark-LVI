@@ -13,6 +13,7 @@ from core import audio_devices
 
 class AudioDeviceTests(unittest.TestCase):
     def setUp(self):
+        audio_devices._cache = None
         audio_devices._probe_results.clear()
         audio_devices._chosen_api.update({"input": None, "output": None})
 
@@ -102,6 +103,20 @@ class AudioDeviceTests(unittest.TestCase):
         self.assertEqual(audio_devices._chosen_api["input"], "directsound")
         self.assertIsNone(audio_devices._chosen_api["output"])
 
+
+    def test_refresh_clears_probe_results_for_reused_device_indices(self):
+        audio_devices._probe_results[("directsound", "input", 3)] = True
+        audio_devices._chosen_api["input"] = "directsound"
+        with patch.object(
+            audio_devices, "_query_uncached",
+            return_value={"input": ["New microphone"], "output": []},
+        ):
+            self.assertEqual(
+                audio_devices.list_devices("input", refresh=True),
+                ["New microphone"],
+            )
+        self.assertEqual(audio_devices._probe_results, {})
+        self.assertIsNone(audio_devices._chosen_api["input"])
 
     def test_duplicate_name_does_not_hide_a_working_endpoint(self):
         fake_sd = types.SimpleNamespace(

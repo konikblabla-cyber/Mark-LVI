@@ -37,6 +37,7 @@ DEFAULT_VALUE = ""
 
 _cache: dict[str, list[str]] | None = None
 _cache_lock = threading.Lock()
+_query_lock = threading.RLock()
 
 # Which host API each direction settled on, so resolve() opens the same endpoint
 # the picker listed. Filled in by _query().
@@ -265,7 +266,7 @@ def _is_pseudo(name: str) -> bool:
     return any(tok in low for tok in _PSEUDO_DEVICES)
 
 
-def _query() -> dict[str, list[str]]:
+def _query_uncached() -> dict[str, list[str]]:
     """Return {'input': [names...], 'output': [names...]}. Never raises.
 
     Only real, selectable devices — see the note above."""
@@ -341,6 +342,18 @@ def _query() -> dict[str, list[str]]:
     except Exception as e:
         print(f"[Audio] Device enumeration failed: {e}")
     return out
+
+
+def _query() -> dict[str, list[str]]:
+    """Serialize device snapshots and discard transport results from old indices.
+
+    PortAudio indices can be reassigned after a USB headset is unplugged. A
+    cached success for yesterday's index must never validate today's endpoint.
+    """
+    with _query_lock:
+        _probe_results.clear()
+        _chosen_api.update({"input": None, "output": None})
+        return _query_uncached()
 
 
 def prefetch() -> None:
