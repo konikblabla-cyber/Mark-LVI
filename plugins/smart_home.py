@@ -142,7 +142,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     try:
         response = requests.post(
             f"{base_url}/api/services/light/{service}",
-            headers=headers, json=payload, timeout=(3.0, 5.0),
+            headers=headers, json=payload, timeout=(3.0, 5.0), allow_redirects=False,
         )
         if response.status_code not in {200, 201}:
             return f"Home Assistant rejected the light command (HTTP {response.status_code})."
@@ -151,7 +151,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         # is not proof that the physical light changed state.
         verified = requests.get(
             f"{base_url}/api/states/{entity}",
-            headers=headers, timeout=(3.0, 5.0),
+            headers=headers, timeout=(3.0, 5.0), allow_redirects=False,
         )
         if verified.status_code != 200:
             return "The command was accepted, but I could not verify the light state."
