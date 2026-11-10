@@ -189,11 +189,13 @@ class FileControllerSafetyTests(unittest.TestCase):
         self.assertTrue(target.exists())
 
     def test_explicit_exact_delete_skips_second_confirmation(self):
-        target = self.root / "report.txt"
+        folder = self.root / "authorizedfolder"
+        folder.mkdir()
+        target = folder / "report.txt"
         target.write_text("keep", encoding="utf-8")
-        params = {"action": "delete", "path": str(self.root), "name": target.name}
+        params = {"action": "delete", "path": str(folder), "name": target.name}
         with patch.object(confirm, "request") as gate, patch.object(files, "_safe_trash", return_value="Moved to Trash: report.txt"):
-            result = files.file_controller(params, session_memory=new_turn_authorization(f"Delete report.txt in {self.root.name}."))
+            result = files.file_controller(params, session_memory=new_turn_authorization("Delete report.txt in authorizedfolder."))
         self.assertIn("Moved to Trash", result)
         gate.assert_not_called()
 
