@@ -9,6 +9,7 @@ from core.desktop_context import (
     _clean_process_name,
     _idle_seconds_from_ticks,
     desktop_is_idle,
+    should_allow_proactive_interrupt,
     _is_fullscreen_rect,
 )
 
@@ -43,6 +44,17 @@ class DesktopContextTests(unittest.TestCase):
             "available": True, "idle_seconds": 600.0, "fullscreen": True,
         }))
 
+    def test_proactive_interrupt_requires_positive_idle_confirmation(self):
+        self.assertTrue(should_allow_proactive_interrupt({
+            "available": True, "idle_seconds": 120.0,
+        }))
+        self.assertFalse(should_allow_proactive_interrupt({
+            "available": True, "idle_seconds": 5.0,
+        }))
+        self.assertFalse(should_allow_proactive_interrupt({"available": False}))
+        self.assertFalse(should_allow_proactive_interrupt({
+            "available": True, "idle_seconds": None,
+        }))
     def test_fullscreen_geometry_detects_borderless_fullscreen(self):
         self.assertTrue(_is_fullscreen_rect(0, 0, 1920, 1080, 1920, 1080))
         self.assertFalse(_is_fullscreen_rect(100, 100, 1200, 800, 1920, 1080))

@@ -88,7 +88,7 @@ from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     should_auto_wake, should_forward_microphone,
 )
-from core.desktop_context import get_desktop_context, desktop_is_idle
+from core.desktop_context import get_desktop_context, should_allow_proactive_interrupt
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
@@ -2468,7 +2468,7 @@ class JarvisLive:
             _desktop_ctx = await asyncio.to_thread(
                 get_desktop_context, include_app=_desktop_opt_in
             )
-            if desktop_is_idle(_desktop_ctx) is False:
+            if not should_allow_proactive_interrupt(_desktop_ctx):
                 continue
 
             self._proactive.mark_attempted()

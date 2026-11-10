@@ -141,3 +141,7 @@ def desktop_is_idle(context: object,
     except (TypeError, ValueError):
         return False
     return seconds >= max(0.0, float(minimum_seconds))
+
+def should_allow_proactive_interrupt(context: object) -> bool:
+    """Allow unsolicited voice only when the desktop sensor positively confirms idle."""
+    return desktop_is_idle(context) is True
