@@ -82,6 +82,8 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. Shared with check-ins only when desktop awareness is enabled; no window titles or screen contents |
 | 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
 | 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
+| 🧰 Windows Workspace Profiles | Save named app groups (work, study, gaming, etc.), list/delete them and launch a whole setup through the existing verified app launcher |
+| 🧪 On-demand PC Diagnostics | Ask JARVIS for a read-only Windows health report with resource pressure, disk space, battery, uptime and top memory users; no automatic cleanup or process killing |
 | 🏠 Home Assistant Lights | Optional HTTPS integration for explicitly mapped Home Assistant lights; can turn lights on/off and verify reported state. No locks, doors, alarms or arbitrary services |
 | 🔗 Session Continuity | A dropped connection, a voice change or a device change no longer wipes the conversation |
 | 🧩 Plugin System | Drop a single `.py` file into `plugins/` — JARVIS learns a new skill on next launch |
