@@ -29,7 +29,9 @@ on:
       - "actions/system_monitor.py"
       - "actions/_system_monitor_tests.py"
       - "actions/workspace_mode.py"
-      - "actions/_workspace_mode_tests.py"
+      - "actions/_workspace_mode_tests.py actions/status_briefing.py actions/_status_briefing_tests.py"
+      - "actions/status_briefing.py"
+      - "actions/_status_briefing_tests.py"
       - "plugins/smart_home.py"
       - "plugins/_smart_home_tests.py"
       - "actions/reminder.py"
@@ -216,6 +218,8 @@ jobs:
         run: python -m actions._system_monitor_tests
       - name: Run Windows workspace profile tests
         run: python -m actions._workspace_mode_tests
+      - name: Run integrated status briefing tests
+        run: python -m actions._status_briefing_tests
       - name: Run restricted Home Assistant light tests
         run: python -m plugins._smart_home_tests
       - name: Run Windows reminder management tests
