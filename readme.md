@@ -559,10 +559,11 @@ python main.py
 |---|---|
 | **OS** | Windows 10/11, macOS, or Linux |
 | **Linux display server** | Everything works on **X11**. On **Wayland** — the default on Ubuntu 22.04+, Fedora and current GNOME/KDE — the system does not permit any program to type, click, capture the screen or raise another window, so those features are unavailable and JARVIS says so at startup instead of pretending. Voice, memory, files, the web and opening applications are unaffected. Log out and pick an Xorg session to get the rest |
-| **Linux desktop tools** | Install `libegl1` for the Qt interface. On X11, install `gnome-screenshot`, `python3-tk` and `xclip` (or `xsel`) for PyAutoGUI screenshots, Tk support and clipboard. `scrot` alone is not sufficient for current PyScreeze. Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip` |
+| **Linux desktop tools** | The installer requires `libegl1` for the Qt interface. On X11, install `gnome-screenshot`, `python3-tk` and `xclip` (or `xsel`) for PyAutoGUI screenshots, Tk support and clipboard. `scrot` alone is not sufficient for current PyScreeze. Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip` |
 | **macOS permissions** | Accessibility (to type and click) and Screen Recording (to see the screen), both under System Settings → Privacy & Security. Until granted, those actions silently do nothing — the OS reports success either way |
 | **Python** | 3.11, 3.12 or 3.13 |
 | **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word). Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
+| **Proactive check-ins** | Spoken check-ins run only when Windows can confirm desktop idleness. On systems without an idle sensor JARVIS stays silent rather than interrupting during active use |
 | **Speakers** | Required for voice replies |
 | **API Key** | Free Gemini API key (entered on first launch → `config/api_keys.json`). Only for the Gemini engine — a fully local setup needs no key and no account |
 | **GPU** | **Not required, anywhere.** The avatar and HUD video are rendered in software; local speech recognition and the neural voice both run on the CPU by default |

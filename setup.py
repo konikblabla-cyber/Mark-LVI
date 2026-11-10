@@ -75,6 +75,17 @@ def _check_linux_portaudio() -> None:
     print("   Then run setup.py again.")
     sys.exit(1)
 
+def _check_linux_qt_runtime() -> None:
+    """Fail clearly when Linux lacks the EGL runtime required by PyQt6."""
+    if OS != "Linux" or find_library("EGL"):
+        return
+    print("\n❌ Qt requires the Linux EGL runtime (`libEGL.so.1`), which is missing.")
+    print("   Debian / Ubuntu: sudo apt-get install libegl1")
+    print("   Fedora:          sudo dnf install mesa-libEGL")
+    print("   Arch:             sudo pacman -S libglvnd")
+    print('   Then run setup.py again.')
+    sys.exit(1)
+
 def _check_linux_desktop_tools() -> None:
     """Warn when Linux desktop automation lacks its native X11 helpers."""
     if OS != "Linux":
@@ -118,6 +129,7 @@ def main() -> None:
 
     # Linux sounddevice wheels do not bundle PortAudio; check before browsers.
     _check_linux_portaudio()
+    _check_linux_qt_runtime()
     _check_linux_desktop_tools()
 
     # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.

@@ -31,6 +31,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes libportaudio2 libegl1 gnome-screenshot scrot python3-tk xclip xvfb
+      - name: Verify the Linux Qt EGL runtime
+        if: runner.os == 'Linux'
+        run: python -c "from setup import _check_linux_qt_runtime; _check_linux_qt_runtime()"
       - name: Verify the installer detects the audio runtime
         run: python -c "from setup import _check_linux_portaudio; _check_linux_portaudio()"
       - name: Smoke-test Linux X11 input and screenshot dependencies
