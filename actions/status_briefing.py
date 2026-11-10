@@ -23,8 +23,23 @@ def build_status_briefing() -> str:
         sections.append(f"ACTIVE MISSIONS: unavailable ({type(exc).__name__}).")
 
     try:
-        from actions.reminder import _list_reminders
-        sections.append("REMINDERS:\n" + _list_reminders()[:1600])
+        from actions.reminder import _read_registry, _scripts_dir, _REMINDER_ID
+        entries = _read_registry()
+        scripts = _scripts_dir()
+        visible = []
+        for reminder_id, record in entries.items():
+            if not _REMINDER_ID.fullmatch(str(reminder_id)) or not isinstance(record, dict):
+                continue
+            script_name = str(record.get("script") or "")
+            if script_name != f"{reminder_id}.py" or not (scripts / script_name).is_file():
+                continue
+            visible.append(
+                f"{record.get('date', '')} {record.get('time', '')}: "
+                f"{str(record.get('message', 'Reminder'))[:100]}"
+            )
+        sections.append(
+            "REMINDERS:\\n" + ("\\n".join(sorted(visible)[:20]) if visible else "none pending.")
+        )
     except Exception as exc:
         sections.append(f"REMINDERS: unavailable ({type(exc).__name__}).")
 
