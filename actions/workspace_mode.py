@@ -28,8 +28,8 @@ def _read_profiles() -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
-    except (OSError, ValueError, TypeError):
-        return {}
+    except (OSError, ValueError, TypeError) as exc:
+        raise RuntimeError("Workspace profile storage is unreadable; refusing to overwrite it.") from exc
     if not isinstance(data, dict):
         return {}
     clean = {}
@@ -78,7 +78,10 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
 
     params = parameters if isinstance(parameters, dict) else {}
     action = str(params.get("action") or "list").strip().casefold()
-    profiles = _read_profiles()
+    try:
+        profiles = _read_profiles()
+    except RuntimeError as exc:
+        return str(exc)
 
     if action == "list":
         if not profiles:
