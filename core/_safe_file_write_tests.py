@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from core import undo
-from core.safe_file_write import safe_write_text
+from core.safe_file_write import MAX_SAFE_WRITE_BYTES, _signature, safe_write_text
 
 
 class SafeFileWriteTests(unittest.TestCase):
@@ -100,6 +100,12 @@ class SafeFileWriteTests(unittest.TestCase):
                     target, "model output", expected_text="old", verify_expected=True
                 )
             self.assertFalse(target.exists())
+
+    def test_undo_signature_does_not_read_unbounded_later_file_growth(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "main.py"
+            target.write_bytes(b"x" * (MAX_SAFE_WRITE_BYTES + 1))
+            self.assertIsNone(_signature(target))
 
     def test_refuses_directory(self):
         with tempfile.TemporaryDirectory() as temp:

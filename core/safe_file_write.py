@@ -17,7 +17,7 @@ def _signature(path: Path):
     """Identify the exact file written, including its content."""
     try:
         info = path.lstat()
-        if not stat.S_ISREG(info.st_mode):
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_SAFE_WRITE_BYTES:
             return None
         digest = hashlib.sha256(path.read_bytes()).digest()
         return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
