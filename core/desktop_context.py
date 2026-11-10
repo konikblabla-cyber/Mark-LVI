@@ -131,7 +131,7 @@ def get_desktop_context(include_app: bool = True) -> dict:
     except Exception:
         return {
             "available": True, "idle_seconds": None,
-            "foreground_app": "", "fullscreen": False,
+            "foreground_app": "", "fullscreen": False, "fullscreen_known": False,
         }
 
 

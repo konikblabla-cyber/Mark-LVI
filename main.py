@@ -92,6 +92,7 @@ from core.desktop_context import get_desktop_context, should_run_proactive_check
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
+    should_feed_while_asleep,
 )
 
 # How long the assistant stays awake with no user speech before it auto-sleeps
@@ -1113,7 +1114,7 @@ class JarvisLive:
         if value:
             self.ui.set_state("SPEAKING")
         elif not self.ui.muted:
-            self.ui.set_state("LISTENING")
+            self.ui.set_state("LISTENING" if self._awake else "SLEEPING")
 
     def set_push_to_talk(self, enabled: bool) -> str:
         """Turn hold-to-talk on or off. Returns the scope actually achieved."""
@@ -1779,7 +1780,8 @@ class JarvisLive:
                 with self._speaking_lock:
                     assistant_speaking = self._is_speaking
                 det = self._wake_detector
-                if det is not None and not assistant_speaking and not self._tail_active():
+                if (det is not None and should_feed_while_asleep(
+                        assistant_speaking, self._tail_active())):
                     det.feed(indata)
                 return
             with self._speaking_lock:

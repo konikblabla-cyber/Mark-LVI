@@ -41,6 +41,12 @@ def is_installed() -> bool:
         return False
 
 
+
+
+def should_feed_while_asleep(assistant_speaking: bool, echo_tail_active: bool) -> bool:
+    """Never analyse the assistant speaker output as a local wake phrase."""
+    return not assistant_speaking and not echo_tail_active
+
 def is_ready() -> bool:
     """True if openwakeword is installed AND its model files are present on disk.
 

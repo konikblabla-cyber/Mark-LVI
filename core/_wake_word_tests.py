@@ -7,6 +7,11 @@ from core import wake_word
 
 
 class WakeWordInstallerTests(unittest.TestCase):
+    def test_wake_detector_does_not_listen_to_jarvis_speaker_output(self):
+        self.assertTrue(wake_word.should_feed_while_asleep(False, False))
+        self.assertFalse(wake_word.should_feed_while_asleep(True, False))
+        self.assertFalse(wake_word.should_feed_while_asleep(False, True))
+        self.assertFalse(wake_word.should_feed_while_asleep(True, True))
     def test_pip_install_timeout_is_reported_without_hanging(self):
         timeout = subprocess.TimeoutExpired(["python", "-m", "pip"], 300)
         with patch.object(wake_word, "is_installed", return_value=False), \
