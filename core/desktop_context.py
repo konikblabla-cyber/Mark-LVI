@@ -52,7 +52,7 @@ def get_desktop_context(include_app: bool = True) -> dict:
     if os.name != "nt":
         return {
             "available": False, "idle_seconds": None,
-            "foreground_app": "", "fullscreen": False,
+            "foreground_app": "", "fullscreen": False, "fullscreen_known": False,
         }
 
     try:
@@ -91,7 +91,7 @@ def get_desktop_context(include_app: bool = True) -> dict:
         if not user32.GetLastInputInfo(ctypes.byref(info)):
             return {
                 "available": True, "idle_seconds": None,
-                "foreground_app": "", "fullscreen": False,
+                "foreground_app": "", "fullscreen": False, "fullscreen_known": False,
             }
 
         idle_seconds = _idle_seconds_from_ticks(
@@ -99,14 +99,19 @@ def get_desktop_context(include_app: bool = True) -> dict:
         )
         hwnd = user32.GetForegroundWindow()
         fullscreen = False
+        fullscreen_known = False
         app = ""
         if hwnd:
             rect = RECT()
             if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                fullscreen = _is_fullscreen_rect(
-                    rect.left, rect.top, rect.right, rect.bottom,
-                    user32.GetSystemMetrics(0), user32.GetSystemMetrics(1),
-                )
+                screen_width = user32.GetSystemMetrics(0)
+                screen_height = user32.GetSystemMetrics(1)
+                if screen_width > 0 and screen_height > 0:
+                    fullscreen_known = True
+                    fullscreen = _is_fullscreen_rect(
+                        rect.left, rect.top, rect.right, rect.bottom,
+                        screen_width, screen_height,
+                    )
             if include_app:
                 pid = wintypes.DWORD()
                 if user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)) and pid.value:
@@ -121,6 +126,7 @@ def get_desktop_context(include_app: bool = True) -> dict:
             "idle_seconds": idle_seconds,
             "foreground_app": app,
             "fullscreen": fullscreen,
+            "fullscreen_known": fullscreen_known,
         }
     except Exception:
         return {
@@ -144,4 +150,8 @@ def desktop_is_idle(context: object,
 
 def should_allow_proactive_interrupt(context: object) -> bool:
     """Allow unsolicited voice only when the desktop sensor positively confirms idle."""
-    return desktop_is_idle(context) is True
+    return (
+        isinstance(context, dict)
+        and context.get("fullscreen_known") is True
+        and desktop_is_idle(context) is True
+    )

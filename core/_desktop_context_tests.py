@@ -47,13 +47,20 @@ class DesktopContextTests(unittest.TestCase):
     def test_proactive_interrupt_requires_positive_idle_confirmation(self):
         self.assertTrue(should_allow_proactive_interrupt({
             "available": True, "idle_seconds": 120.0,
+            "fullscreen": False, "fullscreen_known": True,
         }))
         self.assertFalse(should_allow_proactive_interrupt({
             "available": True, "idle_seconds": 5.0,
+            "fullscreen": False, "fullscreen_known": True,
         }))
         self.assertFalse(should_allow_proactive_interrupt({"available": False}))
         self.assertFalse(should_allow_proactive_interrupt({
+            "available": True, "idle_seconds": 120.0,
+            "fullscreen": False, "fullscreen_known": False,
+        }))
+        self.assertFalse(should_allow_proactive_interrupt({
             "available": True, "idle_seconds": None,
+            "fullscreen": False, "fullscreen_known": True,
         }))
     def test_fullscreen_geometry_detects_borderless_fullscreen(self):
         self.assertTrue(_is_fullscreen_rect(0, 0, 1920, 1080, 1920, 1080))
