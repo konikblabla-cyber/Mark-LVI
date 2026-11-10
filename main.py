@@ -94,7 +94,7 @@ from core.desktop_context import get_desktop_context, should_run_proactive_check
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
-    should_feed_while_asleep,
+    should_feed_while_asleep, dispatch_to_loop,
 )
 
 # How long the assistant stays awake with no user speech before it auto-sleeps
@@ -765,7 +765,12 @@ class JarvisLive:
         return True
 
     def _on_wake_detected(self) -> None:
-        """Open one addressed request when a local wake phrase is detected."""
+        """Marshal wake-word results from the detector thread onto the app loop."""
+        if not dispatch_to_loop(self._loop, self._handle_wake_detected):
+            print("[Wake] Detection ignored: the application event loop is unavailable.")
+
+    def _handle_wake_detected(self) -> None:
+        """Open one addressed request and update Qt only on its owning loop."""
         if self._communication_app_active:
             self._communication_turn_open = True
             self._communication_turn_deadline = time.monotonic() + 90.0

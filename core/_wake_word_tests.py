@@ -7,6 +7,41 @@ from core import wake_word
 
 
 class WakeWordInstallerTests(unittest.TestCase):
+    def test_detector_callback_is_dispatched_to_the_application_loop(self):
+        called = []
+        scheduled = []
+
+        class Loop:
+            def is_closed(self):
+                return False
+            def call_soon_threadsafe(self, callback):
+                scheduled.append(callback)
+
+        self.assertTrue(wake_word.dispatch_to_loop(Loop(), lambda: called.append(True)))
+        self.assertEqual(called, [])
+        scheduled.pop()()
+        self.assertEqual(called, [True])
+
+    def test_detector_callback_is_dropped_when_application_loop_is_unavailable(self):
+        self.assertFalse(wake_word.dispatch_to_loop(None, lambda: None))
+
+        class ClosedLoop:
+            def is_closed(self):
+                return True
+            def call_soon_threadsafe(self, callback):
+                raise AssertionError("closed loop must not be called")
+
+        self.assertFalse(wake_word.dispatch_to_loop(ClosedLoop(), lambda: None))
+
+    def test_detector_callback_handles_loop_shutdown_race(self):
+        class StoppingLoop:
+            def is_closed(self):
+                return False
+            def call_soon_threadsafe(self, callback):
+                raise RuntimeError("event loop is closed")
+
+        self.assertFalse(wake_word.dispatch_to_loop(StoppingLoop(), lambda: None))
+
     def test_wake_detector_does_not_listen_to_jarvis_speaker_output(self):
         self.assertTrue(wake_word.should_feed_while_asleep(False, False))
         self.assertFalse(wake_word.should_feed_while_asleep(True, False))

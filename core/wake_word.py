@@ -43,6 +43,19 @@ def is_installed() -> bool:
 
 
 
+def dispatch_to_loop(loop, callback: Callable[[], None]) -> bool:
+    """Schedule a detector-thread callback safely on the asyncio/Qt owner loop."""
+    if loop is None:
+        return False
+    try:
+        if loop.is_closed():
+            return False
+        loop.call_soon_threadsafe(callback)
+        return True
+    except (AttributeError, RuntimeError):
+        return False
+
+
 def should_feed_while_asleep(assistant_speaking: bool, echo_tail_active: bool) -> bool:
     """Never analyse the assistant speaker output as a local wake phrase."""
     return not assistant_speaking and not echo_tail_active
