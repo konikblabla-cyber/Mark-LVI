@@ -1,6 +1,8 @@
 """Offline tests for communication-app microphone privacy gating."""
+import sys
+import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from core.communication_context import (
     communication_apps_from_sessions,
@@ -75,6 +77,37 @@ class CommunicationContextTests(unittest.TestCase):
     def test_unknown_background_audio_does_not_trigger_privacy_gate(self):
         self.assertFalse(is_communication_context("game.exe", {"musicplayer"}))
 
+    def test_wasapi_probe_initializes_and_uninitializes_com(self):
+        process = types.SimpleNamespace(name=lambda: "Discord.exe")
+        session = types.SimpleNamespace(State=1, Process=process)
+        comtypes = types.SimpleNamespace(CoInitialize=Mock(), CoUninitialize=Mock())
+        audio = types.SimpleNamespace(GetAllSessions=Mock(return_value=[session]))
+        pycaw_package = types.ModuleType("pycaw")
+        pycaw_package.__path__ = []
+        pycaw_module = types.ModuleType("pycaw.pycaw")
+        pycaw_module.AudioUtilities = audio
+        with patch.dict(sys.modules, {
+            "comtypes": comtypes, "pycaw": pycaw_package, "pycaw.pycaw": pycaw_module,
+        }):
+            result = get_active_communication_apps()
+        self.assertEqual(result, {"discord"})
+        comtypes.CoInitialize.assert_called_once_with()
+        comtypes.CoUninitialize.assert_called_once_with()
+
+    def test_wasapi_probe_uninitializes_com_when_session_enumeration_fails(self):
+        comtypes = types.SimpleNamespace(CoInitialize=Mock(), CoUninitialize=Mock())
+        audio = types.SimpleNamespace(GetAllSessions=Mock(side_effect=RuntimeError("WASAPI unavailable")))
+        pycaw_package = types.ModuleType("pycaw")
+        pycaw_package.__path__ = []
+        pycaw_module = types.ModuleType("pycaw.pycaw")
+        pycaw_module.AudioUtilities = audio
+        with patch.dict(sys.modules, {
+            "comtypes": comtypes, "pycaw": pycaw_package, "pycaw.pycaw": pycaw_module,
+        }):
+            result = get_active_communication_apps()
+        self.assertIsNone(result)
+        comtypes.CoInitialize.assert_called_once_with()
+        comtypes.CoUninitialize.assert_called_once_with()
     def test_audio_api_failure_uses_foreground_fallback_on_non_windows(self):
         with patch("core.communication_context.os.name", "posix"):
             self.assertTrue(is_communication_context("Teams.exe", None))
