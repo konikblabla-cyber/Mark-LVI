@@ -117,7 +117,7 @@ class ProactiveEngine:
             app = str(desktop_context.get("foreground_app") or "").strip()[:80]
             if app:
                 desktop_ctx = (
-                    f"\\nForeground executable: {app}. "
+                    f"\nForeground executable: {app}. "
                     "No window title or screen contents were captured."
                 )
 
@@ -128,23 +128,14 @@ class ProactiveEngine:
             category = str(focus_context.get("category") or "").strip()[:40]
             if app and category and category != "unknown":
                 focus_ctx = (
-                    f"\\nStable foreground context: {activity} (application: {app}). "
+                    f"\nStable foreground context: {activity} (application: {app}). "
                     "This is a coarse process-name classification and may be wrong. "
                     "Never claim to know the exact window, document or user action."
                 )
 
         project_ctx = ""
         if isinstance(project_context, str) and project_context.strip():
-            project_ctx = "\\n" + project_context.strip()[:1800]
-        desktop_ctx = ""
-        if isinstance(desktop_context, dict):
-            app = str(desktop_context.get("foreground_app") or "").strip()[:80]
-            if app:
-                desktop_ctx = (
-                    f"\nForeground application (executable name only): {app}. "
-                    "No window title or screen contents were captured. Use this "
-                    "only to tailor a relevant, non-intrusive suggestion."
-                )
+            project_ctx = "\n" + project_context.strip()[:1800]
 
         # Optional: recent conversation context
         recent_ctx = ""
