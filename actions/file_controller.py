@@ -12,6 +12,7 @@ try:
 except ImportError:
     _SEND2TRASH = False
 
+from core import outcome
 from core.undo import push_undo
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
@@ -792,6 +793,20 @@ def get_file_info(path: str, name: str = "") -> str:
     except Exception as e:
         return f"Could not get file info: {e}"
 
+def _filesystem_read_result(result: str, error_prefixes: tuple[str, ...] = ()) -> str:
+    """Mark filenames and file contents as untrusted while preserving action status."""
+    text = str(result or "")
+    if error_prefixes and text.startswith(error_prefixes):
+        return outcome.failed(
+            "file_controller", outcome.untrusted("local-filesystem", text)
+        )
+    return (
+        outcome.done("file_controller", verified=True)
+        + "\n"
+        + outcome.untrusted("local-filesystem", text)
+    )
+
+
 def _file_controller_execute(
     parameters: dict = None,
     response=None,
@@ -808,7 +823,11 @@ def _file_controller_execute(
 
     try:
         if action == "list":
-            return list_files(path)
+            return _filesystem_read_result(
+                list_files(path),
+                ("Access denied:", "Path not found:", "Not a directory:",
+                 "Permission denied:", "Error listing files:"),
+            )
 
         elif action == "create_file":
             return create_file(path, name=name, content=params.get("content", ""))
@@ -829,7 +848,10 @@ def _file_controller_execute(
             return rename_file(path, name=name, new_name=params.get("new_name", ""))
 
         elif action == "read":
-            return read_file(path, name=name)
+            return _filesystem_read_result(
+                read_file(path, name=name),
+                ("Access denied:", "File not found:", "Not a file:", "Could not read file:"),
+            )
 
         elif action == "write":
             return write_file(
@@ -839,27 +861,39 @@ def _file_controller_execute(
             )
 
         elif action == "find":
-            return find_files(
-                name=name or params.get("name", ""),
-                extension=params.get("extension", ""),
-                path=path,
-                max_results=min(int(params.get("max_results", 20)), 50),
+            return _filesystem_read_result(
+                find_files(
+                    name=name or params.get("name", ""),
+                    extension=params.get("extension", ""),
+                    path=path,
+                    max_results=min(int(params.get("max_results", 20)), 50),
+                ),
+                ("Access denied:", "Search path not found:", "Search error:"),
             )
 
         elif action == "largest":
-            return get_largest_files(
-                path=path,
-                count=int(params.get("count", 10)),
+            return _filesystem_read_result(
+                get_largest_files(
+                    path=path,
+                    count=int(params.get("count", 10)),
+                ),
+                ("Access denied:", "Path not found:", "Error:"),
             )
 
         elif action == "disk_usage":
-            return get_disk_usage(path)
+            return _filesystem_read_result(
+                get_disk_usage(path),
+                ("Access denied:", "Could not get disk usage:"),
+            )
 
         elif action == "organize_desktop":
             return organize_desktop()
 
         elif action == "info":
-            return get_file_info(path, name=name)
+            return _filesystem_read_result(
+                get_file_info(path, name=name),
+                ("Access denied:", "Not found:", "Could not get file info:"),
+            )
 
         else:
             return f"Unknown action: '{action}'"
