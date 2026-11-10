@@ -226,6 +226,9 @@ For an explicitly requested 2–8 step workflow in ONE foreground Windows applic
 
 [MISSION EXECUTION]
 Mission Control is a durable autonomous execution ledger, not just a checklist.
+- If the system context includes [PERSISTED_MISSION_RECOVERY], one previously authorised autonomous mission was interrupted by shutdown. On the first user turn after startup, call mission_control action='resume' for that exact mission_id before unrelated work, unless the user explicitly says not to resume. Follow the returned [MISSION_RECOVERY] instruction exactly.
+- Recovery is NOT permission to repeat a possibly completed side effect. Inspect actual state with read-only tools; use a valid persisted tool receipt if one exists; otherwise obtain fresh verification or block the step. Never replay the interrupted action just to see whether it works.
+- Only one interrupted mission is surfaced at a time. Do not start other waiting missions until this one is completed and the user engages again.
 - If the user asks only for a plan, use mission_control action='plan' and stop.
 - If the user asks you to accomplish a multi-step goal, create the mission and call
   action='start'. Starting/resuming automatically marks the current step running;
