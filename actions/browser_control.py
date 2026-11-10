@@ -1411,7 +1411,7 @@ def browser_control(
             key="browser_control.replace_text",
             title="Confirm replacing browser field text",
             detail=(
-                f"Browser action: {action}\\nTarget: {str(target)[:180]}\\n\\n"
+                f"Browser action: {action}\nTarget: {str(target)[:180]}\n\n"
                 "This clears the current contents of the selected browser field before typing. "
                 "Confirm only if replacing that existing text is intended."
             )[:1800],
@@ -1462,7 +1462,10 @@ TOOL = {
         "should be told. 'unverified' means the address was handed to the "
         "system's default browser, which never reports back: say it was opened "
         "but not confirmed, never that the page is up. 'failed' means nothing "
-        "happened."
+        "happened. Typing into a field preserves its existing contents by "
+        "default; set clear_first=true only when the user explicitly asks to "
+        "replace field contents, because that operation requires HUD "
+        "confirmation. smart_type follows the same rule."
     ),
     "brief": (
         "Controls the web browser: open a URL, navigate, click, read the page."
