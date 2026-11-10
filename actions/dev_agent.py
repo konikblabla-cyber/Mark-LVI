@@ -52,7 +52,7 @@ from core.project_env import (
     dependency_name, npm_dependency_name, npm_install_invocation, project_venv_python,
 )
 
-from core.project_plan import validate_project_plan
+from core.project_plan import validate_generated_code_size, validate_project_plan
 from core.timeout_policy import bounded_timeout
 from core.process_runner import run_bounded_process
 
@@ -517,6 +517,7 @@ Code for {file_path}:"""
         response = model.generate_content(prompt)
 
         code = _strip_fences(response.text)
+        validate_generated_code_size(code, file_path)
 
 
 
@@ -898,6 +899,7 @@ Fixed code for {fix_path}:"""
             response = model.generate_content(prompt)
 
             fixed = _strip_fences(response.text)
+            validate_generated_code_size(fixed, fix_path)
 
 
 

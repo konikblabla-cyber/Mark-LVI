@@ -12,6 +12,7 @@ MAX_PROJECT_FILES = 40
 MAX_PROJECT_DEPENDENCIES = 25
 MAX_PROJECT_IMPORTS_PER_FILE = 30
 MAX_RUN_COMMAND_CHARS = 512
+MAX_GENERATED_FILE_BYTES = 2_000_000
 
 _ALLOWED_RUNNERS = {
     "python", "python3", "py", "node", "npm", "npx",
@@ -24,6 +25,19 @@ def _supported_runner(value: str) -> bool:
     if runner.endswith(".exe"):
         runner = runner[:-4]
     return runner in _ALLOWED_RUNNERS or bool(re.fullmatch(r"python3\.\d+", runner))
+
+
+
+def validate_generated_code_size(code: str, path: str = "generated file") -> int:
+    """Reject model output that would create an unexpectedly large source file."""
+    if not isinstance(code, str):
+        raise ValueError(f"Generated content for {path} must be text.")
+    size = len(code.encode("utf-8"))
+    if size > MAX_GENERATED_FILE_BYTES:
+        raise ValueError(
+            f"Generated file {path} exceeds the {MAX_GENERATED_FILE_BYTES}-byte safety limit."
+        )
+    return size
 
 
 def validate_project_plan(plan: Any, language: str = "python") -> dict:

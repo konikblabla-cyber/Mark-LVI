@@ -95,6 +95,16 @@ class ProjectPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_project_plan(js, language="javascript")
 
+    def test_generated_file_size_is_bounded_in_utf8_bytes(self):
+        from core.project_plan import MAX_GENERATED_FILE_BYTES, validate_generated_code_size
+        self.assertEqual(validate_generated_code_size("x" * 100), 100)
+        self.assertEqual(
+            validate_generated_code_size("ą", "unicode.py"),
+            len("ą".encode("utf-8")),
+        )
+        with self.assertRaises(ValueError):
+            validate_generated_code_size("x" * (MAX_GENERATED_FILE_BYTES + 1), "large.py")
+
     def test_rejects_invalid_project_names(self):
         for name in ("../outside", "bad/name", "", "x" * 61):
             plan = valid_plan()
