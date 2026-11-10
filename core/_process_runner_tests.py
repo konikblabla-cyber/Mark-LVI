@@ -70,12 +70,13 @@ class ProcessRunnerTests(unittest.TestCase):
                 "AWS_SECRET_ACCESS_KEY": "aws-secret",
                 "DATABASE_URL": "postgres://user:password@example.invalid/db",
                 "NPM_TOKEN": "npm-secret",
+                "SUPABASE_SERVICE_ROLE_KEY": "supabase-secret",
                 "SSH_AUTH_SOCK": "private-agent-socket",
             })
             code = (
                 "import json,os; keys=['JARVIS_SAFE_TEST_VALUE','GEMINI_API_KEY',"
                 "'OPENAI_API_KEY','GITHUB_TOKEN','AWS_SECRET_ACCESS_KEY',"
-                "'DATABASE_URL','NPM_TOKEN','SSH_AUTH_SOCK']; "
+                "'DATABASE_URL','NPM_TOKEN','SUPABASE_SERVICE_ROLE_KEY','SSH_AUTH_SOCK']; "
                 "print(json.dumps({k:os.environ.get(k) for k in keys}))"
             )
             result = run_bounded_process(
@@ -86,7 +87,7 @@ class ProcessRunnerTests(unittest.TestCase):
         self.assertEqual(values["JARVIS_SAFE_TEST_VALUE"], "preserved")
         for key in (
             "GEMINI_API_KEY", "OPENAI_API_KEY", "GITHUB_TOKEN",
-            "AWS_SECRET_ACCESS_KEY", "DATABASE_URL", "NPM_TOKEN", "SSH_AUTH_SOCK",
+            "AWS_SECRET_ACCESS_KEY", "DATABASE_URL", "NPM_TOKEN", "SUPABASE_SERVICE_ROLE_KEY", "SSH_AUTH_SOCK",
         ):
             with self.subTest(key=key):
                 self.assertIsNone(values[key])
