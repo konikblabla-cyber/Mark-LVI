@@ -34,7 +34,7 @@ def build_status_briefing() -> str:
             entries = {}
         if not isinstance(entries, dict):
             raise ValueError("invalid reminder registry")
-        reminder_id_pattern = re.compile(r"^JARVISReminder_\d{8}_\d{6}$")
+        reminder_id_pattern = re.compile(r"^JARVISReminder_\d{8}_\d{6}(?:_[a-f0-9]{6})?$")
         visible = []
         for reminder_id, record in entries.items():
             if not reminder_id_pattern.fullmatch(str(reminder_id)) or not isinstance(record, dict):
