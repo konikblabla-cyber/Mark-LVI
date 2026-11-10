@@ -80,8 +80,8 @@ def _check_linux_desktop_tools() -> None:
     if OS != "Linux":
         return
     missing = []
-    if not shutil.which("scrot"):
-        missing.append("scrot")
+    if not (shutil.which("gnome-screenshot") or shutil.which("scrot")):
+        missing.append("gnome-screenshot (or scrot)")
     if importlib.util.find_spec("tkinter") is None:
         missing.append("python3-tk")
     if not (shutil.which("xclip") or shutil.which("xsel")):
@@ -89,9 +89,9 @@ def _check_linux_desktop_tools() -> None:
     if not missing:
         return
     print("\\n⚠️  Some Linux desktop-control features need system packages: " + ", ".join(missing))
-    print("   Debian / Ubuntu: sudo apt-get install scrot python3-tk xclip")
-    print("   Fedora:          sudo dnf install scrot python3-tkinter xclip")
-    print("   Arch:             sudo pacman -S scrot tk xclip")
+    print("   Debian / Ubuntu: sudo apt-get install gnome-screenshot scrot python3-tk xclip")
+    print("   Fedora:          sudo dnf install gnome-screenshot scrot python3-tkinter xclip")
+    print("   Arch:             sudo pacman -S gnome-screenshot scrot tk xclip")
     print("   Then restart JARVIS. Voice, memory and other features remain available.")
 
 def _check_assets() -> None:
