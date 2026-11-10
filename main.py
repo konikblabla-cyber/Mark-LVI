@@ -679,6 +679,7 @@ class JarvisLive:
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
+        self._startup_mission_recovery_injected = False
         from core.autonomy_policy import new_turn_authorization
         self._turn_authorization = new_turn_authorization("")
         def _mission_confirmation_result(tool_name):
@@ -1364,6 +1365,15 @@ class JarvisLive:
         parts = [time_ctx, identity_ctx]
         if mem_str:
             parts.append(mem_str)
+        if not self._startup_mission_recovery_injected:
+            self._startup_mission_recovery_injected = True
+            try:
+                from plugins.mission_control import startup_recovery_context
+                recovery_context = startup_recovery_context()
+                if recovery_context:
+                    parts.append(recovery_context)
+            except Exception as recovery_error:
+                print(f"[Mission] Startup recovery check unavailable: {type(recovery_error).__name__}")
         parts.append(sys_prompt)
 
         cfg = dict(
