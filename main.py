@@ -82,6 +82,7 @@ from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
+from core.audio_recovery import callback_is_stalled, stream_is_active
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.live_session_policy import go_away_notice, live_turn_is_active
@@ -1756,8 +1757,13 @@ class JarvisLive:
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
+        last_input_callback = [time.monotonic()]
 
         def callback(indata, frames, time_info, status):
+            # PortAudio can leave a stream object present after a USB endpoint
+            # disappears. A callback heartbeat lets the owner task detect that
+            # silent failure without doing device enumeration on the audio thread.
+            last_input_callback[0] = time.monotonic()
             # A foreground Discord/Teams/Zoom/phone app is treated as a private
             # conversation zone. Audio is never forwarded there until a local
             # wake phrase or explicit PTT hold opens a single request.
@@ -1906,7 +1912,20 @@ class JarvisLive:
             with _mic_stream:
                 print("[JARVIS] 🎤 Mic stream open")
                 while True:
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.25)
+                    if not stream_is_active(_mic_stream):
+                        self.ui.write_log(
+                            "SYS: Microphone stream stopped — restoring audio connection."
+                        )
+                        raise _ReconnectSignal(keep_context=True)
+                    if callback_is_stalled(
+                            last_input_callback[0], time.monotonic(), stall_after=5.0):
+                        self.ui.write_log(
+                            "SYS: Microphone stopped delivering audio — restoring connection."
+                        )
+                        raise _ReconnectSignal(keep_context=True)
+        except _ReconnectSignal:
+            raise
         except Exception as e:
             print(f"[JARVIS] ❌ Mic: {e}")
             raise
@@ -2208,6 +2227,11 @@ class JarvisLive:
 
         try:
             while True:
+                if not stream_is_active(stream):
+                    self.ui.write_log(
+                        "SYS: Speaker stream stopped — restoring audio connection."
+                    )
+                    raise _ReconnectSignal(keep_context=True)
                 try:
                     chunk = await asyncio.wait_for(
                         self.audio_in_queue.get(),
@@ -2287,15 +2311,28 @@ class JarvisLive:
 
                 try:
                     await asyncio.to_thread(stream.write, bytes(batch))
-                except (RuntimeError, asyncio.CancelledError):
-                    break   # executor shutting down — exit cleanly
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self.ui.write_log(
+                        "SYS: Speaker write failed — restoring audio connection."
+                    )
+                    raise _ReconnectSignal(keep_context=True) from e
+        except _ReconnectSignal:
+            raise
         except Exception as e:
             print(f"[JARVIS] ❌ Play: {e}")
             raise
         finally:
             self.set_speaking(False)
-            stream.stop()
-            stream.close()
+            try:
+                stream.stop()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
 
     # ── Morning briefing ────────────────────────────────────────────────────────
 
