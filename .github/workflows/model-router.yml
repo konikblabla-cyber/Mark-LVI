@@ -18,6 +18,8 @@ on:
       - "core/echo.py"
       - "core/desktop_context.py"
       - "core/_desktop_context_tests.py"
+      - "core/audio_devices.py"
+      - "core/_audio_devices_tests.py"
       - "core/wake_word.py"
       - "core/_wake_word_tests.py"
       - "core/appidentity.py"

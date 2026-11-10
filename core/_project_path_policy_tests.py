@@ -19,7 +19,7 @@ class ProjectPathPolicyTests(unittest.TestCase):
             root.mkdir()
             self.assertEqual(
                 resolve_project_file(root, "src/main.py"),
-                root / "src" / "main.py",
+                root.resolve() / "src" / "main.py",
             )
 
     def test_rejects_absolute_and_traversal_paths(self):
