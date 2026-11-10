@@ -34,6 +34,19 @@ class ProjectEnvironmentTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     npm_dependency_name(value)
 
+    def test_builds_safe_cross_platform_npm_invocations(self):
+        from core.project_env import npm_install_invocation
+        args, shell = npm_install_invocation("npm", ["react@18.2.0"], windows=False)
+        self.assertFalse(shell)
+        self.assertEqual(args[0], "npm")
+        self.assertIn("--ignore-scripts", args)
+        command, shell = npm_install_invocation(
+            r"C:\Program Files\nodejs\npm.cmd", ["react@^18.2.0"], windows=True
+        )
+        self.assertTrue(shell)
+        self.assertIn("npm.cmd", command)
+        self.assertIn("react@^18.2.0", command)
+
     def test_does_not_create_environment_unless_requested(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "project"

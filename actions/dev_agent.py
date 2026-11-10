@@ -23,7 +23,7 @@ PROJECTS_DIR     = Path.home() / "Desktop" / "JarvisProjects"
 MAX_FIX_ATTEMPTS = 5
 # Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
-from core.project_env import dependency_name, npm_dependency_name, project_venv_python
+from core.project_env import (\n    dependency_name, npm_dependency_name, npm_install_invocation, project_venv_python,\n)
 from core.project_plan import validate_project_plan
 from core.project_path_policy import (
     require_new_project_file, resolve_project_file, validate_project_root,
@@ -284,9 +284,10 @@ def _install_dependencies(dependencies: list[str], project_dir: Path,
         if not npm:
             return "npm was not found. Install Node.js/npm to enable JavaScript dependencies."
         try:
+            command, use_shell = npm_install_invocation(npm, dependencies)
             result = subprocess.run(
-                [npm, "install", "--ignore-scripts", "--no-audit", "--no-fund", "--save"]
-                + dependencies,
+                command,
+                shell=use_shell,
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
                 timeout=240, cwd=str(project_dir)

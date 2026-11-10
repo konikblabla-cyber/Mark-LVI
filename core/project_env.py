@@ -41,12 +41,28 @@ def npm_dependency_name(spec: str) -> str:
         raise TypeError("Node dependency entries must be text.")
     value = spec.strip()
     match = _NPM_REQUIREMENT_RE.fullmatch(value)
-    if not match or any(ch in value for ch in "&|<>%^$"):
+    if not match or any(ch in value for ch in "&|<>%^$!"):
         raise ValueError(f"Unsupported npm dependency specification: {value!r}")
     name = match.group("name").lower()
     if name.startswith("@") and "/" not in name:
         raise ValueError("Scoped npm packages must include a package name.")
     return name
+
+
+def npm_install_invocation(npm_path: str, dependencies: list[str],
+                           windows: bool | None = None):
+    """Build a safe npm invocation, including npm.cmd on Windows."""
+    for value in dependencies:
+        npm_dependency_name(value)
+    args = [
+        str(npm_path), "install", "--ignore-scripts", "--no-audit", "--no-fund", "--save"
+    ] + dependencies
+    on_windows = os.name == "nt" if windows is None else bool(windows)
+    if on_windows and str(npm_path).lower().endswith((".cmd", ".bat")):
+        # All arguments are validated registry package specs, so they cannot
+        # inject shell operators or additional commands into cmd.exe.
+        return subprocess.list2cmdline(args), True
+    return args, False
 
 
 def project_venv_python(project_dir: Path, create: bool = False,
