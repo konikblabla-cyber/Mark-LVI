@@ -111,6 +111,10 @@ def _has_valid_persisted_tool_evidence(step: dict) -> bool:
         return False
     if evidence.get("action") != tool_name:
         return False
+    ui_action = step.get("ui_action")
+    expected_tool = ui_action.get("tool") if isinstance(ui_action, dict) else ""
+    if expected_tool and tool_name != expected_tool:
+        return False
     digest = evidence.get("result_sha256")
     return isinstance(digest, str) and bool(re.fullmatch(r"[0-9a-f]{64}", digest))
 
@@ -276,6 +280,12 @@ def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
             step = next((s for s in mission.get("steps", []) if s.get("id") == step_id), None)
             if step is None or step.get("status") != "running":
                 return False
+            ui_action = step.get("ui_action")
+            expected_tool = ui_action.get("tool") if isinstance(ui_action, dict) else ""
+            if expected_tool and (
+                evidence is None or evidence.get("tool_name") != expected_tool
+            ):
+                evidence = None
             if evidence is None:
                 step.pop("tool_evidence", None)
             else:
@@ -466,7 +476,17 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     clear_step, verification_summary, verified_evidence,
                 )
                 evidence = verified_evidence(session_memory, mission_id, sid)
+                ui_action = step.get("ui_action")
+                expected_tool = ui_action.get("tool") if isinstance(ui_action, dict) else ""
+                if expected_tool and evidence is not None and evidence.get("tool_name") != expected_tool:
+                    evidence = None
                 if evidence is None:
+                    if expected_tool:
+                        return (
+                            f"This UI step requires a verified result from the planned tool "
+                            f"'{expected_tool}'. The recorded result does not match that action. "
+                            "The step remains running; do not invent a verification sentence."
+                        )
                     return (
                         "No matching verified tool result is recorded for this mission step. "
                         "The step remains running. Do not invent a verification sentence. "

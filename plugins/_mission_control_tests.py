@@ -347,6 +347,51 @@ class MissionControlReliabilityTests(unittest.TestCase):
 
 
 
+    def _plan_ui_action(self, mission_id, tool="select_tab_item"):
+        fake_plan = {
+            "status": "planned",
+            "steps": [{
+                "tool": tool,
+                "parameters": {"tab_label": "Privacy"},
+                "risk": "low",
+                "requires_confirmation": False,
+                "reason": "Select the requested tab",
+                "expected_result": "Privacy tab becomes selected",
+            }],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=[]), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=fake_plan):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            })
+        self.assertIn("[MISSION_UI_PLAN]", result)
+
+    def test_ui_step_rejects_success_from_an_unrelated_tool(self):
+        mission_id = self._running_mission("Open Privacy tab")
+        self._plan_ui_action(mission_id)
+        self.assertFalse(mission_control.record_tool_result(
+            self.scope, "verified_test_action",
+            "status=done action=verified_test_action verified=true",
+        ))
+        result = self.complete(mission_id)
+        self.assertIn("requires a verified result from the planned tool", result)
+        step = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(step["status"], "running")
+        self.assertNotIn("tool_evidence", step)
+
+    def test_ui_step_accepts_only_its_planned_tool_result(self):
+        mission_id = self._running_mission("Open Privacy tab")
+        self._plan_ui_action(mission_id, tool="select_tab_item")
+        self.assertTrue(mission_control.record_tool_result(
+            self.scope, "select_tab_item",
+            "status=done action=select_tab_item verified=true",
+        ))
+        result = self.complete(mission_id)
+        self.assertIn("[MISSION_COMPLETE]", result)
+        step = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(step["status"], "done")
+        self.assertIn("Application verified select_tab_item", step["verification"])
+
     def test_long_ui_plan_keeps_its_machine_readable_handoff(self):
         mission_id = self._running_mission("Click Save and verify a new confirmation label")
         fake_plan = {
