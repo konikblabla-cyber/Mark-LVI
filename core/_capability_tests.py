@@ -258,7 +258,9 @@ class MissionControlTests(unittest.TestCase):
                     {"action": "resume", "mission_id": mission_id},
                     session_memory=scope,
                 )
-                self.assertIn("[MISSION_CONTINUE]", resumed)
+                self.assertIn("[MISSION_RECOVERY]", resumed)
+                self.assertIn("Do NOT repeat", resumed)
+                self.assertNotIn("[MISSION_CONTINUE]", resumed)
                 self.assertIn("STEP_ID=S01", resumed)
 
     def test_paused_mission_rejects_completion_until_resume(self):
@@ -290,7 +292,9 @@ class MissionControlTests(unittest.TestCase):
                     {"action": "resume", "mission_id": mission_id},
                     session_memory=scope,
                 )
-                self.assertIn("[MISSION_CONTINUE]", resumed)
+                self.assertIn("[MISSION_RECOVERY]", resumed)
+                self.assertIn("Do NOT repeat", resumed)
+                self.assertNotIn("[MISSION_CONTINUE]", resumed)
                 self._record_done(mission, scope, "approved_task")
                 completed = mission.run({
                     "action": "complete_step", "mission_id": mission_id,
