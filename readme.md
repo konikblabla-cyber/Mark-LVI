@@ -85,7 +85,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧰 Windows Workspace Profiles | Save named app groups (work, study, gaming, etc.), list/delete them and launch a whole setup through the existing verified app launcher |
 | 📋 Integrated Status Briefing | One local report combines active missions, pending reminders, monitored topics, saved workspaces and Windows health without changing anything |
 | 🧪 On-demand PC Diagnostics | Ask JARVIS for a read-only Windows health report with resource pressure, disk space, battery, uptime and top memory users; no automatic cleanup or process killing |
-| 🏠 Home Assistant Lights | Optional HTTPS integration for explicitly mapped Home Assistant lights; can turn lights on/off and verify reported state. No locks, doors, alarms or arbitrary services |
+| 🏠 Home Assistant | Optional HTTPS integration for explicitly mapped lights, switches, fans and climate targets; verifies reported state. No locks, doors, alarms or arbitrary services |
 | 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only; no window titles or screen capture |
 | 📁 Project Overview | On request, inspect the selected project folder's file types, entry points and Git branch; remember metadata without reading source code or storing its path |
 | ⏱️ Process Watch | Watch a named Windows process start or exit; keep the alert on disk until JARVIS can safely deliver it |
@@ -117,7 +117,7 @@ Python dependencies stay inside that project's local `.venv`; JavaScript and Typ
 
 Running or building code still requires an on-screen confirmation. A process is limited to 5 minutes and 1 MB of captured output; exceeding either limit stops it. The regular code helper writes atomically and supports Undo for files up to 1 MB, without undoing later edits made by the user.
 
-Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit `light.*` alias map under **Settings → Plugin Settings**. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint.
+Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit entity map for `light.*`, `switch.*`, `fan.*` or `climate.*` under **Settings → Plugin Settings**. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint. Climate control changes the target temperature only; it does not change HVAC mode.
 
 Process Watch records only executable basenames and start/exit events in a local JSON file. Pending notices remain saved until delivered. It never records command lines, file contents or window text. Reminder cancellation uses the ID returned when a reminder is created or listed.
 
