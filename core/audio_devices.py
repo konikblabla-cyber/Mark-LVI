@@ -113,45 +113,44 @@ _PREFERRED_APIS = {
 # in the app. Probe the mode you ship, not the mode that is easier to write.
 _PROBE_SECONDS = {"output": 0.6, "input": 0.35}
 
-# Cache: {(api_name_or_None, kind): bool}
+# Cache: {(host_api, kind, device_index): bool}
 _probe_results: dict = {}
 
 
 def _transport_works(idx: int, kind: str, api_key) -> bool:
-    """Does this host API actually move audio, or only pretend to?
+    """Does this endpoint actually transport audio, or only pretend to?
 
-    Probed once per API per direction and cached. Output writes silence, so the
-    probe is inaudible; input reads and discards."""
-    if api_key in _probe_results:
-        return _probe_results[api_key]
+    Probe each endpoint independently. Devices exposed by one Windows host API
+    do not always behave alike, so one silent endpoint must not hide a working
+    microphone or speaker beside it.
+    """
+    cache_key = (api_key, kind, int(idx))
+    if cache_key in _probe_results:
+        return _probe_results[cache_key]
 
+    st = None
     ok = False
     try:
         import sounddevice as sd
         rate = _RATES.get(kind, 16000)
         secs = _PROBE_SECONDS.get(kind, 0.5)
 
-        # Each direction is probed the way main.py actually uses it. That is not
-        # a detail: DirectSound input passes a callback stream and fails a
-        # blocking read, so probing the wrong mode rejected a microphone that
-        # works perfectly in the app.
         if kind == "output":
-            # main.py writes with stream.write() — a real sink is rate-limited
-            # by the hardware clock, a fake one swallows the buffer instantly.
+            # main.py writes through stream.write(); a real sink is clocked by
+            # the hardware while a fake sink consumes the buffer immediately.
             st = sd.RawOutputStream(samplerate=rate, channels=1, dtype="int16",
                                     blocksize=1024, device=idx)
             st.start()
             t0 = time.monotonic()
-            st.write(bytes(int(rate * secs) * 2))   # silence — inaudible
+            st.write(bytes(int(rate * secs) * 2))  # silence — inaudible
             elapsed = time.monotonic() - t0
-            st.stop(); st.close()
             ok = elapsed > secs * 0.5
             if not ok:
-                print(f"[Audio] output: host API reports success but moves no "
-                      f"audio ({elapsed*1000:.0f} ms for {secs*1000:.0f} ms) "
-                      f"— skipping it")
+                print(f"[Audio] output endpoint {idx}: host API reports success "
+                      f"but moves no audio ({elapsed*1000:.0f} ms for "
+                      f"{secs*1000:.0f} ms) — skipping it")
         else:
-            # main.py reads through a callback — count what arrives.
+            # main.py reads through a callback; count delivered frames.
             frames = [0]
 
             def _cb(indata, n, *_a):
@@ -161,16 +160,25 @@ def _transport_works(idx: int, kind: str, api_key) -> bool:
                                 blocksize=1024, device=idx, callback=_cb)
             st.start()
             time.sleep(secs)
-            st.stop(); st.close()
             ok = frames[0] > rate * secs * 0.3
             if not ok:
-                print(f"[Audio] input: host API delivered {frames[0]} frames in "
-                      f"{secs*1000:.0f} ms — skipping it")
+                print(f"[Audio] input endpoint {idx}: host API delivered "
+                      f"{frames[0]} frames in {secs*1000:.0f} ms — skipping it")
     except Exception as e:
-        print(f"[Audio] {kind} transport probe failed: {e}")
+        print(f"[Audio] {kind} transport probe failed for endpoint {idx}: {e}")
         ok = False
+    finally:
+        if st is not None:
+            try:
+                st.stop()
+            except Exception:
+                pass
+            try:
+                st.close()
+            except Exception:
+                pass
 
-    _probe_results[api_key] = ok
+    _probe_results[cache_key] = ok
     return ok
 
 
@@ -206,6 +214,7 @@ def configure(input_rate: int, output_rate: int) -> None:
     _RATES["output"] = int(output_rate)
     with _cache_lock:
         _cache = None
+    _probe_results.clear()
 
 
 def _usable(idx: int, kind: str) -> bool:
@@ -299,15 +308,23 @@ def _query() -> dict[str, list[str]]:
         # speakers only work on MME — and a single global choice cannot be right
         # for both.
         for kind in ("input", "output"):
+            _chosen_api[kind] = None
             for api_filter in list(preferred) + [None]:
                 found = _collect(api_filter, kind)
                 if not found:
                     continue
-                # One probe per API per direction, cached, on this thread.
-                if not _transport_works(found[0][0], kind, (api_filter, kind)):
+                # Test every selectable endpoint. A silent first endpoint must
+                # not cause the entire host API to be rejected.
+                working = [
+                    (idx, name) for idx, name in found
+                    if _transport_works(idx, kind, api_filter)
+                ]
+                if not working:
                     continue
                 _chosen_api[kind] = api_filter
-                out[kind] = [_display_name(n, devices) for _i, n in found]
+                out[kind] = [
+                    _display_name(name, devices) for _idx, name in working
+                ]
                 break
             if out[kind]:
                 print(f"[Audio] {kind}: using "
