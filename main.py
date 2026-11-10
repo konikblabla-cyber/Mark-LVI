@@ -812,7 +812,13 @@ class JarvisLive:
                 active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
                 active = is_communication_context(foreground_app, active_audio_apps)
             except Exception as exc:
-                print(f"[CommunicationGuard] context check failed: {exc}")
+                # A failed privacy probe is not evidence that no call is active.
+                # Close the mic gate immediately; the next successful poll may
+                # reopen it after the local Windows audio state is known again.
+                self._communication_app_active = True
+                self._communication_turn_open = False
+                self._communication_turn_deadline = 0.0
+                print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
                 continue
 
             if active == self._communication_app_active:
