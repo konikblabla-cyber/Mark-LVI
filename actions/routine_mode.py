@@ -19,6 +19,10 @@ def _path() -> Path:
     return Path.home() / ".jarvis" / "routines.json"
 
 
+def _valid_app_name(value: object) -> bool:
+    return isinstance(value, str) and bool(_APP_RE.fullmatch(value.strip()))
+
+
 def _read() -> dict:
     path = _path()
     if not path.exists():
@@ -27,8 +31,26 @@ def _read() -> dict:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise RuntimeError("Routine storage is unreadable; refusing to overwrite it.") from exc
-    if not isinstance(data, dict) or not isinstance(data.get("routines"), dict):
+    if (not isinstance(data, dict) or data.get("version") != 1
+            or not isinstance(data.get("routines"), dict)):
         raise RuntimeError("Routine storage has an invalid structure.")
+    if len(data["routines"]) > _MAX_ROUTINES:
+        raise RuntimeError("Routine storage exceeds the supported limit.")
+
+    for key, item in data["routines"].items():
+        if (not isinstance(key, str) or not _NAME_RE.fullmatch(key)
+                or key != key.casefold() or not isinstance(item, dict)
+                or not isinstance(item.get("name"), str)
+                or item["name"].casefold() != key):
+            raise RuntimeError("Routine storage contains an invalid routine identity.")
+        apps = item.get("applications", [])
+        devices = item.get("home_actions", [])
+        if (not isinstance(apps, list) or len(apps) > _MAX_ITEMS
+                or not all(_valid_app_name(app) for app in apps)):
+            raise RuntimeError("Routine storage contains an unsafe application entry.")
+        if (not isinstance(devices, list) or len(devices) > _MAX_ITEMS
+                or not all(_validate_device_action(entry) is not None for entry in devices)):
+            raise RuntimeError("Routine storage contains an unsafe smart-home entry.")
     return data
 
 
