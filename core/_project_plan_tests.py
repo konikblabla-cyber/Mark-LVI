@@ -28,6 +28,19 @@ class ProjectPlanTests(unittest.TestCase):
         js["entry_point"] = "main.js"
         self.assertEqual(validate_project_plan(js)["run_command"], "node main.js")
 
+    def test_accepts_python_package_imports(self):
+        plan = {
+            "project_name": "pkg_app",
+            "entry_point": "main.py",
+            "files": [
+                {"path": "lib/helpers/__init__.py", "description": "Package", "imports": []},
+                {"path": "main.py", "description": "Entry", "imports": ["lib.helpers"]},
+            ],
+            "run_command": "python main.py",
+            "dependencies": [],
+        }
+        self.assertEqual(validate_project_plan(plan)["entry_point"], "main.py")
+
     def test_accepts_javascript_relative_imports(self):
         js = {
             "project_name": "web_app",

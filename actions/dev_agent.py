@@ -415,18 +415,16 @@ def _write_file(
 
 
     dependency_context = ""
-
     for dep_dotted in file_imports:
-
-        dep_path = dep_dotted.replace(".", "/") + ".py"
-
+        dep_base = dep_dotted.replace(".", "/")
+        dep_path = dep_base + ".py"
+        if dep_path not in already_written:
+            package_init = dep_base + "/__init__.py"
+            if package_init in already_written:
+                dep_path = package_init
         if dep_path in already_written:
-
             code_snippet = already_written[dep_path][:2000]
-
             dependency_context += f"\n\n--- {dep_path} (you must import from this) ---\n{code_snippet}"
-
-
 
     lang_rules = ""
 

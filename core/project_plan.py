@@ -101,8 +101,9 @@ def validate_project_plan(plan: Any, language: str = "python") -> dict:
         planned_paths = set(normalized_paths)
         for item in validated_files:
             for module in item["imports"]:
-                module_path = module.replace(".", "/") + ".py"
-                if module_path.casefold() not in planned_paths:
+                module_base = module.replace(".", "/")
+                module_paths = {module_base + ".py", module_base + "/__init__.py"}
+                if not any(candidate.casefold() in planned_paths for candidate in module_paths):
                     raise ValueError(f"Project import is not present in the file plan: {module}")
 
     dependencies = plan.get("dependencies", [])
