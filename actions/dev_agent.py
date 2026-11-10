@@ -233,6 +233,8 @@ def _classify_error(output: str) -> str:
         "attributeerror", "valueerror", "keyerror", "indexerror",
 
         "zerodivisionerror", "filenotfounderror", "permissionerror",
+        "process exited with code", "timed out", "output truncated",
+        "output limit", "command not found", "run error:",
 
     )):
 
@@ -251,12 +253,6 @@ def _has_error(output: str, run_command: str) -> bool:
     
 
     low = output.lower()
-
-
-
-    if "timed out" in low:
-
-        return False
 
 
 

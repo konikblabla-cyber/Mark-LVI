@@ -4,10 +4,27 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from actions.dev_agent import _open_vscode
+from actions.dev_agent import _classify_error, _has_error, _open_vscode
 
 
 class DevAgentLaunchSafetyTests(unittest.TestCase):
+    def test_nonzero_exit_is_not_reported_as_success(self):
+        output = "Process exited with code 7."
+        self.assertTrue(_has_error(output, "python main.py"))
+        self.assertEqual(_classify_error(output), "runtime_error")
+
+    def test_timeout_is_not_reported_as_success(self):
+        output = "Timed out after 30s — process was stopped."
+        self.assertTrue(_has_error(output, "python main.py"))
+        self.assertEqual(_classify_error(output), "runtime_error")
+
+    def test_output_limit_is_not_reported_as_success(self):
+        output = "Output truncated at the 1 MB safety limit; process stopped."
+        self.assertTrue(_has_error(output, "python main.py"))
+
+    def test_empty_successful_output_remains_valid(self):
+        self.assertFalse(_has_error("", "python main.py"))
+
     def test_vscode_launch_does_not_use_a_shell_for_user_paths(self):
         with tempfile.TemporaryDirectory() as temp:
             executable = Path(temp) / "Code.exe"
