@@ -686,6 +686,7 @@ class JarvisLive:
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
+        self._queued_process_alerts: list[dict] = []
         self._startup_mission_recovery_injected = False
         from core.autonomy_policy import new_turn_authorization
         self._turn_authorization = new_turn_authorization("")
@@ -2545,6 +2546,57 @@ class JarvisLive:
             except Exception as e:
                 print(f"[Monitor] ⚠️ Could not send alert: {e}")
 
+    async def _run_process_watchers(self) -> None:
+        """Watch explicitly requested processes and deliver saved alerts safely."""
+        while True:
+            await asyncio.sleep(5)
+            try:
+                from plugins.process_watch import check_all, acknowledge_alerts
+                found = await asyncio.to_thread(check_all)
+                known = {str(item.get("id")) for item in self._queued_process_alerts}
+                for item in found:
+                    if str(item.get("id")) not in known:
+                        self._queued_process_alerts.append(item)
+                        known.add(str(item.get("id")))
+            except Exception as exc:
+                print(f"[ProcessWatch] Poll failed: {type(exc).__name__}")
+                continue
+
+            if (not self._queued_process_alerts or not self.session
+                    or not self._awake or self._communication_app_active
+                    or self._phone_active):
+                continue
+
+            with self._speaking_lock:
+                speaking = self._is_speaking
+            if speaking or (time.monotonic() - self._last_user_speech) < 10:
+                continue
+
+            batch = self._queued_process_alerts[:5]
+            ids = [str(item.get("id")) for item in batch if item.get("id")]
+            messages = [str(item.get("message") or "")[:180] for item in batch]
+            if not ids or not messages:
+                continue
+            prompt = (
+                "[PROCESS_WATCH_ALERT]\n"
+                "The user explicitly asked JARVIS to monitor these processes. "
+                "Report the verified changes briefly in the user's current language. "
+                "Do not claim to have inspected files or process command lines.\n"
+                + "\n".join(f"- {message}" for message in messages)
+            )
+            try:
+                await self.session.send_client_content(
+                    turns={"role": "user", "parts": [{"text": prompt}]},
+                    turn_complete=True,
+                )
+                await asyncio.to_thread(acknowledge_alerts, ids)
+                self._queued_process_alerts = [
+                    item for item in self._queued_process_alerts
+                    if str(item.get("id")) not in set(ids)
+                ]
+            except Exception as exc:
+                print(f"[ProcessWatch] Alert delivery deferred: {type(exc).__name__}")
+
     # ── Background monitor ──────────────────────────────────────────────────────
 
     async def _run_background_monitor(self) -> None:
@@ -2971,6 +3023,7 @@ class JarvisLive:
                     tg.create_task(self._receive_audio())
                     tg.create_task(self._play_audio())
                     tg.create_task(self._run_system_monitor())
+                    tg.create_task(self._run_process_watchers())
                     tg.create_task(self._run_background_monitor())
                     tg.create_task(self._run_proactive_mode())
                     tg.create_task(self._run_communication_guard())
