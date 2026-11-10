@@ -1952,7 +1952,11 @@ class JarvisLive:
             # Preserve the current reply on speakers. Do not let a server-side
             # session lifetime warning cut off audio that is already queued.
             _deadline = time.monotonic() + 15.0
-            while (not self.audio_in_queue.empty()) and time.monotonic() < _deadline:
+            while time.monotonic() < _deadline:
+                with self._speaking_lock:
+                    _still_speaking = self._is_speaking
+                if self.audio_in_queue.empty() and not _still_speaking:
+                    break
                 await asyncio.sleep(0.05)
             with self._speaking_lock:
                 _still_speaking = self._is_speaking
@@ -2140,6 +2144,8 @@ class JarvisLive:
                             and response.server_content.turn_complete
                             and not response.tool_call):
                         await _drain_before_session_resume()
+        except _ReconnectSignal:
+            raise
         except Exception as e:
             print(f"[JARVIS] ❌ Recv: {e}")
             traceback.print_exc()
