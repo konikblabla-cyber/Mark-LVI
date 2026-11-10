@@ -4,6 +4,7 @@ import sys
 import hashlib
 import json
 import re
+import shlex
 import shutil
 import threading
 import time
@@ -23,6 +24,7 @@ MAX_FIX_ATTEMPTS = 5
 # Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
 from core.project_env import dependency_name, project_venv_python
+from core.project_plan import validate_project_plan
 from core.project_path_policy import (
     require_new_project_file, resolve_project_file, validate_project_root,
 )
@@ -334,7 +336,7 @@ def _open_vscode(project_dir: Path) -> bool:
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     print(f"[DevAgent] 🚀 Running: {run_command}")
     try:
-        parts = run_command.split()
+        parts = shlex.split(run_command, posix=True)
         if not parts:
             return "Run error: empty run command."
 
@@ -506,7 +508,7 @@ def _build_project(
     _update("planning")
     log("Planning project structure...")
     try:
-        plan = _plan_project(description, language)
+        plan = validate_project_plan(_plan_project(description, language))
     except RateLimitError:
         msg = "Rate limit reached, sir. Please try again in a moment."
         if speak: speak(msg)
