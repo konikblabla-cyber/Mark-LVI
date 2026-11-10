@@ -118,6 +118,38 @@ def inspect_project_folder(path: object, max_files: int = 1500) -> dict | None:
     }
 
 
+def remember_project_snapshot(snapshot: object) -> bool:
+    """Persist a metadata-only note for a folder the user explicitly selected."""
+    if not isinstance(snapshot, dict):
+        return False
+    name = str(snapshot.get("project_name") or "").strip()
+    if not name:
+        return False
+    safe_key = re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_")[:36]
+    if not safe_key:
+        return False
+
+    try:
+        languages = snapshot.get("languages") or []
+        language_text = ", ".join(
+            str(label)[:30] for label, count in languages[:5]
+            if isinstance(label, str) and isinstance(count, int) and count > 0
+        )
+        branch = str(snapshot.get("git_branch") or "")[:60]
+        files = int(snapshot.get("file_count") or 0)
+        value = f"User-selected project folder: {name[:80]}; files: {files}"
+        if language_text:
+            value += f"; technologies: {language_text}"
+        if branch:
+            value += f"; Git branch: {branch}"
+        value += "; source code and absolute path were not stored."
+        from memory.memory_manager import update_memory
+        update_memory({"projects": {f"local_project_{safe_key}": value[:360]}})
+        return True
+    except Exception:
+        return False
+
+
 def format_project_context(snapshot: object) -> str:
     """Produce a short prompt fragment without disclosing the selected path."""
     if not isinstance(snapshot, dict):
