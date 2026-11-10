@@ -640,7 +640,7 @@ def _open_vscode(project_dir: Path) -> bool:
             continue
         try:
             subprocess.Popen(
-                [str(executable), str(project_dir)],
+                [raw, str(project_dir)],
                 shell=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
