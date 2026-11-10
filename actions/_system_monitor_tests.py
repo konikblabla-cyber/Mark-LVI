@@ -88,7 +88,7 @@ class SystemHealthTests(unittest.TestCase):
             "uptime": "3h 20m", "process_count": 120,
             "top_memory_processes": [{"name": "Code.exe", "memory_mb": 1400.0}],
         }
-        with patch.object(system_monitor, "_OS", "Windows"), \\
+        with patch.object(system_monitor, "_OS", "Windows"), \
              patch.object(system_monitor, "get_system_status", return_value=snapshot):
             report = system_monitor.diagnose_computer({})
         self.assertIn("CPU 92%", report)
