@@ -67,7 +67,8 @@ class DevAgentLaunchSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             result = SimpleNamespace(stdout="", stderr="", returncode=None,
                                      timed_out=False, output_limited=False)
-            with patch("actions.dev_agent.run_bounded_process", return_value=result):
+            with patch("actions.dev_agent.run_bounded_process", return_value=result), \
+                 patch("builtins.print"):
                 self.assertIn("status unknown", _run_project("python main.py", Path(temp)))
 
     def test_code_helper_does_not_claim_success_without_exit_status(self):
@@ -81,19 +82,37 @@ class DevAgentLaunchSafetyTests(unittest.TestCase):
 
     def test_vscode_launch_does_not_use_a_shell_for_user_paths(self):
         with tempfile.TemporaryDirectory() as temp:
-            executable = Path(temp) / "Code.exe"
-            executable.write_text("mock executable", encoding="utf-8")
+            executable = str(Path(temp) / "Code.exe")
             project = Path(temp) / "workspace & echo INJECTED"
-            self.assertTrue(executable.is_file())
-            self.assertEqual(executable.suffix.casefold(), ".exe")
-            with patch("actions.dev_agent.shutil.which", return_value=str(executable)), \
-                 patch("actions.dev_agent.Path.is_file", return_value=True), \
+
+            class FakeExecutablePath:
+                suffix = ".exe"
+
+                def __init__(self, raw):
+                    self.raw = raw
+
+                def is_file(self):
+                    return True
+
+                def __str__(self):
+                    return self.raw
+
+            class FakePathFactory:
+                def __new__(cls, raw):
+                    return FakeExecutablePath(raw)
+
+                @staticmethod
+                def home():
+                    return Path.home()
+
+            with patch("actions.dev_agent.shutil.which", return_value=executable), \
+                 patch("actions.dev_agent.Path", FakePathFactory), \
                  patch("actions.dev_agent.subprocess.Popen") as popen, \
                  patch("actions.dev_agent.time.sleep"):
                 self.assertTrue(_open_vscode(project))
 
             args, kwargs = popen.call_args
-            self.assertEqual(args[0], [str(executable), str(project)])
+            self.assertEqual(args[0], [executable, str(project)])
             self.assertFalse(kwargs["shell"])
 
     def test_ignores_cmd_shims_and_does_not_fall_back_to_a_shell(self):
