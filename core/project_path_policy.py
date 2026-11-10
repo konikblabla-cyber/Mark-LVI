@@ -91,6 +91,14 @@ def resolve_project_path_without_symlinks(project_dir: Path, relative_path: str)
     parts = normalized.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise ValueError("Project path contains an unsafe component.")
+    windows_devices = {"CON", "PRN", "AUX", "NUL"}
+    windows_devices.update(f"COM{i}" for i in range(1, 10))
+    windows_devices.update(f"LPT{i}" for i in range(1, 10))
+    for part in parts:
+        if (len(part) > 100 or part.endswith((" ", "."))
+                or any(ord(ch) < 32 or ch in '<>:"|?*' for ch in part)
+                or part.split(".", 1)[0].upper() in windows_devices):
+            raise ValueError("Project path contains a Windows-reserved name or character.")
 
     current = root
     for index, part in enumerate(parts):

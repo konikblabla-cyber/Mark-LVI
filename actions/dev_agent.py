@@ -586,13 +586,14 @@ def _install_dependencies(dependencies: list[str], project_dir: Path,
     to_install = []
     for dep, pkg_name in zip(dependencies, package_names):
         try:
-            result = subprocess.run(
+            result = run_bounded_process(
                 [str(python_exe), "-m", "pip", "show", pkg_name],
-                capture_output=True, text=True, timeout=20,
-                cwd=str(project_dir)
+                cwd=project_dir, timeout=20
             )
         except Exception as e:
             return f"Dependency check failed: {e}"
+        if result.timed_out or result.output_limited:
+            return "Dependency check exceeded a safety limit; no installation was started."
         if result.returncode != 0:
             to_install.append(dep)
         else:

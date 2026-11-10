@@ -48,6 +48,10 @@ def run_bounded_process(args, *, cwd: Path, timeout: float,
     """Run with bounded output and lifetime; shell is reserved for validated commands."""
     if not args:
         raise ValueError("A process command is required.")
+    if shell and not isinstance(args, str):
+        raise ValueError("Shell execution requires one validated command string.")
+    if not shell and isinstance(args, str):
+        raise ValueError("Commands must be argument lists unless shell execution is explicit.")
     if timeout <= 0:
         raise ValueError("Process timeout must be positive.")
     if output_limit < 1:

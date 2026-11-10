@@ -151,6 +151,15 @@ class ProjectPathPolicyTests(unittest.TestCase):
             target = atomic_write_project_text(root, "src/main.py", "print('ok')", expect_missing=True)
             self.assertEqual(target.read_text(encoding="utf-8"), "print('ok')")
 
+    def test_refuses_windows_device_names_on_every_platform(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            root.mkdir()
+            for name in ("CON", "NUL.txt", "COM1.log", "LPT9.data", "bad?.py", "trailing."):
+                with self.subTest(path=name):
+                    with self.assertRaises(ValueError):
+                        resolve_project_path_without_symlinks(root, name)
+
     def test_refuses_existing_file_without_overwriting(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "project"
