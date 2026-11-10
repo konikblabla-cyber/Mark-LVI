@@ -65,8 +65,8 @@ class CommunicationContextTests(unittest.TestCase):
     def test_open_chat_app_alone_does_not_count_as_background_call(self):
         self.assertFalse(is_communication_context("opera.exe", set()))
 
-    def test_focused_chat_app_is_private_even_without_audio_session(self):
-        self.assertTrue(is_communication_context("Discord.exe", set()))
+    def test_focused_chat_app_without_call_audio_does_not_block_commands(self):
+        self.assertFalse(is_communication_context("Discord.exe", set()))
 
     def test_active_background_call_is_private_while_game_is_foreground(self):
         self.assertTrue(is_communication_context("game.exe", {"discord"}))
@@ -77,6 +77,9 @@ class CommunicationContextTests(unittest.TestCase):
     def test_audio_api_failure_falls_back_to_foreground_app(self):
         self.assertTrue(is_communication_context("Teams.exe", None))
         self.assertFalse(is_communication_context("opera.exe", None))
+
+    def test_active_call_detection_does_not_need_chat_to_be_foreground(self):
+        self.assertTrue(is_communication_context("opera.exe", {"teams"}))
 
     def test_fresh_desktop_input_auto_wakes_outside_calls(self):
         self.assertTrue(should_auto_wake(0.0, False))

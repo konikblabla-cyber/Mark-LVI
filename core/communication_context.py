@@ -87,12 +87,12 @@ def is_communication_context(
     foreground_app: object,
     active_audio_apps: set[str] | None,
 ) -> bool:
-    """Treat a focused chat app or an active call audio session as private."""
-    if is_communication_app(foreground_app):
-        return True
-    return bool(active_audio_apps and any(
-        is_communication_app(name) for name in active_audio_apps
-    ))
+    """Treat an active call session as private; fall back to focus if API fails."""
+    if active_audio_apps is None:
+        # Without WASAPI, prefer privacy when a recognised communication app
+        # is the foreground window rather than assuming the call is inactive.
+        return is_communication_app(foreground_app)
+    return any(is_communication_app(name) for name in active_audio_apps)
 
 
 def should_auto_wake(
