@@ -421,12 +421,14 @@ def resolve(name: str, kind: str):
             partial = None
             for idx, dev_name in _candidates(api_filter):
                 if dev_name == wanted:
-                    if _usable(idx, kind):
+                    if (_usable(idx, kind)
+                            and _transport_works(idx, kind, api_filter)):
                         return idx
                     continue
                 if partial is None and (dev_name.startswith(wanted[:24])
                                         or wanted.startswith(dev_name[:24])):
-                    if _usable(idx, kind):
+                    if (_usable(idx, kind)
+                            and _transport_works(idx, kind, api_filter)):
                         partial = idx
             if partial is not None:
                 return partial

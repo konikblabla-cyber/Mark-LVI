@@ -103,5 +103,34 @@ class AudioDeviceTests(unittest.TestCase):
         self.assertIsNone(audio_devices._chosen_api["output"])
 
 
+    def test_resolve_skips_a_silent_saved_endpoint(self):
+        fake_sd = types.SimpleNamespace(
+            query_devices=lambda: [
+                {"name": "USB speakers", "hostapi": 0,
+                 "max_input_channels": 0, "max_output_channels": 2},
+                {"name": "USB speakers", "hostapi": 1,
+                 "max_input_channels": 0, "max_output_channels": 2},
+            ],
+            query_hostapis=lambda: [
+                {"name": "Windows DirectSound"},
+                {"name": "Windows MME"},
+            ],
+        )
+        with patch.dict(sys.modules, {"sounddevice": fake_sd}):
+            with patch("platform.system", return_value="Windows"):
+                with patch.object(audio_devices, "_PREFERRED_APIS",
+                                  {"Windows": ("directsound", "mme")}):
+                    audio_devices._chosen_api["output"] = "directsound"
+                    with patch.object(audio_devices, "list_devices",
+                                      return_value=["USB speakers"]):
+                        with patch.object(audio_devices, "_usable", return_value=True):
+                            with patch.object(audio_devices, "_transport_works",
+                                              side_effect=[False, True]):
+                                self.assertEqual(
+                                    audio_devices.resolve("USB speakers", "output"),
+                                    1,
+                                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
