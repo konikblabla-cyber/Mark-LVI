@@ -341,11 +341,19 @@ def diagnose_computer(parameters: dict, player=None, session_memory=None) -> str
     gpu = status.get("gpu_percent")
     gpu_text = f"{gpu:.0f}%" if gpu is not None else "not exposed by the installed driver"
     temp_text = f"{temp:.0f}°C" if temp is not None else "not exposed by the installed driver"
+    battery = status.get("battery")
+    battery_text = (
+        f"{battery['percent']:.0f}% ({'plugged in' if battery.get('plugged') else 'on battery'})"
+        if battery else "not available"
+    )
+    network = status.get("network_adapters_up")
+    network_text = str(network) if network is not None else "unknown"
     summary = "No critical resource warning detected." if not findings else " ".join(findings)
     return (
         f"Windows health report: CPU {cpu:.0f}%; RAM {ram:.0f}% "
         f"({status['ram_used_gb']:.1f}/{status['ram_total_gb']:.1f} GB); "
         f"GPU {gpu_text}; CPU temperature {temp_text}; system drive {disk_text}; "
+        f"battery {battery_text}; active network adapters {network_text}; "
         f"uptime {status['uptime']}; {status['process_count']} processes. "
         f"Top memory users: {top_text}. {summary} "
         "This report is read-only; no process was stopped and no files or settings were changed."
