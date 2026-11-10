@@ -30,9 +30,15 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes libportaudio2
+          sudo apt-get install --yes libportaudio2 scrot python3-tk xclip xvfb
       - name: Verify the installer detects the audio runtime
         run: python -c "from setup import _check_linux_portaudio; _check_linux_portaudio()"
+      - name: Smoke-test Linux X11 input and screenshot dependencies
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -c "import pyautogui, pyperclip, mss; image = pyautogui.screenshot(); print('PyAutoGUI screenshot:', image.size); pyperclip.copy('jarvis-smoke-test'); assert pyperclip.paste() == 'jarvis-smoke-test'"
+      - name: Smoke-test Windows and macOS desktop-control imports
+        if: runner.os != 'Linux'
+        run: python -c "import pyautogui, pyperclip, mss; print('PyAutoGUI screen:', pyautogui.size())"
       - name: Import core runtime dependencies
         run: >-
           python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,

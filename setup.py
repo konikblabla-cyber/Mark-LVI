@@ -13,6 +13,8 @@ Two things it deliberately does NOT install:
     PyQt6 and numpy already listed here. No GPU, no OpenGL, no extra packages.
 """
 import platform
+import importlib.util
+import shutil
 from ctypes.util import find_library
 import subprocess
 import sys
@@ -73,6 +75,25 @@ def _check_linux_portaudio() -> None:
     print("   Then run setup.py again.")
     sys.exit(1)
 
+def _check_linux_desktop_tools() -> None:
+    """Warn when Linux desktop automation lacks its native X11 helpers."""
+    if OS != "Linux":
+        return
+    missing = []
+    if not shutil.which("scrot"):
+        missing.append("scrot")
+    if importlib.util.find_spec("tkinter") is None:
+        missing.append("python3-tk")
+    if not (shutil.which("xclip") or shutil.which("xsel")):
+        missing.append("xclip or xsel")
+    if not missing:
+        return
+    print("\\n⚠️  Some Linux desktop-control features need system packages: " + ", ".join(missing))
+    print("   Debian / Ubuntu: sudo apt-get install scrot python3-tk xclip")
+    print("   Fedora:          sudo dnf install scrot python3-tkinter xclip")
+    print("   Arch:             sudo pacman -S scrot tk xclip")
+    print("   Then restart JARVIS. Voice, memory and other features remain available.")
+
 def _check_assets() -> None:
     """The avatar's face is a shipped file; a truncated clone should say so."""
     face = HERE / "core" / "face_model.obj"
@@ -95,6 +116,7 @@ def main() -> None:
 
     # Linux sounddevice wheels do not bundle PortAudio; check before browsers.
     _check_linux_portaudio()
+    _check_linux_desktop_tools()
 
     # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.
     # (Safari automation additionally needs: python -m playwright install webkit)
