@@ -92,6 +92,14 @@ Gemini Live ends a turn itself. A chat API does not: every tool result is a fres
 
 Two limits, because they catch different faults. A **repeated** call means the model did not understand the result it got, and re-running the tool is actively harmful — so it is answered from what the tool already returned and never reaches the application twice. A long chain of **different** calls is a model wandering: not harmful, not converging either, so it is capped and the model is told to answer with what it has.
 
+### 🧰 Safer coding agent and project builder
+
+The coding agent validates a project plan before it writes anything. New builds use a **new project folder only**; an existing folder is left untouched. Generated paths cannot escape the project or follow symlinks. A plan is limited to 40 files, 25 dependencies and 2 MB per generated source file.
+
+Python dependencies stay inside that project's local `.venv`; JavaScript and TypeScript dependencies use local npm installs with lifecycle scripts disabled. Other languages use their native dependency manifests rather than installing packages into global Python.
+
+Running or building code still requires an on-screen confirmation. A process is limited to 5 minutes and 1 MB of captured output; exceeding either limit stops it. The regular code helper writes atomically and supports Undo for files up to 1 MB, without undoing later edits made by the user.
+
 ### What it costs when you do not use it
 
 | | |
