@@ -101,8 +101,11 @@ def _preview(code: str, lines: int = 10) -> str:
 
 
 def _has_error(output: str) -> bool:
-    error_signals = ["error", "exception", "traceback", "syntaxerror",
-                     "nameerror", "typeerror", "stderr", "failed", "crash"]
+    error_signals = [
+        "error", "exception", "traceback", "syntaxerror", "nameerror",
+        "typeerror", "stderr", "failed", "crash", "exit code",
+        "timed out", "output truncated", "output limit",
+    ]
     return any(s in output.lower() for s in error_signals)
 
 
@@ -281,6 +284,12 @@ def _build(description, language, output_path, args, timeout, speak=None, player
 
         last_output = _run_file(path, args, timeout)
 
+        low_output = last_output.lower()
+        if "timed out" in low_output or "output truncated" in low_output or "output limit" in low_output:
+            msg = f"Build stopped by an execution safety limit. {last_output[:240]}"
+            if speak: speak(msg)
+            return msg
+
         if not _has_error(last_output):
             msg = (
                 f"Build complete, sir. "
@@ -295,10 +304,13 @@ def _build(description, language, output_path, args, timeout, speak=None, player
             player.write_log(f"[Code] Fixing (attempt {attempt})...")
 
         try:
-            code = _fix_code(code, last_output, description)
-            save_status = _save_file(path, code)
+            fixed_code = _fix_code(code, last_output, description)
+            save_status = _save_file(
+                path, fixed_code, expected_text=code, verify_expected=True
+            )
             if save_status.startswith("Could not save:"):
                 raise OSError(save_status)
+            code = fixed_code
         except Exception as e:
             msg = f"Could not fix code on attempt {attempt}: {e}"
             if speak: speak(msg)
@@ -517,6 +529,10 @@ Be specific and actionable. If you see an error message, quote it exactly."""
 
         response = gemini.call(contents, tier=gemini.SMART, timeout_ms=45_000)
         if response is None:
+            try:
+                screenshot_path.unlink()
+            except OSError:
+                pass
             return "Sir, I couldn't reach Gemini to analyse that screenshot."
 
         analysis = (response.text or "").strip()
