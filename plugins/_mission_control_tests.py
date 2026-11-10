@@ -418,6 +418,24 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(payload["steps"][0]["tool"], "click_and_verify")
         self.assertEqual(payload["steps"][0]["expected_result"], "E" * 320)
 
+    def test_startup_recovery_context_finds_interrupted_autonomous_mission(self):
+        mission_id = self.plan("Finish the open task")
+        self.assertEqual(mission_control.startup_recovery_context(), "")
+
+        self.start(mission_id)
+        context = mission_control.startup_recovery_context()
+        self.assertIn("[PERSISTED_MISSION_RECOVERY]", context)
+        self.assertIn(mission_id, context)
+        self.assertIn("Finish the open task", context)
+        self.assertIn("[MISSION_RECOVERY]", context)
+        self.assertIn("Do NOT repeat", context)
+
+    def test_startup_recovery_context_never_resumes_user_paused_missions(self):
+        mission_id = self.plan("Finish the open task")
+        self.start(mission_id)
+        mission_control.run({"action": "pause", "mission_id": mission_id})
+        self.assertEqual(mission_control.startup_recovery_context(), "")
+
 
 
 if __name__ == "__main__":
