@@ -89,6 +89,9 @@ class RoutineModeTests(unittest.TestCase):
         self.assertIn("alias is not currently allowed", result)
         self.assertFalse(home.called)
 
+    def test_routine_action_registers_its_handler(self):
+        self.assertTrue(callable(routine_mode.TOOL.get("handler")))
+
     def test_delete_and_corrupt_store_protection(self):
         routine_mode.run({
             "action": "save", "routine_name": "Study", "applications": ["Code"],
