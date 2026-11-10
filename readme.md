@@ -564,7 +564,7 @@ python main.py
 | **macOS permissions** | Accessibility (to type and click) and Screen Recording (to see the screen), both under System Settings → Privacy & Security. Until granted, those actions silently do nothing — the OS reports success either way |
 | **Python** | 3.11, 3.12 or 3.13 |
 | **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word). Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
-| **Proactive check-ins** | Spoken check-ins run only when Windows can confirm desktop idleness. On systems without an idle sensor JARVIS stays silent rather than interrupting during active use |
+| **Proactive check-ins** | After 15 minutes without user speech, JARVIS may speak when Windows positively confirms the desktop is idle and no fullscreen window, call or phone session is active. This can happen while the wake-word microphone remains asleep; microphone audio stays local. Without a verified idle sensor, check-ins stay silent |
 | **Speakers** | Required for voice replies |
 | **API Key** | Free Gemini API key (entered on first launch → `config/api_keys.json`). Only for the Gemini engine — a fully local setup needs no key and no account |
 | **GPU** | **Not required, anywhere.** The avatar and HUD video are rendered in software; local speech recognition and the neural voice both run on the CPU by default |
