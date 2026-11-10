@@ -656,7 +656,7 @@ def computer_control(
       amount        : scroll amount (default: 3)
       seconds       : wait duration
       title         : window title fragment for focus_window
-      target_app    : exact foreground process name for all synthetic input
+      target_app    : on Windows, exact foreground executable returned by foreground_app
       description   : natural-language element description for screen_find/click
       type          : data type for random_data
       field         : memory field name for user_data
@@ -862,9 +862,10 @@ TOOL = {
     "name": "computer_control",
     "description": (
         "Direct computer control: type, click, hotkeys, scroll, move mouse. "
-        "Before typing or clicking, call action='foreground_app' to read the exact "
-        "active executable name, then pass it as target_app on the input action. "
-        "Every input action requires target_app and is refused if another app is active. "
+        "On Windows, before typing or clicking, call action='foreground_app' and pass its exact "
+        "executable name as target_app; the active window is checked before input. "
+        "This foreground-identity guard is Windows-only. On macOS/Linux, do not call "
+        "foreground_app as a prerequisite; attempt only actions the OS actually permits. "
         "screenshots, find elements on screen, and CLOSE an application. "
         "Use action='close_app' with 'app_name' whenever the user asks to "
         "close, quit or exit a program - 'close Spotify', 'quit Chrome'. "
@@ -879,7 +880,7 @@ TOOL = {
     # Used in place of `description` only when a small model is on a tool
     # budget - Gemini still gets the full text. See providers/schema.py.
     "brief": (
-        "Controls the computer: call foreground_app to inspect the active executable before typing or clicking, then pass it as target_app; use close_app to close a named app and open_app to launch one."
+        "Controls the computer. On Windows, inspect foreground_app and pass target_app before typing or clicking; on macOS/Linux, use only OS-permitted input actions. Use close_app to close a named app and open_app to launch one."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -906,7 +907,7 @@ TOOL = {
             },
             "target_app": {
                 "type": "STRING",
-                "description": "Required for every mouse/keyboard/clipboard action: exact target application's foreground process name, e.g. notepad.exe or chrome.exe. Do not guess; inspect the foreground app or focus the named app first."
+                "description": "Windows only: exact foreground executable name returned by foreground_app; required for mouse/keyboard/clipboard actions. This parameter is not used for the macOS/Linux input path."
             },
             "text": {
                 "type": "STRING",
