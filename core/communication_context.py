@@ -53,17 +53,36 @@ def communication_apps_from_sessions(sessions) -> set[str]:
     return names
 
 
+def _capture_sessions_from_devices(devices, session_type, session_interface):
+    """Enumerate WASAPI sessions attached to active microphone endpoints."""
+    sessions = []
+    for device in devices or ():
+        manager = device.AudioSessionManager
+        enumerator = manager.GetSessionEnumerator()
+        for index in range(enumerator.GetCount()):
+            control = enumerator.GetSession(index)
+            if control is None:
+                continue
+            control2 = control.QueryInterface(session_interface)
+            if control2 is not None:
+                sessions.append(session_type(control2))
+    return sessions
+
+
 def get_active_communication_apps() -> set[str] | None:
     """Return communication apps with active Windows audio sessions.
 
-    An open Discord window is not proof of a call. WASAPI session state is a
-    better signal: active playback/call sessions remain visible while the app
-    is behind a game. Returns None when the Windows audio-session API is
-    unavailable, allowing the caller to fall back to foreground-app detection.
+    An open Discord window is not proof of a call. Check both render sessions
+    and sessions attached to active capture endpoints, so a call that is
+    sending microphone audio is still seen even when remote playback is silent.
+    Returns None when the Windows audio-session API is unavailable.
     """
     try:
         import comtypes
+        from pycaw.api.audiopolicy import IAudioSessionControl2
+        from pycaw.constants import DEVICE_STATE, EDataFlow
         from pycaw.pycaw import AudioUtilities
+        from pycaw.utils import AudioSession
     except Exception:
         return None
 
@@ -73,7 +92,18 @@ def get_active_communication_apps() -> set[str] | None:
         # before asking WASAPI for its session enumerator.
         comtypes.CoInitialize()
         initialized = True
-        return communication_apps_from_sessions(AudioUtilities.GetAllSessions())
+        # AudioUtilities.GetAllSessions() only walks the default render
+        # endpoint. Enumerate capture endpoints separately: WASAPI exposes
+        # microphone sessions through each endpoint's AudioSessionManager.
+        capture_devices = AudioUtilities.GetAllDevices(
+            data_flow=EDataFlow.eCapture.value,
+            device_state=DEVICE_STATE.ACTIVE.value,
+        )
+        sessions = list(AudioUtilities.GetAllSessions() or ())
+        sessions.extend(_capture_sessions_from_devices(
+            capture_devices, AudioSession, IAudioSessionControl2
+        ))
+        return communication_apps_from_sessions(sessions)
     except Exception:
         return None
     finally:

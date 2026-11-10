@@ -78,37 +78,116 @@ class CommunicationContextTests(unittest.TestCase):
     def test_unknown_background_audio_does_not_trigger_privacy_gate(self):
         self.assertFalse(is_communication_context("game.exe", {"musicplayer"}))
 
-    def test_wasapi_probe_initializes_and_uninitializes_com(self):
-        process = types.SimpleNamespace(name=lambda: "Discord.exe")
-        session = types.SimpleNamespace(State=1, Process=process)
+    def test_wasapi_probe_checks_render_and_capture_sessions(self):
+        render_process = types.SimpleNamespace(name=lambda: "Discord.exe")
+        render_session = types.SimpleNamespace(State=1, Process=render_process)
+
+        capture_process = types.SimpleNamespace(name=lambda: "Teams.exe")
+        class CaptureControl:
+            State = 1
+            Process = capture_process
+            def QueryInterface(self, interface):
+                self.interface = interface
+                return self
+
+        control = CaptureControl()
+        class SessionEnumerator:
+            def GetCount(self):
+                return 1
+            def GetSession(self, index):
+                self.assert_index = index
+                return control
+
+        manager = types.SimpleNamespace(
+            GetSessionEnumerator=lambda: SessionEnumerator()
+        )
+        capture_device = types.SimpleNamespace(AudioSessionManager=manager)
+
+        class WrappedSession:
+            def __init__(self, ctl):
+                self.State = ctl.State
+                self.Process = ctl.Process
+
         comtypes = types.SimpleNamespace(CoInitialize=Mock(), CoUninitialize=Mock())
-        audio = types.SimpleNamespace(GetAllSessions=Mock(return_value=[session]))
+        audio = types.SimpleNamespace(
+            GetAllSessions=Mock(return_value=[render_session]),
+            GetAllDevices=Mock(return_value=[capture_device]),
+        )
+        interface = object()
+        api_package = types.ModuleType("pycaw.api")
+        api_package.__path__ = []
+        policy_module = types.ModuleType("pycaw.api.audiopolicy")
+        policy_module.IAudioSessionControl2 = interface
+        constants_module = types.ModuleType("pycaw.constants")
+        constants_module.EDataFlow = types.SimpleNamespace(
+            eCapture=types.SimpleNamespace(value=1)
+        )
+        constants_module.DEVICE_STATE = types.SimpleNamespace(
+            ACTIVE=types.SimpleNamespace(value=1)
+        )
+        utils_module = types.ModuleType("pycaw.utils")
+        utils_module.AudioSession = WrappedSession
         pycaw_package = types.ModuleType("pycaw")
         pycaw_package.__path__ = []
         pycaw_module = types.ModuleType("pycaw.pycaw")
         pycaw_module.AudioUtilities = audio
         with patch.dict(sys.modules, {
-            "comtypes": comtypes, "pycaw": pycaw_package, "pycaw.pycaw": pycaw_module,
+            "comtypes": comtypes,
+            "pycaw": pycaw_package,
+            "pycaw.api": api_package,
+            "pycaw.api.audiopolicy": policy_module,
+            "pycaw.constants": constants_module,
+            "pycaw.pycaw": pycaw_module,
+            "pycaw.utils": utils_module,
         }):
             result = get_active_communication_apps()
-        self.assertEqual(result, {"discord"})
+
+        self.assertEqual(result, {"discord", "teams"})
+        audio.GetAllDevices.assert_called_once_with(
+            data_flow=1, device_state=1
+        )
+        self.assertIs(control.interface, interface)
         comtypes.CoInitialize.assert_called_once_with()
         comtypes.CoUninitialize.assert_called_once_with()
 
-    def test_wasapi_probe_uninitializes_com_when_session_enumeration_fails(self):
+    def test_wasapi_probe_uninitializes_com_when_capture_enumeration_fails(self):
         comtypes = types.SimpleNamespace(CoInitialize=Mock(), CoUninitialize=Mock())
-        audio = types.SimpleNamespace(GetAllSessions=Mock(side_effect=RuntimeError("WASAPI unavailable")))
+        audio = types.SimpleNamespace(
+            GetAllSessions=Mock(return_value=[]),
+            GetAllDevices=Mock(side_effect=RuntimeError("WASAPI unavailable")),
+        )
+        interface = object()
+        api_package = types.ModuleType("pycaw.api")
+        api_package.__path__ = []
+        policy_module = types.ModuleType("pycaw.api.audiopolicy")
+        policy_module.IAudioSessionControl2 = interface
+        constants_module = types.ModuleType("pycaw.constants")
+        constants_module.EDataFlow = types.SimpleNamespace(
+            eCapture=types.SimpleNamespace(value=1)
+        )
+        constants_module.DEVICE_STATE = types.SimpleNamespace(
+            ACTIVE=types.SimpleNamespace(value=1)
+        )
+        utils_module = types.ModuleType("pycaw.utils")
+        utils_module.AudioSession = object
         pycaw_package = types.ModuleType("pycaw")
         pycaw_package.__path__ = []
         pycaw_module = types.ModuleType("pycaw.pycaw")
         pycaw_module.AudioUtilities = audio
         with patch.dict(sys.modules, {
-            "comtypes": comtypes, "pycaw": pycaw_package, "pycaw.pycaw": pycaw_module,
+            "comtypes": comtypes,
+            "pycaw": pycaw_package,
+            "pycaw.api": api_package,
+            "pycaw.api.audiopolicy": policy_module,
+            "pycaw.constants": constants_module,
+            "pycaw.pycaw": pycaw_module,
+            "pycaw.utils": utils_module,
         }):
             result = get_active_communication_apps()
         self.assertIsNone(result)
         comtypes.CoInitialize.assert_called_once_with()
         comtypes.CoUninitialize.assert_called_once_with()
+
     def test_audio_api_failure_uses_foreground_fallback_on_non_windows(self):
         with patch("core.communication_context.os.name", "posix"):
             self.assertTrue(is_communication_context("Teams.exe", None))
