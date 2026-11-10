@@ -31,6 +31,9 @@ class DesktopAwarenessTests(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertEqual(result["category"] if "category" in result else None, None)
 
+    def test_action_registers_its_handler(self):
+        self.assertTrue(callable(desktop_awareness.TOOL.get("handler")))
+
     def test_formatter_does_not_claim_unknown_sensor_data(self):
         result = desktop_awareness.format_desktop_context({
             "available": True, "application": "", "activity": "unknown activity",
