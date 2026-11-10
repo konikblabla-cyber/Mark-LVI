@@ -81,9 +81,14 @@ def _read_file(file_path: str) -> tuple[str, str]:
         return "", f"Could not read file: {e}"
 
 
-def _save_file(path: Path, content: str) -> str:
+def _save_file(path: Path, content: str, *,
+               expected_text: str | None = None,
+               verify_expected: bool = False) -> str:
     try:
-        return safe_write_text(path, content, undo_label=f"code file {path.name}")
+        return safe_write_text(
+            path, content, undo_label=f"code file {path.name}",
+            expected_text=expected_text, verify_expected=verify_expected,
+        )
     except Exception as e:
         return f"Could not save: {e}"
 
@@ -350,7 +355,9 @@ Updated code:"""
     except Exception as e:
         return f"Could not edit code: {e}"
 
-    status = _save_file(Path(file_path), edited)
+    status = _save_file(
+        Path(file_path), edited, expected_text=content, verify_expected=True
+    )
     if status.startswith("Could not save:"):
         return status
     print(f"[Code] ✅ Edited: {file_path}")
@@ -398,10 +405,13 @@ def _run_action(file_path, args, timeout, player) -> str:
 
 def _optimize_action(file_path, code, language, output_path, player) -> str:
 
-    if file_path and not code:
-        code, err = _read_file(file_path)
+    disk_content = None
+    if file_path:
+        disk_content, err = _read_file(file_path)
         if err:
             return err
+        if not code:
+            code = disk_content
     if not code:
         return "Please provide code or a file path to optimize, sir."
 
@@ -437,7 +447,11 @@ Optimized code:"""
     else:
         save_path = _resolve_save_path(output_path, lang)
 
-    status = _save_file(save_path, optimized)
+    status = _save_file(
+        save_path, optimized,
+        expected_text=disk_content if file_path else None,
+        verify_expected=bool(file_path),
+    )
     if status.startswith("Could not save:"):
         return status
     print(f"[Code] ✅ Optimized: {save_path}")
@@ -477,7 +491,6 @@ def _screen_debug_action(description, file_path, player, speak=None) -> str:
         from google.genai import types
 
         image_bytes  = screenshot_path.read_bytes()
-        image_base64 = _image_to_base64(screenshot_path)
 
         user_question = description or "What error or problem do you see on the screen? How can it be fixed?"
 
@@ -520,7 +533,10 @@ Be specific and actionable. If you see an error message, quote it exactly."""
             if code_match:
                 fixed_code = code_match.group(1).strip()
                 save_path  = Path(file_path)
-                save_status = _save_file(save_path, fixed_code)
+                save_status = _save_file(
+                    save_path, fixed_code,
+                    expected_text=file_content, verify_expected=True,
+                )
                 if save_status.startswith("Could not save:"):
                     analysis += f"\n\n⚠️ The fix could not be saved: {save_status}"
                 else:

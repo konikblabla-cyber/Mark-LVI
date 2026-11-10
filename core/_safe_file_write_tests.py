@@ -81,6 +81,26 @@ class SafeFileWriteTests(unittest.TestCase):
                 safe_write_text(target, b"not text")
             self.assertFalse(target.exists())
 
+    def test_compare_and_swap_preserves_concurrent_user_edit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "main.py"
+            target.write_text("user's newer edit", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                safe_write_text(
+                    target, "model output",
+                    expected_text="original snapshot", verify_expected=True,
+                )
+            self.assertEqual(target.read_text(encoding="utf-8"), "user's newer edit")
+
+    def test_compare_and_swap_refuses_disappeared_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "main.py"
+            with self.assertRaises(FileNotFoundError):
+                safe_write_text(
+                    target, "model output", expected_text="old", verify_expected=True
+                )
+            self.assertFalse(target.exists())
+
     def test_refuses_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "folder"

@@ -51,11 +51,14 @@ def _atomic_replace(target: Path, content: bytes, mode: int | None = None) -> No
 
 def safe_write_text(path: Path, content: str, *,
                     undo_label: str = "wrote code",
-                    undo_limit: int = UNDO_CONTENT_LIMIT) -> str:
+                    undo_limit: int = UNDO_CONTENT_LIMIT,
+                    expected_text: str | None = None,
+                    verify_expected: bool = False) -> str:
     """Atomically write a file and register undo when the old file is small.
 
     Final-component symlinks and non-regular files are refused. A parent
     directory symlink is resolved once so the write destination is explicit.
+    When verify_expected is true, the existing file must exactly match expected_text.
     Undo restores/removes only if the file still matches this exact write.
     """
     if not isinstance(content, str):
@@ -80,14 +83,21 @@ def safe_write_text(path: Path, content: str, *,
     previous = None
     previous_mode = None
     existed = target.exists()
+    if verify_expected and not existed:
+        raise FileNotFoundError("The file disappeared before the edit could be saved.")
     if existed:
         try:
             info = target.stat()
             previous_mode = stat.S_IMODE(info.st_mode)
+            current_bytes = target.read_bytes() if (info.st_size <= undo_limit or verify_expected) else None
+            if verify_expected and current_bytes != expected_text.encode("utf-8"):
+                raise RuntimeError("The file changed while the model was working; newer contents were left untouched.")
             if info.st_size <= undo_limit:
-                previous = target.read_bytes()
+                previous = current_bytes
         except OSError as exc:
             raise OSError("Could not safely back up the existing file; nothing was changed.") from exc
+    elif verify_expected:
+        raise FileNotFoundError("The file disappeared before the edit could be saved.")
 
     _atomic_replace(target, encoded, previous_mode)
     written_signature = _signature(target)
