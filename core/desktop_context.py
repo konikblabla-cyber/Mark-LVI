@@ -148,6 +148,25 @@ def desktop_is_idle(context: object,
         return False
     return seconds >= max(0.0, float(minimum_seconds))
 
+def should_run_proactive_checkin(
+    session_available: bool,
+    communication_active: bool,
+    phone_active: bool,
+    context: object,
+) -> bool:
+    """Allow a spoken check-in only with a live session and verified idle desktop.
+
+    Wake-word sleep closes only the microphone path. It must not suppress an
+    explicitly enabled proactive check-in; the local idle/context gates still
+    prevent speaking during active work or a communication session.
+    """
+    return (
+        bool(session_available)
+        and not communication_active
+        and not phone_active
+        and should_allow_proactive_interrupt(context)
+    )
+
 def should_allow_proactive_interrupt(context: object) -> bool:
     """Allow unsolicited voice only when the desktop sensor positively confirms idle."""
     return (

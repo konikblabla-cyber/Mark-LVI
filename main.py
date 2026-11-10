@@ -88,7 +88,7 @@ from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     should_auto_wake, should_forward_microphone,
 )
-from core.desktop_context import get_desktop_context, should_allow_proactive_interrupt
+from core.desktop_context import get_desktop_context, should_run_proactive_checkin
 from core.viseme               import VisemeStream
 from core.wake_word            import (
     WakeWordDetector, is_ready as wake_is_ready, install_and_download as wake_install,
@@ -1776,8 +1776,10 @@ class JarvisLive:
             # only a queue push, so the audio path is never slowed. When wake word
             # is off (default) or we're awake, this is a single boolean check.
             if self._wake_enabled and not self._awake:
+                with self._speaking_lock:
+                    assistant_speaking = self._is_speaking
                 det = self._wake_detector
-                if det is not None:
+                if det is not None and not assistant_speaking and not self._tail_active():
                     det.feed(indata)
                 return
             with self._speaking_lock:
@@ -2464,8 +2466,7 @@ class JarvisLive:
         while True:
             await asyncio.sleep(60)   # evaluate once per minute
 
-            if (not self.session or not self._awake
-                    or self._communication_app_active or self._phone_active):
+            if (not self.session or self._communication_app_active or self._phone_active):
                 continue
 
             with self._speaking_lock:
@@ -2483,7 +2484,9 @@ class JarvisLive:
             _desktop_ctx = await asyncio.to_thread(
                 get_desktop_context, include_app=_desktop_opt_in
             )
-            if not should_allow_proactive_interrupt(_desktop_ctx):
+            if not should_run_proactive_checkin(
+                    bool(self.session), self._communication_app_active,
+                    self._phone_active, _desktop_ctx):
                 continue
 
             self._proactive.mark_attempted()

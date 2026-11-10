@@ -10,6 +10,7 @@ from core.desktop_context import (
     _idle_seconds_from_ticks,
     desktop_is_idle,
     should_allow_proactive_interrupt,
+    should_run_proactive_checkin,
     _is_fullscreen_rect,
 )
 
@@ -60,6 +61,31 @@ class DesktopContextTests(unittest.TestCase):
         }))
         self.assertFalse(should_allow_proactive_interrupt({
             "available": True, "idle_seconds": None,
+            "fullscreen": False, "fullscreen_known": True,
+        }))
+    def test_proactive_checkin_can_run_while_microphone_is_asleep(self):
+        context = {
+            "available": True, "idle_seconds": 1800.0,
+            "fullscreen": False, "fullscreen_known": True,
+        }
+        self.assertTrue(should_run_proactive_checkin(True, False, False, context))
+
+    def test_proactive_checkin_is_blocked_without_a_session_or_during_calls(self):
+        context = {
+            "available": True, "idle_seconds": 1800.0,
+            "fullscreen": False, "fullscreen_known": True,
+        }
+        self.assertFalse(should_run_proactive_checkin(False, False, False, context))
+        self.assertFalse(should_run_proactive_checkin(True, True, False, context))
+        self.assertFalse(should_run_proactive_checkin(True, False, True, context))
+
+    def test_proactive_checkin_still_requires_confirmed_idle_and_window_geometry(self):
+        self.assertFalse(should_run_proactive_checkin(True, False, False, {
+            "available": True, "idle_seconds": 1800.0,
+            "fullscreen": False, "fullscreen_known": False,
+        }))
+        self.assertFalse(should_run_proactive_checkin(True, False, False, {
+            "available": True, "idle_seconds": 1.0,
             "fullscreen": False, "fullscreen_known": True,
         }))
     def test_fullscreen_geometry_detects_borderless_fullscreen(self):
