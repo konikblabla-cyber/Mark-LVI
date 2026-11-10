@@ -63,6 +63,12 @@ def build_status_briefing() -> str:
         sections.append(f"SAVED WORKSPACES: unavailable ({type(exc).__name__}).")
 
     try:
+        from plugins.process_watch import list_watchers
+        sections.append("PROCESS WATCHES:\\n" + list_watchers()[:1200])
+    except Exception as exc:
+        sections.append(f"PROCESS WATCHES: unavailable ({type(exc).__name__}).")
+
+    try:
         from actions.system_monitor import get_system_status
         status = get_system_status()
         disk = status.get("disk") or {}
@@ -77,11 +83,33 @@ def build_status_briefing() -> str:
         temp = status.get("cpu_temp_c")
         if temp is not None and temp >= 85:
             warnings.append(f"CPU temperature high ({temp:.0f}°C)")
+        battery = status.get("battery") or {}
+        battery_text = (
+            f"battery {battery['percent']:.0f}%"
+            + (" charging" if battery.get("plugged") else " unplugged")
+            if isinstance(battery.get("percent"), (int, float)) else "battery unknown"
+        )
+        network = status.get("network_adapters_up")
+        network_text = (
+            f"{network} network adapter(s) up"
+            if isinstance(network, int) else "network adapter state unknown"
+        )
+        temperature = status.get("cpu_temp_c")
+        temp_text = f"CPU temp {temperature:.0f}°C" if isinstance(temperature, (int, float)) else "CPU temp unknown"
+        gpu = status.get("gpu_percent")
+        gpu_text = f"GPU {gpu:.0f}%" if isinstance(gpu, (int, float)) else "GPU unknown"
+        top = status.get("top_memory_processes") or []
+        top_text = ", ".join(
+            f"{str(item.get('name', ''))[:40]} {float(item.get('memory_mb', 0)):.0f} MB"
+            for item in top[:3] if isinstance(item, dict)
+        )
         sections.append(
             "PC HEALTH: "
             f"CPU {status['cpu_percent']:.0f}%, RAM {status['ram_percent']:.0f}%, "
             f"disk free {disk_free if disk_free is not None else 'unknown'} GB, "
+            f"{battery_text}, {network_text}, {temp_text}, {gpu_text}, "
             f"uptime {status.get('uptime', 'unknown')}. "
+            + (f"Top memory: {top_text}. " if top_text else "")
             + ("Warnings: " + ", ".join(warnings) if warnings else "No critical resource warning.")
         )
     except Exception as exc:
