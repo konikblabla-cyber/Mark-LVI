@@ -89,8 +89,12 @@ def is_communication_context(
 ) -> bool:
     """Treat an active call session as private; fall back to focus if API fails."""
     if active_audio_apps is None:
-        # Without WASAPI, prefer privacy when a recognised communication app
-        # is the foreground window rather than assuming the call is inactive.
+        # On Windows the app-session API is required to detect a call behind
+        # a game. If it is unavailable, fail closed instead of forwarding
+        # microphone audio merely because a non-communication window is focused.
+        if os.name == "nt":
+            return True
+        # Other platforms do not use this Windows-only WASAPI sensor.
         return is_communication_app(foreground_app)
     return any(is_communication_app(name) for name in active_audio_apps)
 

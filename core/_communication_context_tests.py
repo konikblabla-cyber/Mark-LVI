@@ -1,5 +1,6 @@
 """Offline tests for communication-app microphone privacy gating."""
 import unittest
+from unittest.mock import patch
 
 from core.communication_context import (
     communication_apps_from_sessions,
@@ -74,9 +75,15 @@ class CommunicationContextTests(unittest.TestCase):
     def test_unknown_background_audio_does_not_trigger_privacy_gate(self):
         self.assertFalse(is_communication_context("game.exe", {"musicplayer"}))
 
-    def test_audio_api_failure_falls_back_to_foreground_app(self):
-        self.assertTrue(is_communication_context("Teams.exe", None))
-        self.assertFalse(is_communication_context("opera.exe", None))
+    def test_audio_api_failure_uses_foreground_fallback_on_non_windows(self):
+        with patch("core.communication_context.os.name", "posix"):
+            self.assertTrue(is_communication_context("Teams.exe", None))
+            self.assertFalse(is_communication_context("opera.exe", None))
+
+    def test_windows_audio_api_failure_fails_closed_in_background_apps(self):
+        with patch("core.communication_context.os.name", "nt"):
+            self.assertTrue(is_communication_context("opera.exe", None))
+            self.assertTrue(is_communication_context("game.exe", None))
 
     def test_active_call_detection_does_not_need_chat_to_be_foreground(self):
         self.assertTrue(is_communication_context("opera.exe", {"teams"}))

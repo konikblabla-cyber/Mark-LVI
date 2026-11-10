@@ -800,7 +800,7 @@ class JarvisLive:
     async def _run_communication_guard(self) -> None:
         """Keep mic audio local in known call/chat apps unless explicitly addressed."""
         while True:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(0.25)
             try:
                 context = await asyncio.to_thread(get_desktop_context, include_app=True)
                 foreground_app = (
@@ -836,7 +836,13 @@ class JarvisLive:
                         active):
                     self.wake(reason="desktop activity")
             if active:
-                if wake_is_ready():
+                if active_audio_apps is None and sys.platform == "win32":
+                    self.ui.write_log(
+                        "SYS: Windows audio-session detection is unavailable. "
+                        "Microphone stays local; repair pycaw/comtypes or use "
+                        "Push-to-Talk / the local wake phrase."
+                    )
+                elif wake_is_ready():
                     ready = self._ensure_wake_detector()
                     if ready:
                         self.ui.write_log(
