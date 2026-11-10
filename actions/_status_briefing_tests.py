@@ -14,9 +14,14 @@ class StatusBriefingTests(unittest.TestCase):
              patch("actions.workspace_mode._read_profiles", return_value={
                  "work": {"name": "Work", "applications": ["Code"]},
              }), \
+             patch("plugins.process_watch.list_watchers", return_value="Watching python.exe"), \
              patch("actions.system_monitor.get_system_status", return_value={
                  "cpu_percent": 20.0, "ram_percent": 40.0,
                  "disk": {"free_gb": 100.0, "free_percent": 20.0},
+                 "battery": {"percent": 78.0, "plugged": True},
+                 "network_adapters_up": 2,
+                 "top_memory_processes": [{"name": "Code.exe", "memory_mb": 1000}],
+                 "gpu_percent": 35.0,
                  "uptime": "2h 10m", "cpu_temp_c": 50.0,
              }):
             report = status_briefing.build_status_briefing()
@@ -24,6 +29,10 @@ class StatusBriefingTests(unittest.TestCase):
         self.assertIn("Pending reminders", report)
         self.assertIn("Windows updates", report)
         self.assertIn("Work", report)
+        self.assertIn("Watching python.exe", report)
+        self.assertIn("battery 78% charging", report)
+        self.assertIn("2 network adapter(s) up", report)
+        self.assertIn("Code.exe 1000 MB", report)
         self.assertIn("PC HEALTH", report)
         self.assertIn("read-only", report)
 
