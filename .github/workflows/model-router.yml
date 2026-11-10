@@ -229,3 +229,5 @@ jobs:
         run: python -m core._process_runner_tests
       - name: Run safe code-file write and undo tests on Windows
         run: python -m core._safe_file_write_tests
+      - name: Run dev-agent safety tests on Windows
+        run: python -m actions._dev_agent_safety_tests
