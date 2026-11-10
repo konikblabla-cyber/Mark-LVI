@@ -6,6 +6,7 @@ intended for proactive context and project orientation, not code execution.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 
