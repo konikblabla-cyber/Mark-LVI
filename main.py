@@ -1181,21 +1181,20 @@ class JarvisLive:
                     self._engine.flush_microphone(SEND_SAMPLE_RATE), self._loop)
             except Exception as e:
                 print(f"[JARVIS] PTT flush failed: {e}")
+        # The global hotkey listener runs on its own thread. Qt widgets must
+        # only be touched from the application's event-loop thread.
+        dispatch_to_loop(self._loop, lambda: self._update_ptt_ui(held))
+
+    def _update_ptt_ui(self, held: bool) -> None:
+        """Paint PTT state on the Qt/asyncio owner thread."""
+        if held:
+            state = "LISTENING"
+        else:
+            # Releasing PTT does not put JARVIS to sleep unless wake-word
+            # mode is enabled and the assistant is actually asleep.
+            state = ("SLEEPING" if (self._wake_enabled and not self._awake)
+                     else "LISTENING")
         try:
-            if held:
-                state = "LISTENING"
-            else:
-                # Releasing the key does NOT mean the assistant went to sleep.
-                #
-                # This used to paint SLEEPING unconditionally, and SLEEPING in
-                # this app means one specific thing — the wake-word gate is
-                # closed, the lids are down, nothing is being listened to at all.
-                # With push-to-talk on, every key release asserted that, so
-                # tapping WAKE NOW appeared to do nothing: the assistant really
-                # did wake, and the next release immediately painted it asleep
-                # again. Two different ideas were sharing one state.
-                state = ("SLEEPING" if (self._wake_enabled and not self._awake)
-                         else "LISTENING")
             self.ui.set_state(state)
         except Exception:
             pass
