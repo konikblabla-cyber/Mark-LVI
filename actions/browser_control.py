@@ -6,6 +6,7 @@ import concurrent.futures
 import importlib.util
 import os
 import platform
+import re
 import shutil
 import subprocess
 import threading
@@ -117,14 +118,14 @@ def _normalize_url(url: str) -> str:
         return "about:blank"
     if raw.lower() == "about:blank":
         return "about:blank"
-    if any(ch.isspace() or ord(ch) < 32 for ch in raw) or "\\\\" in raw:
+    if any(ch.isspace() or ord(ch) < 32 for ch in raw) or "\\" in raw:
         raise ValueError("URL contains whitespace, control characters or backslashes")
     if raw.startswith("//"):
         raise ValueError("Protocol-relative URLs are not accepted")
 
     is_web_url = bool(re.match(r"^https?://", raw, re.IGNORECASE))
     host_port = bool(re.match(
-        r"^(?:[A-Za-z0-9.-]+|\\[[0-9A-Fa-f:]+\\]):[0-9]+(?:/|$)", raw
+        r"^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\]):[0-9]+(?:/|$)", raw
     ))
     explicit_scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*):", raw)
     if explicit_scheme and not is_web_url and not host_port:
