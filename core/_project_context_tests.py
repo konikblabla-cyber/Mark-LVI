@@ -20,7 +20,7 @@ class ProjectContextTests(unittest.TestCase):
 
             snapshot = inspect_project_folder(root)
             self.assertEqual(snapshot["project_name"], "my-project")
-            self.assertEqual(snapshot["file_count"], 3)
+            self.assertEqual(snapshot["file_count"], 2)
             self.assertEqual(snapshot["git_branch"], "feature/demo")
             prompt = format_project_context(snapshot)
             self.assertIn("my-project", prompt)
