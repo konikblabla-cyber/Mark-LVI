@@ -755,6 +755,12 @@ def computer_control(
             coords = _screen_find(desc)
             if coords:
                 time.sleep(0.2)
+                # Screenshot analysis may take seconds. Recheck the exact foreground
+                # process immediately before the click to avoid targeting a newly
+                # focused window with coordinates from the previous screenshot.
+                blocked = _input_window_guard(target_app)
+                if blocked:
+                    return blocked
                 _click(x=coords[0], y=coords[1])
                 return f"Clicked '{desc}' at {coords}"
             return f"Element not found on screen: '{desc}'"

@@ -117,6 +117,20 @@ class ComputerControlSafetyTests(unittest.TestCase):
                     request["run"]()
                     execute.assert_called_once()
 
+    def test_screen_click_rechecks_target_after_slow_screen_analysis(self):
+        blocked = "status=failed action=computer_control reason=foreground changed"
+        with patch.object(control, "_get_os", return_value="windows"), \
+             patch.object(control, "_input_window_guard", side_effect=["", blocked]) as guard, \
+             patch.object(control, "_screen_find", return_value=(20, 30)), \
+             patch.object(control, "_click") as click:
+            result = control.computer_control({
+                "action": "screen_click", "description": "Save button",
+                "target_app": "notepad.exe",
+            })
+        self.assertEqual(result, blocked)
+        self.assertEqual(guard.call_count, 2)
+        click.assert_not_called()
+
     def test_confirmed_hotkey_rechecks_foreground_before_execution(self):
         request = {}
         blocked = "status=failed action=computer_control reason=foreground changed"
