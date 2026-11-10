@@ -30,7 +30,7 @@ def dependency_name(spec: str) -> str:
 
 _NPM_REQUIREMENT_RE = re.compile(
     r"^(?P<name>(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*)"
-    r"(?:@(?P<version>[A-Za-z0-9.*+!~_-]+))?$",
+    r"(?:@(?P<version>[A-Za-z0-9.*+!~^_-]+))?$",
     re.IGNORECASE,
 )
 
@@ -41,7 +41,7 @@ def npm_dependency_name(spec: str) -> str:
         raise TypeError("Node dependency entries must be text.")
     value = spec.strip()
     match = _NPM_REQUIREMENT_RE.fullmatch(value)
-    if not match or any(ch in value for ch in "&|<>%^$!"):
+    if not match or any(ch in value for ch in "&|<>%$!"):
         raise ValueError(f"Unsupported npm dependency specification: {value!r}")
     name = match.group("name").lower()
     if name.startswith("@") and "/" not in name:
@@ -61,7 +61,9 @@ def npm_install_invocation(npm_path: str, dependencies: list[str],
     if on_windows and str(npm_path).lower().endswith((".cmd", ".bat")):
         # All arguments are validated registry package specs, so they cannot
         # inject shell operators or additional commands into cmd.exe.
-        return subprocess.list2cmdline(args), True
+        base = subprocess.list2cmdline(args[:-len(dependencies)])
+        quoted = " ".join(f'"{value}"' for value in dependencies)
+        return f"{base} {quoted}", True
     return args, False
 
 
