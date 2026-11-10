@@ -98,7 +98,7 @@ def is_communication_context(
 def should_auto_wake(
     idle_seconds: object,
     communication_active: bool,
-    max_idle_seconds: float = 3.0,
+    max_idle_seconds: float = 15.0,
 ) -> bool:
     """Wake an armed assistant on fresh local input, never during a call."""
     if communication_active:

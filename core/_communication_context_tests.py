@@ -83,8 +83,8 @@ class CommunicationContextTests(unittest.TestCase):
 
     def test_fresh_desktop_input_auto_wakes_outside_calls(self):
         self.assertTrue(should_auto_wake(0.0, False))
-        self.assertTrue(should_auto_wake(2.5, False))
-        self.assertFalse(should_auto_wake(4.0, False))
+        self.assertTrue(should_auto_wake(12.5, False))
+        self.assertFalse(should_auto_wake(16.0, False))
         self.assertFalse(should_auto_wake(None, False))
 
     def test_desktop_activity_never_auto_wakes_inside_a_call(self):
