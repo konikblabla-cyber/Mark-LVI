@@ -106,10 +106,11 @@ def _require_pyautogui():
 
 
 def _require_pyperclip() -> bool:
-    """Is the clipboard usable? Returns a bool rather than raising, because
-    every caller already has a hotkey fallback written for the case where it
-    is not — turning that into an exception would break the path built to
-    survive it."""
+    """Whether the optional clipboard module is installed.
+
+    Runtime clipboard access can still fail when the OS backend (for example
+    xclip/xsel on Linux) is missing, so callers must catch backend errors too.
+    """
     return _PYPERCLIP
 
 _FIRST_NAMES = [
@@ -201,11 +202,14 @@ def _smart_type(text: str, clear_first: bool = True) -> str:
         time.sleep(0.1)
 
     if len(text) > 20 and _require_pyperclip():
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        paste_key = "command" if _get_os() == "mac" else "ctrl"
-        pyautogui.hotkey(paste_key, "v")
-        return f"Smart-typed (clipboard): {text[:60]}{'…' if len(text) > 60 else ''}"
+        try:
+            pyperclip.copy(text)
+            time.sleep(0.1)
+            paste_key = "command" if _get_os() == "mac" else "ctrl"
+            pyautogui.hotkey(paste_key, "v")
+            return f"Smart-typed (clipboard): {text[:60]}{'…' if len(text) > 60 else ''}"
+        except Exception as exc:
+            _safe_print(f"[ComputerControl] clipboard backend unavailable; using key typing ({type(exc).__name__})")
 
     pyautogui.typewrite(text, interval=0.04)
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
@@ -291,22 +295,28 @@ def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.5) -> str:
 
 
 def _clipboard_get() -> str:
-    if _require_pyperclip():
-        return pyperclip.paste()
-    _hotkey("ctrl", "c")
-    time.sleep(0.2)
-    return "(copied — pyperclip unavailable for read)"
+    if not _require_pyperclip():
+        return outcome.failed("computer_control", "clipboard reading is unavailable; install/repair pyperclip and the OS clipboard backend (xclip or xsel on Linux)")
+    try:
+        return str(pyperclip.paste())
+    except Exception as exc:
+        return outcome.failed("computer_control", f"clipboard read failed ({type(exc).__name__}); check the OS clipboard backend")
 
 
 def _clipboard_paste(text: str) -> str:
+    _require_pyautogui()
+    value = str(text or "")
     if _require_pyperclip():
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        _require_pyautogui()
-        paste_key = "command" if _get_os() == "mac" else "ctrl"
-        pyautogui.hotkey(paste_key, "v")
-        return f"Pasted: {text[:60]}{'…' if len(text) > 60 else ''}"
-    return "pyperclip not available"
+        try:
+            pyperclip.copy(value)
+            time.sleep(0.1)
+            paste_key = "command" if _get_os() == "mac" else "ctrl"
+            pyautogui.hotkey(paste_key, "v")
+            return f"Pasted: {value[:60]}{'…' if len(value) > 60 else ''}"
+        except Exception as exc:
+            _safe_print(f"[ComputerControl] clipboard backend unavailable; typing text instead ({type(exc).__name__})")
+    pyautogui.typewrite(value, interval=0.04)
+    return f"Typed instead of clipboard paste: {value[:60]}{'…' if len(value) > 60 else ''}"
 
 
 def _screenshot(save_path: str | None = None) -> str:

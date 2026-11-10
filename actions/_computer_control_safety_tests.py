@@ -195,6 +195,37 @@ class ComputerControlSafetyTests(unittest.TestCase):
             request["run"]()
             execute.assert_called_once_with("delete")
 
+    def test_smart_type_falls_back_to_keyboard_when_clipboard_backend_fails(self):
+        gui = type("Gui", (), {"typewrite": Mock()})()
+        clipboard = type("Clipboard", (), {"copy": Mock(side_effect=RuntimeError("no backend"))})()
+        with patch.object(control, "_require_pyautogui"), \
+             patch.object(control, "_require_pyperclip", return_value=True), \
+             patch.object(control, "pyautogui", gui), \
+             patch.object(control, "pyperclip", clipboard), \
+             patch.object(control.time, "sleep"):
+            result = control._smart_type("a long piece of text", clear_first=False)
+        self.assertIn("Smart-typed:", result)
+        gui.typewrite.assert_called_once_with("a long piece of text", interval=0.04)
+
+    def test_clipboard_read_never_claims_success_without_a_backend(self):
+        with patch.object(control, "_require_pyperclip", return_value=False):
+            result = control._clipboard_get()
+        self.assertIn("status=failed action=computer_control", result)
+        self.assertIn("clipboard reading is unavailable", result)
+        self.assertNotIn("copied", result.lower())
+
+    def test_clipboard_paste_falls_back_to_typed_text_when_copy_fails(self):
+        gui = type("Gui", (), {"typewrite": Mock()})()
+        clipboard = type("Clipboard", (), {"copy": Mock(side_effect=RuntimeError("no backend"))})()
+        with patch.object(control, "_require_pyautogui"), \
+             patch.object(control, "_require_pyperclip", return_value=True), \
+             patch.object(control, "pyautogui", gui), \
+             patch.object(control, "pyperclip", clipboard), \
+             patch.object(control.time, "sleep"), \
+             patch.object(control, "_get_os", return_value="windows"):
+            result = control._clipboard_paste("hello clipboard")
+        self.assertIn("Typed instead of clipboard paste", result)
+        gui.typewrite.assert_called_once_with("hello clipboard", interval=0.04)
     def test_foreground_app_reports_only_the_active_process_name(self):
         with patch("core.desktop_context.get_desktop_context",
                    return_value={"available": True, "foreground_app": "notepad.exe"}):
