@@ -2924,13 +2924,13 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
             else:
 
                 try:
-                atomic_write_project_text(folder, rel, new, expected_text=written[rel])
-            except Exception as e:
-                _log(player, f"Kept {rel}; it changed or became unsafe during repair: {str(e)[:120]}")
-                continue
+                    atomic_write_project_text(folder, rel, new, expected_text=written[rel])
+                except Exception as e:
+                    _log(player, f"Kept {rel}; it changed or became unsafe during repair: {str(e)[:120]}")
+                    continue
 
-            written[rel] = new
-            _update(file=rel, file_state="done")
+                written[rel] = new
+                _update(file=rel, file_state="done")
 
     still_broken = [rel for rel, text in written.items() if _syntax_error(rel, text)]
 
