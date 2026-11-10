@@ -958,7 +958,7 @@ TOOL = {
             },
             "clear_first": {
                 "type": "BOOLEAN",
-                "description": "Clear field before typing (default: true)"
+                "description": "False by default. Set true only when the user explicitly asks to replace the entire active field or document; HUD confirmation is then required."
             },
             "path": {
                 "type": "STRING",

@@ -88,7 +88,7 @@ def _check_linux_desktop_tools() -> None:
         missing.append("xclip or xsel")
     if not missing:
         return
-    print("\\n⚠️  Some Linux desktop-control features need system packages: " + ", ".join(missing))
+    print("\n⚠️  Some Linux desktop-control features need system packages: " + ", ".join(missing))
     print("   Debian / Ubuntu: sudo apt-get install gnome-screenshot scrot python3-tk xclip")
     print("   Fedora:          sudo dnf install gnome-screenshot scrot python3-tkinter xclip")
     print("   Arch:             sudo pacman -S gnome-screenshot scrot tk xclip")
