@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -38,9 +38,11 @@ jobs:
           python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,
           httpx, requests, bs4, playwright, PIL, cv2, psutil, send2trash,
           pptx, fastapi, uvicorn, cryptography, multipart, qrcode, ddgs,
-          pdfplumber, PyPDF2, docx, pynvml"
+          pdfplumber, PyPDF2, docx, pynvml, googleapiclient.discovery,
+          google_auth_oauthlib.flow, tinytuya, paho.mqtt.client, openpyxl,
+          youtube_transcript_api"
       - name: Verify Windows audio and UI dependencies
         if: runner.os == 'Windows'
         run: >-
           python -c "import comtypes, pycaw.pycaw, win32api, win32gui,
-          win32com.client, wmi, pywinauto"
+          win32com.client, wmi, pywinauto, pygetwindow, win10toast"
