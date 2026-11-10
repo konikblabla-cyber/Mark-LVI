@@ -547,7 +547,7 @@ python setup.py        # installs deps for YOUR OS + the browser automation engi
 python main.py
 ```
 
-`setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. For full X11 desktop input, screenshots and clipboard, also install `gnome-screenshot`, `python3-tk` and `xclip` (Debian/Ubuntu: `sudo apt-get install gnome-screenshot python3-tk xclip`). `scrot` alone is not sufficient for the current PyScreeze screenshot backend. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
+`setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. Install `libegl1` for the Qt interface. For full X11 desktop input, screenshots and clipboard, also install `gnome-screenshot`, `python3-tk` and `xclip` (Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip`). `scrot` alone is not sufficient for the current PyScreeze screenshot backend. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
 
 > ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. The optional **wake word** engine is *not* installed here — grab it in one click from **⚙ → WAKE WORD** inside the app.
 
@@ -559,7 +559,7 @@ python main.py
 |---|---|
 | **OS** | Windows 10/11, macOS, or Linux |
 | **Linux display server** | Everything works on **X11**. On **Wayland** — the default on Ubuntu 22.04+, Fedora and current GNOME/KDE — the system does not permit any program to type, click, capture the screen or raise another window, so those features are unavailable and JARVIS says so at startup instead of pretending. Voice, memory, files, the web and opening applications are unaffected. Log out and pick an Xorg session to get the rest |
-| **Linux desktop tools** | On X11, install `gnome-screenshot`, `python3-tk` and `xclip` (or `xsel`) for PyAutoGUI screenshots, Tk support and clipboard. `scrot` alone is not sufficient for the current PyScreeze backend. Debian/Ubuntu: `sudo apt-get install gnome-screenshot python3-tk xclip` |
+| **Linux desktop tools** | Install `libegl1` for the Qt interface. On X11, install `gnome-screenshot`, `python3-tk` and `xclip` (or `xsel`) for PyAutoGUI screenshots, Tk support and clipboard. `scrot` alone is not sufficient for current PyScreeze. Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip` |
 | **macOS permissions** | Accessibility (to type and click) and Screen Recording (to see the screen), both under System Settings → Privacy & Security. Until granted, those actions silently do nothing — the OS reports success either way |
 | **Python** | 3.11, 3.12 or 3.13 |
 | **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word). Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |

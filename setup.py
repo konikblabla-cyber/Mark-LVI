@@ -86,12 +86,14 @@ def _check_linux_desktop_tools() -> None:
         missing.append("python3-tk")
     if not (shutil.which("xclip") or shutil.which("xsel")):
         missing.append("xclip or xsel")
+    if not find_library("EGL"):
+        missing.append("libegl1 (Qt display runtime)")
     if not missing:
         return
     print("\n⚠️  Some Linux desktop-control features need system packages: " + ", ".join(missing))
-    print("   Debian / Ubuntu: sudo apt-get install gnome-screenshot scrot python3-tk xclip")
-    print("   Fedora:          sudo dnf install gnome-screenshot scrot python3-tkinter xclip")
-    print("   Arch:             sudo pacman -S gnome-screenshot scrot tk xclip")
+    print("   Debian / Ubuntu: sudo apt-get install libegl1 gnome-screenshot scrot python3-tk xclip")
+    print("   Fedora:          sudo dnf install mesa-libEGL gnome-screenshot scrot python3-tkinter xclip")
+    print("   Arch:             sudo pacman -S libglvnd gnome-screenshot scrot tk xclip")
     print("   Then restart JARVIS. Voice, memory and other features remain available.")
 
 def _check_assets() -> None:
