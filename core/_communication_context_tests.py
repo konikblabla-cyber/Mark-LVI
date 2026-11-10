@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from core.communication_context import (
     communication_apps_from_sessions,
+    get_active_communication_apps,
     is_communication_app,
     is_communication_context,
     normalize_process_name,
