@@ -46,7 +46,8 @@ on:
       - "plugins/mission_control.py"
       - "plugins/_mission_control_tests.py"
       - "core/prompt.txt"
-      - "plugins/knowledge_vault.py"
+      - "plugins/knowledge_vault.py plugins/_knowledge_vault_tests.py"
+      - "plugins/_knowledge_vault_tests.py"
       - "memory/config_manager.py"
       - "memory/memory_manager.py"
       - "memory/_tests.py"
@@ -203,6 +204,8 @@ jobs:
         run: python -m actions._computer_control_safety_tests
       - name: Run memory store reliability tests
         run: python -m memory._tests
+      - name: Run Knowledge Vault Undo safety tests
+        run: python -m plugins._knowledge_vault_tests
       - name: Run background monitor reliability tests
         run: python -m actions._background_monitor_tests
       - name: Run Whisper device policy tests

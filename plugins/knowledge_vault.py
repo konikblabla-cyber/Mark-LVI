@@ -6,6 +6,7 @@ as untrusted data so prompt-injection text inside a note stays data.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tempfile
@@ -195,14 +196,30 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
             if len(updated.encode("utf-8")) > _MAX_NOTE_BYTES:
                 return "The resulting note would exceed 256 KB."
             _atomic_write(root, target, updated)
+            expected_digest = hashlib.sha256(updated.encode("utf-8")).digest()
+
             def restore():
-                target.parent.resolve().relative_to(root)
-                if previous is None:
-                    if target.exists() or target.is_symlink():
+                # Undo is conditional: never delete or overwrite a note that
+                # the user or another process changed after this operation.
+                try:
+                    target.parent.resolve().relative_to(root)
+                    if target.is_symlink():
+                        return "Cannot undo: the note became a symbolic link; it was left untouched."
+                    if not target.is_file():
+                        return "Cannot undo: the note is missing or is no longer a regular file."
+                    current_digest = hashlib.sha256(target.read_bytes()).digest()
+                    if current_digest != expected_digest:
+                        return "Cannot undo: the note changed since this action; the newer contents were left untouched."
+                    if previous is None:
                         target.unlink()
-                else:
+                        return f"Removed newly created note {target.name}."
                     _atomic_write(root, target, previous)
-                return f"Restored {target.name} to its previous contents."
+                    return f"Restored {target.name} to its previous contents."
+                except (OSError, ValueError) as exc:
+                    return (
+                        f"Cannot undo safely ({type(exc).__name__}); "
+                        "the note was left untouched."
+                    )
             push_undo(f"{'created' if previous is None else 'appended to'} note {target.relative_to(root).as_posix()}", restore)
             rel = target.relative_to(root).as_posix()
             displayed = _show(player, rel, _untrusted(rel, updated[:20_000]))
