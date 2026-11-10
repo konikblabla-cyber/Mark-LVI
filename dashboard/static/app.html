@@ -244,20 +244,35 @@
     const wake  = document.getElementById('wake');
 
     const _wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const _wsUrl   = `${_wsProto}://${location.host}/ws?token=${encodeURIComponent(_authToken)}`;
-    const ws       = new WebSocket(_wsUrl);
+    const _cookieReady = (async () => {
+      if (!_authToken) return false;
+      try {
+        const response = await fetch('/api/session-cookie', {
+          method: 'POST', headers: _authHeader(),
+        });
+        return response.ok;
+      } catch { return false; }
+    })();
 
-    ws.onopen    = () => { sys('Remote session active.'); toast('Connected to JARVIS'); };
-    ws.onclose   = () => sys('Connection lost — refresh to reconnect.');
-    ws.onerror   = () => sys('Connection error.');
-    ws.onmessage = (e) => {
-      const m = JSON.parse(e.data);
-      if (m.type === 'log')           append(m.speaker, m.text);
-      if (m.type === 'status')        setStatus(m.state);
-      if (m.type === 'wake')          sys('Wake word detected — connecting…');
-      if (m.type === 'sys')           sys(m.text);
-      if (m.type === 'file_received') _onFileReceived(m);
-    };
+    _cookieReady.then(ready => {
+      if (!ready) {
+        sys('Session expired — please sign in again.');
+        location.replace('/login');
+        return;
+      }
+      const ws = new WebSocket(`${_wsProto}://${location.host}/ws`);
+      ws.onopen    = () => { sys('Remote session active.'); toast('Connected to JARVIS'); };
+      ws.onclose   = () => sys('Connection lost — refresh to reconnect.');
+      ws.onerror   = () => sys('Connection error.');
+      ws.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.type === 'log')           append(m.speaker, m.text);
+        if (m.type === 'status')        setStatus(m.state);
+        if (m.type === 'wake')          sys('Wake word detected — connecting…');
+        if (m.type === 'sys')           sys(m.text);
+        if (m.type === 'file_received') _onFileReceived(m);
+      };
+    });
 
     function setStatus(s) {
       if (s === 'active') {
@@ -354,7 +369,7 @@
         if (xhr.status === 200) {
           let savedName = file.name;
           try { savedName = JSON.parse(xhr.responseText).name || file.name; } catch {}
-          const dlUrl = `/uploads/${encodeURIComponent(savedName)}?token=${encodeURIComponent(_authToken)}`;
+          const dlUrl = `/uploads/${encodeURIComponent(savedName)}`;
           if (bar)  { bar.style.width = '100%'; bar.style.background = 'var(--green)'; }
           if (st)   { st.textContent = '✓'; st.className = 'fc-status done'; }
           if (lbl)  lbl.textContent = 'Sent';
@@ -384,7 +399,7 @@
 
     // File received by another WebSocket client (e.g., second open tab)
     function _onFileReceived(m) {
-      const dlUrl = `/uploads/${encodeURIComponent(m.name)}?token=${encodeURIComponent(_authToken)}`;
+      const dlUrl = `/uploads/${encodeURIComponent(m.name)}`;
       const card  = document.createElement('div');
       card.className = 'msg-file';
       card.innerHTML = `
@@ -501,6 +516,11 @@
 
     async function doMic() {
       if (_voiceWs) { _stopVoice(); return; }
+      if (!(await _cookieReady)) {
+        sys('Session expired — sign in again to use the microphone.');
+        location.replace('/login');
+        return;
+      }
 
       if (!navigator.mediaDevices?.getUserMedia) {
         _showVoiceSetup();
@@ -526,7 +546,7 @@
 
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
       const ws = new WebSocket(
-        `${wsProto}://${location.host}/ws/phone-audio?token=${encodeURIComponent(_authToken)}`
+        `${wsProto}://${location.host}/ws/phone-audio`
       );
       ws.binaryType = 'arraybuffer';
 

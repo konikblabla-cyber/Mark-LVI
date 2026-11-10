@@ -19,6 +19,9 @@ import string
 import threading
 import time
 from pathlib import Path
+from core.dashboard_auth_policy import (
+    SESSION_COOKIE_NAME, session_cookie_options, websocket_origin_matches,
+)
 from core.dashboard_upload_policy import (
     MAX_UPLOAD_FILES, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_TOTAL_MB, upload_usage,
 )
@@ -850,6 +853,15 @@ class DashboardServer:
             return _valid(req.headers.get("authorization", "")
                           .removeprefix("Bearer ").strip())
 
+        def _set_session_cookie(response, token: str):
+            response.set_cookie(
+                SESSION_COOKIE_NAME, token,
+                **session_cookie_options(self._ssl_enabled()),
+            )
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            return response
+
         def _who(req: Request) -> str:
             """The client address a throttle counts against."""
             return (getattr(getattr(req, "client", None), "host", "") or "unknown")
@@ -857,6 +869,13 @@ class DashboardServer:
         @app.get("/login", response_class=HTMLResponse)
         async def login_page():
             return HTMLResponse(self._login_html)
+
+        @app.post("/api/session-cookie")
+        async def session_cookie(req: Request):
+            token = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
+            if not _valid(token):
+                return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+            return _set_session_cookie(JSONResponse({"ok": True}), token)
 
         @app.get("/", response_class=HTMLResponse)
         async def index():
@@ -897,8 +916,9 @@ class DashboardServer:
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Remote connection established."}
                 ))
-                # Bearer token in response body — no cookies needed (works on any browser/HTTP)
-                return JSONResponse({"ok": True, "token": tok})
+                return _set_session_cookie(
+                    JSONResponse({"ok": True, "token": tok}), tok,
+                )
             self._throttle.record_failure(who)
             return JSONResponse({"ok": False, "error": "Invalid or expired key"},
                                 status_code=401)
@@ -933,7 +953,7 @@ class DashboardServer:
                 {"type": "sys", "text": "Remote connection established via QR code."}
             ))
 
-            return HTMLResponse(f"""<!DOCTYPE html>
+            response = HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
   body{{background:#07090f;color:#dde3ed;font-family:sans-serif;
@@ -949,6 +969,7 @@ class DashboardServer:
 </script>
 <p>Connecting to JARVIS…</p>
 </body></html>""")
+            return _set_session_cookie(response, tok)
 
         @app.post("/api/device-login")
         async def device_login_ep(req: Request):
@@ -970,7 +991,9 @@ class DashboardServer:
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Known device reconnected automatically."}
             ))
-            return JSONResponse({"ok": True, "token": tok, "key": session_key})
+            return _set_session_cookie(
+                JSONResponse({"ok": True, "token": tok, "key": session_key}), tok,
+            )
 
         @app.post("/api/revoke-devices")
         async def revoke_devices(req: Request):
@@ -1027,8 +1050,14 @@ class DashboardServer:
         # ── Phone mic real-time audio → Gemini Live ──────────────────────────
 
         @app.websocket("/ws/phone-audio")
-        async def phone_audio_ws(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+        async def phone_audio_ws(websocket: WebSocket):
+            if not websocket_origin_matches(
+                websocket.headers.get("origin", ""),
+                websocket.headers.get("host", ""),
+            ):
+                await websocket.close(code=4003)
+                return
+            tok = str(websocket.cookies.get(SESSION_COOKIE_NAME) or "").strip()
             if not _valid(tok):
                 await websocket.close(code=4001)
                 return
@@ -1180,9 +1209,8 @@ class DashboardServer:
             return JSONResponse({"files": files})
 
         @app.get("/uploads/{filename}")
-        async def download_file(filename: str, token: str = ""):
-            # Auth via query param — browser <a download> can't send custom headers
-            tok = token.strip()
+        async def download_file(filename: str, req: Request):
+            tok = str(req.cookies.get(SESSION_COOKIE_NAME) or "").strip()
             if not _valid(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             safe = re.sub(r'[/\\]', '', filename)
@@ -1192,8 +1220,14 @@ class DashboardServer:
             return FileResponse(str(path), filename=safe)
 
         @app.websocket("/ws")
-        async def ws_ep(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+        async def ws_ep(websocket: WebSocket):
+            if not websocket_origin_matches(
+                websocket.headers.get("origin", ""),
+                websocket.headers.get("host", ""),
+            ):
+                await websocket.close(code=4003)
+                return
+            tok = str(websocket.cookies.get(SESSION_COOKIE_NAME) or "").strip()
             if not _valid(tok):
                 await websocket.close(code=4001)
                 return
