@@ -25,7 +25,7 @@ class LinuxLauncherTests(unittest.TestCase):
         self.assertEqual(name, "libreoffice")
 
     def test_linux_office_alias_detects_existing_shared_libreoffice_process(self):
-        existing = object()
+        existing = type("Match", (), {"label": "LibreOffice Writer"})()
         with patch.object(open_app, "_SYSTEM", "Linux"), \
              patch.object(open_app.appidentity, "launcher_name", return_value="libreoffice --writer"), \
              patch.object(open_app.shutil, "which", return_value="/usr/bin/libreoffice"), \
