@@ -19,6 +19,17 @@ MEMORY_PATH      = BASE_DIR / "memory" / "long_term.json"
 _lock            = RLock()
 MAX_VALUE_LENGTH = 380
 
+
+def _console_log(message: str) -> None:
+    """Print diagnostics without crashing on legacy Windows console code pages."""
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        stream = sys.stdout
+        encoding = getattr(stream, "encoding", None) or "ascii"
+        safe = str(message).encode(encoding, errors="backslashreplace").decode(encoding)
+        print(safe, file=stream)
+
 # ── Why there are two very different numbers here ────────────────────────────
 #
 # There used to be one: MEMORY_MAX_CHARS = 2200, applied to the whole store. It
@@ -70,12 +81,12 @@ def _read_memory_unlocked(strict: bool = False) -> dict:
     except Exception as exc:
         if strict:
             raise RuntimeError("memory store is unreadable; refusing to overwrite it") from exc
-        print(f"[Memory] ⚠️ Load error: {exc}")
+        _console_log(f"[Memory] ⚠️ Load error: {exc}")
         return _empty_memory()
     if not isinstance(data, dict):
         if strict:
             raise RuntimeError("memory store has an invalid structure; refusing to overwrite it")
-        print("[Memory] ⚠️ Load error: root value is not an object")
+        _console_log("[Memory] ⚠️ Load error: root value is not an object")
         return _empty_memory()
     base = _empty_memory()
     for key in base:
@@ -144,7 +155,7 @@ def _trim_to_limit(memory: dict) -> dict:
             break
         del memory[cat][key]
         dropped.append(f"{cat}/{key}")
-        print(f"[Memory] 🗑️  Trimmed {cat}/{key}")
+        _console_log(f"[Memory] 🗑️  Trimmed {cat}/{key}")
     if dropped and _trim_notifier:
         try:
             _trim_notifier(
@@ -201,7 +212,7 @@ def update_memory(memory_update: dict) -> dict:
         memory = _read_memory_unlocked(strict=True)
         if _recursive_update(memory, memory_update):
             save_memory(memory)
-            print(f"[Memory] 💾 Saved: {list(memory_update.keys())}")
+            _console_log(f"[Memory] 💾 Saved: {list(memory_update.keys())}")
         return memory
 
 
@@ -488,7 +499,7 @@ def save_session_summary(summary: str, language: str = "") -> None:
         sessions.append(entry)
         memory["sessions"] = sessions[-_SESSION_MAX:]
         save_memory(memory)
-    print(f"[Memory] 📝 Session saved ({entry['date']}): {summary[:60]}…")
+    _console_log(f"[Memory] 📝 Session saved ({entry['date']}): {summary[:60]}…")
 
 
 def pop_last_session() -> dict | None:
@@ -509,5 +520,5 @@ def pop_last_session() -> dict | None:
             save_memory(memory)
             return entry
         except Exception as e:
-            print(f"[Memory] ⚠️ pop_last_session error: {e}")
+            _console_log(f"[Memory] ⚠️ pop_last_session error: {e}")
             return None

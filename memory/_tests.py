@@ -1,4 +1,5 @@
 """Offline tests for crash-safe, corruption-safe long-term memory storage."""
+import io
 import json
 import tempfile
 import unittest
@@ -18,6 +19,15 @@ class MemoryStoreReliabilityTests(unittest.TestCase):
     def tearDown(self):
         self.path_patch.stop()
         self.temp_dir.cleanup()
+
+    def test_console_logging_survives_legacy_windows_code_pages(self):
+        buffer = io.BytesIO()
+        stream = io.TextIOWrapper(buffer, encoding="cp1252", errors="strict")
+        with patch("sys.stdout", stream):
+            memory_manager._console_log("[Memory] 💾 Saved: ['preferences']")
+        stream.flush()
+        output = buffer.getvalue().decode("cp1252")
+        self.assertIn(r"\U0001f4be", output)
 
     def test_update_and_search_round_trip(self):
         memory_manager.update_memory({"preferences": {"theme": "dark"}})
