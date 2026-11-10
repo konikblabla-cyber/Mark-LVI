@@ -1,7 +1,10 @@
 """Compact, local daily briefing across JARVIS' existing Windows subsystems."""
 from __future__ import annotations
 
+import json
 import platform
+import re
+from pathlib import Path
 from datetime import datetime
 
 
@@ -23,15 +26,21 @@ def build_status_briefing() -> str:
         sections.append(f"ACTIVE MISSIONS: unavailable ({type(exc).__name__}).")
 
     try:
-        from actions.reminder import _read_registry, _scripts_dir, _REMINDER_ID
-        entries = _read_registry()
-        scripts = _scripts_dir()
+        reminder_root = Path.home() / ".jarvis" / "reminders"
+        registry_path = reminder_root / "reminders.json"
+        try:
+            entries = json.loads(registry_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            entries = {}
+        if not isinstance(entries, dict):
+            raise ValueError("invalid reminder registry")
+        reminder_id_pattern = re.compile(r"^JARVISReminder_\\d{8}_\\d{6}$")
         visible = []
         for reminder_id, record in entries.items():
-            if not _REMINDER_ID.fullmatch(str(reminder_id)) or not isinstance(record, dict):
+            if not reminder_id_pattern.fullmatch(str(reminder_id)) or not isinstance(record, dict):
                 continue
             script_name = str(record.get("script") or "")
-            if script_name != f"{reminder_id}.py" or not (scripts / script_name).is_file():
+            if script_name != f"{reminder_id}.py" or not (reminder_root / script_name).is_file():
                 continue
             visible.append(
                 f"{record.get('date', '')} {record.get('time', '')}: "
