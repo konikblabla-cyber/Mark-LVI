@@ -63,6 +63,8 @@ class ProactiveEngine:
         monitors:     list[str] | None = None,
         recent_turns: list[str] | None = None,
         desktop_context: dict | None = None,
+        focus_context: dict | None = None,
+        project_context: str | None = None,
     ) -> str:
         """
         Build a context snapshot for Gemini.
@@ -108,7 +110,32 @@ class ProactiveEngine:
                 "You may mention one if it seems relevant."
             )
 
-        # Optional, privacy-limited desktop context: executable basename only.
+        # Optional, privacy-limited desktop context: executable basename and
+        # a broad category. No window title, document name or screen content.
+        desktop_ctx = ""
+        if isinstance(desktop_context, dict):
+            app = str(desktop_context.get("foreground_app") or "").strip()[:80]
+            if app:
+                desktop_ctx = (
+                    f"\\nForeground executable: {app}. "
+                    "No window title or screen contents were captured."
+                )
+
+        focus_ctx = ""
+        if isinstance(focus_context, dict):
+            app = str(focus_context.get("application") or "").strip()[:80]
+            activity = str(focus_context.get("activity") or "").strip()[:80]
+            category = str(focus_context.get("category") or "").strip()[:40]
+            if app and category and category != "unknown":
+                focus_ctx = (
+                    f"\\nStable foreground context: {activity} (application: {app}). "
+                    "This is a coarse process-name classification and may be wrong. "
+                    "Never claim to know the exact window, document or user action."
+                )
+
+        project_ctx = ""
+        if isinstance(project_context, str) and project_context.strip():
+            project_ctx = "\\n" + project_context.strip()[:1800]
         desktop_ctx = ""
         if isinstance(desktop_context, dict):
             app = str(desktop_context.get("foreground_app") or "").strip()[:80]
@@ -132,6 +159,9 @@ class ProactiveEngine:
             "Context about this person:",
             mem_str,
             monitor_ctx,
+            desktop_ctx,
+            focus_ctx,
+            project_ctx,
             recent_ctx,
             "",
             "Task:",
