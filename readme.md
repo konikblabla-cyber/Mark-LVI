@@ -82,6 +82,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. Shared with check-ins only when desktop awareness is enabled; no window titles or screen contents |
 | 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
 | 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
+| 🏠 Home Assistant Lights | Optional HTTPS integration for explicitly mapped Home Assistant lights; can turn lights on/off and verify reported state. No locks, doors, alarms or arbitrary services |
 | 🔗 Session Continuity | A dropped connection, a voice change or a device change no longer wipes the conversation |
 | 🧩 Plugin System | Drop a single `.py` file into `plugins/` — JARVIS learns a new skill on next launch |
 | 📄 Linux Office Aliases | Say Word, Excel or PowerPoint to open LibreOffice Writer, Calc or Impress when LibreOffice is installed; process verification recognises the actual runtime executable |
@@ -109,7 +110,7 @@ Python dependencies stay inside that project's local `.venv`; JavaScript and Typ
 
 Running or building code still requires an on-screen confirmation. A process is limited to 5 minutes and 1 MB of captured output; exceeding either limit stops it. The regular code helper writes atomically and supports Undo for files up to 1 MB, without undoing later edits made by the user.
 
-### What it costs when you do not use it
+Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit `light.*` alias map under **Settings → Plugin Settings**. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint.\n\n### What it costs when you do not use it
 
 | | |
 |---|---|
