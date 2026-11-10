@@ -1836,7 +1836,7 @@ def _safe_rel(folder: Path, rel: str) -> str | None:
         return None
 
     parts = rel.split("/")
-    if any(part in {"", ".", ".."} or part in _SKIP_DIRS for part in parts):
+    if any(part in {"", ".", ".."} or part.casefold() in _SKIP_DIRS_CASEFOLD for part in parts):
         return None
     try:
         resolve_project_path_without_symlinks(folder, rel)
