@@ -7,11 +7,19 @@ from __future__ import annotations
 
 import ntpath
 import os
+import sys
 
 
 # Windows executable basenames commonly used by desktop chat and calling apps.
 # Browser-based calls are intentionally not inferred from chrome.exe/msedge.exe:
 # process identity alone cannot reliably tell a Meet/Teams tab from other browsing.
+
+
+def initial_communication_gate(platform_name: object = None) -> bool:
+    """Keep the Windows microphone local until the first WASAPI probe completes."""
+    platform = sys.platform if platform_name is None else str(platform_name)
+    return platform.casefold() == "win32"
+
 COMMUNICATION_APP_NAMES = frozenset({
     "discord", "discordptb", "discordcanary",
     "teams", "ms-teams", "skype", "skypeapp",

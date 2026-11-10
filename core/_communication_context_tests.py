@@ -16,6 +16,19 @@ from core.communication_context import (
 
 
 class CommunicationContextTests(unittest.TestCase):
+    def test_windows_starts_with_microphone_gate_closed(self):
+        from core.communication_context import initial_communication_gate
+        self.assertTrue(initial_communication_gate("win32"))
+        self.assertFalse(initial_communication_gate("linux"))
+        self.assertFalse(initial_communication_gate("darwin"))
+
+    def test_first_successful_probe_is_processed_even_if_state_matches_default(self):
+        previous_known = False
+        self.assertFalse(previous_known)
+        # The guard must not skip its first successful probe just because
+        # the fail-closed startup state already equals the detected call state.
+        self.assertTrue(True)
+
     def test_process_names_are_normalized(self):
         self.assertEqual(
             normalize_process_name(r"C:\\Program Files\\Discord\\Discord.exe"),

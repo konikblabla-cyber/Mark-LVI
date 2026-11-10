@@ -594,7 +594,9 @@ class JarvisLive:
         self._phone_active        = False   # True while phone mic is streaming; pauses PC mic
         # In known communication apps, PC audio stays local until a local wake-word
         # match or an explicit push-to-talk hold opens one request.
-        self._communication_app_active = False
+        # Fail closed until the first Windows audio-session probe confirms there is no call.
+        self._communication_app_active = (sys.platform == "win32")
+        self._communication_context_known = False
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
@@ -820,10 +822,12 @@ class JarvisLive:
                 self._communication_turn_open = False
                 self._communication_turn_deadline = 0.0
                 self._communication_app_active = True
+                self._communication_context_known = False
                 print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
                 continue
 
-            if active == self._communication_app_active:
+            if (self._communication_context_known
+                    and active == self._communication_app_active):
                 # This remains a local decision. Recent keyboard/mouse input can
                 # wake a sleeping JARVIS for a direct command, but never in a
                 # known communication context.
@@ -841,6 +845,7 @@ class JarvisLive:
             self._communication_turn_open = False
             self._communication_turn_deadline = 0.0
             self._communication_app_active = active
+            self._communication_context_known = True
             if not active and self._wake_enabled and not self._awake:
                 if should_auto_wake(
                         context.get("idle_seconds") if isinstance(context, dict) else None,
