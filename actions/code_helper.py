@@ -22,6 +22,7 @@ from core import gemini
 from core.safe_file_write import safe_write_text
 from core import confirm as confirm_gate
 from core.timeout_policy import bounded_timeout
+from core.process_runner import run_bounded_process
 
 
 def _get_api_key() -> str:
@@ -211,12 +212,12 @@ Fixed code:"""
 
 def _run_file(path: Path, args: list, timeout: int) -> str:
     interpreters = {
-        ".py":  [sys.executable],
-        ".js":  ["node"],
-        ".ts":  ["ts-node"],
-        ".sh":  ["bash"],
+        ".py": [sys.executable],
+        ".js": ["node"],
+        ".ts": ["ts-node"],
+        ".sh": ["bash"],
         ".ps1": ["powershell", "-File"],
-        ".rb":  ["ruby"],
+        ".rb": ["ruby"],
         ".php": ["php"],
     }
     interp = interpreters.get(path.suffix.lower())
@@ -224,27 +225,28 @@ def _run_file(path: Path, args: list, timeout: int) -> str:
         return f"No interpreter for {path.suffix}."
 
     try:
-        result = subprocess.run(
+        result = run_bounded_process(
             interp + [str(path)] + (args or []),
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout, cwd=str(path.parent)
+            cwd=path.parent,
+            timeout=timeout,
         )
-        output = result.stdout.strip()
-        error  = result.stderr.strip()
-        parts  = []
-        if output: parts.append(f"Output:\n{output}")
-        if error:  parts.append(f"Stderr:\n{error}")
+        if result.timed_out:
+            return f"Timed out after {timeout}s."
+        parts = []
+        if result.stdout.strip():
+            parts.append(f"Output:\n{result.stdout.strip()}")
+        if result.stderr.strip():
+            parts.append(f"Stderr:\n{result.stderr.strip()}")
+        if result.returncode not in (0, None):
+            parts.append(f"Exit code: {result.returncode}")
+        if result.output_limited:
+            parts.append("Output truncated at the 1 MB safety limit; process stopped.")
         return "\n\n".join(parts) if parts else "Executed with no output."
 
-    except subprocess.TimeoutExpired:
-        return f"Timed out after {timeout}s."
     except FileNotFoundError:
         return f"Interpreter not found: {interp[0]}."
     except Exception as e:
         return f"Execution error: {e}"
-
-
 def _build(description, language, output_path, args, timeout, speak=None, player=None) -> str:
     if not description:
         return "Please describe what you want me to build, sir."

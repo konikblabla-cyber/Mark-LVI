@@ -54,6 +54,7 @@ from core.project_env import (
 
 from core.project_plan import validate_project_plan
 from core.timeout_policy import bounded_timeout
+from core.process_runner import run_bounded_process
 
 from core.project_path_policy import (
 
@@ -662,87 +663,40 @@ def _open_vscode(project_dir: Path) -> bool:
 
 
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
-
     print(f"[DevAgent] 🚀 Running: {run_command}")
-
     try:
-
         parts = shlex.split(run_command, posix=True)
-
         if not parts:
-
             return "Run error: empty run command."
 
-
-
         python_exe = project_venv_python(project_dir, create=False)
-
         env = os.environ.copy()
-
         if python_exe:
-
             env["PATH"] = str(python_exe.parent) + os.pathsep + env.get("PATH", "")
-
         command_name = Path(parts[0]).name.lower()
-
         if re.fullmatch(r"python(?:3(?:\.\d+)?)?(?:\.exe)?|py\.exe?", command_name):
-
             parts[0] = str(python_exe or sys.executable)
 
-
-
-        result = subprocess.run(
-
-            parts,
-
-            capture_output=True, text=True,
-
-            encoding="utf-8", errors="replace",
-
-            timeout=timeout,
-
-            cwd=str(project_dir),
-
-            env=env,
-
+        result = run_bounded_process(
+            parts, cwd=project_dir, timeout=timeout, env=env
         )
-
-
-
-        stdout = result.stdout.strip()
-
-        stderr = result.stderr.strip()
-
-
-
+        if result.timed_out:
+            return f"Timed out after {timeout}s — process was stopped."
         combined_parts = []
-
-        if stdout:
-
-            combined_parts.append(f"STDOUT:\n{stdout}")
-
-        if stderr:
-
-            combined_parts.append(f"STDERR:\n{stderr}")
-
-
-
+        if result.stdout.strip():
+            combined_parts.append(f"STDOUT:\n{result.stdout.strip()}")
+        if result.stderr.strip():
+            combined_parts.append(f"STDERR:\n{result.stderr.strip()}")
+        if result.returncode not in (0, None):
+            combined_parts.append(f"Process exited with code {result.returncode}.")
+        if result.output_limited:
+            combined_parts.append("Output truncated at the 1 MB safety limit; process stopped.")
         return "\n\n".join(combined_parts) if combined_parts else "Ran with no output."
 
-
-
-    except subprocess.TimeoutExpired:
-
-        return f"Timed out after {timeout}s — long-running app (server/GUI) is likely working."
-
     except FileNotFoundError as e:
-
         return f"Command not found: {e}"
-
     except Exception as e:
-
         return f"Run error: {e}"
-
 def _try_auto_install(error_output: str, project_dir: Path) -> bool:
 
     """Install a missing package only inside this project's virtual environment."""
