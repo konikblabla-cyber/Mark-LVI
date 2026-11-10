@@ -517,6 +517,46 @@ def _screen_find(description: str) -> tuple[int, int] | None:
 
     return None
 
+_INPUT_ACTIONS = {
+    "type", "smart_type", "click", "left_click", "double_click",
+    "right_click", "move", "drag", "hotkey", "press", "scroll",
+    "copy", "paste", "screen_click", "clear_field",
+}
+
+
+def _input_window_guard() -> str:
+    """Refuse synthetic input to JARVIS itself; fail closed if Windows cannot identify focus."""
+    if _get_os() != "windows":
+        return ""
+    try:
+        from core.desktop_context import get_desktop_context
+        context = get_desktop_context(include_app=True)
+        foreground = str(context.get("foreground_app") or "").strip()
+        if not context.get("available") or not foreground:
+            return outcome.failed(
+                "computer_control",
+                "foreground application could not be identified safely; no input was sent",
+            )
+        own_exes = {
+            Path(exe).name.casefold()
+            for exe in appidentity.own_exes()
+            if exe
+        }
+        own_exes.add(Path(sys.executable).name.casefold())
+        if foreground.casefold() in own_exes:
+            return outcome.failed(
+                "computer_control",
+                "JARVIS is the active window; refusing synthetic input into its own interface",
+                foreground_app=foreground,
+            )
+        return ""
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"foreground safety check failed ({type(exc).__name__}); no input was sent",
+        )
+
+
 def computer_control(
     parameters: dict,
     response=None,
@@ -570,6 +610,11 @@ def computer_control(
 
     if not action:
         return "No action specified for computer_control."
+
+    if action in _INPUT_ACTIONS:
+        blocked = _input_window_guard()
+        if blocked:
+            return blocked
 
     if player:
         # Terminal, not the HUD: the activity log is for the conversation and

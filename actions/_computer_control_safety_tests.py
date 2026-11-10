@@ -1,5 +1,7 @@
 """Offline regression tests for desktop-control safety boundaries."""
+import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -97,6 +99,29 @@ class ComputerControlSafetyTests(unittest.TestCase):
             execute.assert_not_called()
             request["run"]()
             execute.assert_called_once_with("alt", "f4")
+
+    def test_input_refuses_to_type_into_jarvis_foreground_window(self):
+        app = Path(sys.executable).name
+        with patch.object(control, "_get_os", return_value="windows"), \
+             patch("core.desktop_context.get_desktop_context",
+                   return_value={"available": True, "foreground_app": app}), \
+             patch.object(control.appidentity, "own_exes",
+                          return_value={sys.executable}), \
+             patch.object(control, "_type") as execute:
+            result = control.computer_control({"action": "type", "text": "unsafe"})
+        self.assertIn("status=failed", result)
+        self.assertIn("JARVIS is the active window", result)
+        execute.assert_not_called()
+
+    def test_input_fails_closed_when_foreground_process_is_unknown(self):
+        with patch.object(control, "_get_os", return_value="windows"), \
+             patch("core.desktop_context.get_desktop_context",
+                   return_value={"available": True, "foreground_app": ""}), \
+             patch.object(control, "_type") as execute:
+            result = control.computer_control({"action": "type", "text": "unsafe"})
+        self.assertIn("status=failed", result)
+        self.assertIn("no input was sent", result)
+        execute.assert_not_called()
 
     def test_delete_key_waits_for_hud_confirmation(self):
         request = {}
