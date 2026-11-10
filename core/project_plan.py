@@ -44,6 +44,9 @@ def validate_project_plan(plan: Any, language: str = "python") -> dict:
     """Reject malformed, oversized, unsafe, or internally inconsistent plans."""
     if not isinstance(plan, dict):
         raise ValueError("Project planner must return a JSON object.")
+    lang = str(language or "python").strip().lower()
+    is_python = lang in {"python", "py"}
+    is_javascript = lang in {"javascript", "typescript", "js", "ts", "node"}
 
     name = plan.get("project_name")
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 60:
@@ -73,9 +76,15 @@ def validate_project_plan(plan: Any, language: str = "python") -> dict:
             raise ValueError(f"File description is invalid or too long: {path}")
         if not isinstance(imports, list) or len(imports) > MAX_PROJECT_IMPORTS_PER_FILE:
             raise ValueError(f"Import list is invalid or too large: {path}")
-        if any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", value)
-               for value in imports):
-            raise ValueError(f"Project imports must be dotted module names: {path}")
+        if is_python:
+            if any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", value)
+                   for value in imports):
+                raise ValueError(f"Project imports must be dotted module names: {path}")
+        elif any(not isinstance(value, str) or not value.strip() or len(value) > 200
+                 or any(ord(ch) < 32 for ch in value)
+                 or value.strip().startswith("../") or value.strip().startswith("..\\")
+                 for value in imports):
+            raise ValueError(f"Project imports are invalid: {path}")
         validated_files.append({
             "path": "/".join(parts),
             "description": description,
@@ -88,20 +97,20 @@ def validate_project_plan(plan: Any, language: str = "python") -> dict:
     if entry.casefold() not in normalized_paths:
         raise ValueError("Project entry point must be one of the generated files.")
 
-    planned_paths = set(normalized_paths)
-    for item in validated_files:
-        for module in item["imports"]:
-            module_path = module.replace(".", "/") + ".py"
-            if module_path.casefold() not in planned_paths:
-                raise ValueError(f"Project import is not present in the file plan: {module}")
+    if is_python:
+        planned_paths = set(normalized_paths)
+        for item in validated_files:
+            for module in item["imports"]:
+                module_path = module.replace(".", "/") + ".py"
+                if module_path.casefold() not in planned_paths:
+                    raise ValueError(f"Project import is not present in the file plan: {module}")
 
     dependencies = plan.get("dependencies", [])
     if not isinstance(dependencies, list) or len(dependencies) > MAX_PROJECT_DEPENDENCIES:
         raise ValueError(f"Project plan may declare at most {MAX_PROJECT_DEPENDENCIES} dependencies.")
-    lang = str(language or "python").strip().lower()
-    if lang in {"javascript", "typescript", "js", "ts", "node"}:
+    if is_javascript:
         names = [npm_dependency_name(value) for value in dependencies]
-    elif lang in {"python", "py"}:
+    elif is_python:
         names = [dependency_name(value) for value in dependencies]
     else:
         if any(not isinstance(value, str) or not value.strip() or len(value) > 200
