@@ -26,6 +26,13 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Check for broken or conflicting dependencies
         run: python -m pip check
+      - name: Install PortAudio runtime for Linux sounddevice
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libportaudio2
+      - name: Verify the installer detects the audio runtime
+        run: python -c "from setup import _check_linux_portaudio; _check_linux_portaudio()"
       - name: Import core runtime dependencies
         run: >-
           python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,

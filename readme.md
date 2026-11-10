@@ -545,7 +545,7 @@ python setup.py        # installs deps for YOUR OS + the browser automation engi
 python main.py
 ```
 
-`setup.py` only ever installs what your operating system needs — the Windows-only libraries are skipped automatically on macOS and Linux, and vice-versa. It also checks your Python version up front, so a wrong interpreter fails with a sentence instead of a wall of pip output. Prefer to do it by hand? `pip install -r requirements.txt` works too.
+`setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
 
 > ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. The optional **wake word** engine is *not* installed here — grab it in one click from **⚙ → WAKE WORD** inside the app.
 
@@ -559,7 +559,7 @@ python main.py
 | **Linux display server** | Everything works on **X11**. On **Wayland** — the default on Ubuntu 22.04+, Fedora and current GNOME/KDE — the system does not permit any program to type, click, capture the screen or raise another window, so those features are unavailable and JARVIS says so at startup instead of pretending. Voice, memory, files, the web and opening applications are unaffected. Log out and pick an Xorg session to get the rest |
 | **macOS permissions** | Accessibility (to type and click) and Screen Recording (to see the screen), both under System Settings → Privacy & Security. Until granted, those actions silently do nothing — the OS reports success either way |
 | **Python** | 3.11, 3.12 or 3.13 |
-| **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word) |
+| **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word). Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
 | **Speakers** | Required for voice replies |
 | **API Key** | Free Gemini API key (entered on first launch → `config/api_keys.json`). Only for the Gemini engine — a fully local setup needs no key and no account |
 | **GPU** | **Not required, anywhere.** The avatar and HUD video are rendered in software; local speech recognition and the neural voice both run on the CPU by default |

@@ -13,6 +13,7 @@ Two things it deliberately does NOT install:
     PyQt6 and numpy already listed here. No GPU, no OpenGL, no extra packages.
 """
 import platform
+from ctypes.util import find_library
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,23 @@ def _check_python() -> None:
         sys.exit(1)
 
 
+def _check_linux_portaudio() -> None:
+    """Fail with the missing system package before the app fails at import time."""
+    if OS != "Linux":
+        return
+    if find_library("portaudio"):
+        return
+
+    print(
+        "\n❌ PortAudio was not found. The sounddevice Python package needs "
+        "the system PortAudio library on Linux."
+    )
+    print("   Debian / Ubuntu: sudo apt-get install libportaudio2")
+    print("   Fedora:          sudo dnf install portaudio")
+    print("   Arch:             sudo pacman -S portaudio")
+    print("   Then run setup.py again.")
+    sys.exit(1)
+
 def _check_assets() -> None:
     """The avatar's face is a shipped file; a truncated clone should say so."""
     face = HERE / "core" / "face_model.obj"
@@ -74,6 +92,9 @@ def main() -> None:
     # requirements.txt filters OS-specific extras by itself via pip markers.
     _run("Installing Python dependencies (OS-specific extras auto-filtered)…",
          [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+
+    # Linux sounddevice wheels do not bundle PortAudio; check before browsers.
+    _check_linux_portaudio()
 
     # Chromium covers Chrome/Edge/Opera/Brave/Vivaldi; Firefox for Firefox.
     # (Safari automation additionally needs: python -m playwright install webkit)
