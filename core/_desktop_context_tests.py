@@ -12,6 +12,7 @@ from core.desktop_context import (
     should_allow_proactive_interrupt,
     should_run_proactive_checkin,
     _is_fullscreen_rect,
+    _is_fullscreen_monitor_rect,
 )
 
 
@@ -91,6 +92,15 @@ class DesktopContextTests(unittest.TestCase):
     def test_fullscreen_geometry_detects_borderless_fullscreen(self):
         self.assertTrue(_is_fullscreen_rect(0, 0, 1920, 1080, 1920, 1080))
         self.assertFalse(_is_fullscreen_rect(100, 100, 1200, 800, 1920, 1080))
+
+    def test_fullscreen_geometry_uses_the_actual_monitor_origin(self):
+        # A secondary monitor can have negative coordinates in Windows' virtual desktop.
+        self.assertTrue(_is_fullscreen_monitor_rect(
+            -1920, 0, 0, 1080, -1920, 0, 0, 1080,
+        ))
+        self.assertFalse(_is_fullscreen_monitor_rect(
+            -1800, 100, -100, 900, -1920, 0, 0, 1080,
+        ))
 
     def test_missing_windows_sensor_preserves_other_platform_behaviour(self):
         self.assertIsNone(desktop_is_idle({"available": False}))
