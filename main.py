@@ -383,9 +383,9 @@ TOOL_DECLARATIONS = [
     {
         "name": "system_status",
         "description": (
-            "Returns real-time system metrics: CPU usage, RAM, GPU load, CPU temperature, "
-            "uptime, and process count. Use when the user asks about computer performance, "
-            "temperature, memory, or resource usage."
+            "Returns live Windows diagnostics: CPU, RAM, GPU, temperature, disk space, "
+            "battery, active network adapters, uptime, and the top memory-consuming processes. "
+            "Use when the user asks about performance, storage, battery, connectivity, or system health."
         ),
         "parameters": {
             "type": "OBJECT",
