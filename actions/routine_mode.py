@@ -133,7 +133,8 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
         for name, item in sorted(routines.items(), key=lambda row: row[0].casefold())[:_MAX_ROUTINES]:
             apps = item.get("applications", []) if isinstance(item, dict) else []
             devices = item.get("home_actions", []) if isinstance(item, dict) else []
-            rows.append(f"{name}: {len(apps)} app(s), {len(devices)} smart-home action(s)")
+            display_name = str(item.get("name") or name)[:40]
+            rows.append(f"{display_name}: {len(apps)} app(s), {len(devices)} smart-home action(s)")
         return "Saved routines:\n" + "\n".join(rows)
 
     name = str(params.get("routine_name") or "").strip()
