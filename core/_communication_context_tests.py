@@ -22,12 +22,11 @@ class CommunicationContextTests(unittest.TestCase):
         self.assertFalse(initial_communication_gate("linux"))
         self.assertFalse(initial_communication_gate("darwin"))
 
-    def test_first_successful_probe_is_processed_even_if_state_matches_default(self):
-        previous_known = False
-        self.assertFalse(previous_known)
-        # The guard must not skip its first successful probe just because
-        # the fail-closed startup state already equals the detected call state.
-        self.assertTrue(True)
+    def test_first_successful_probe_is_never_skipped(self):
+        from core.communication_context import communication_context_unchanged
+        self.assertFalse(communication_context_unchanged(True, True, False))
+        self.assertTrue(communication_context_unchanged(True, True, True))
+        self.assertFalse(communication_context_unchanged(False, True, True))
 
     def test_process_names_are_normalized(self):
         self.assertEqual(

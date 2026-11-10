@@ -20,6 +20,11 @@ def initial_communication_gate(platform_name: object = None) -> bool:
     platform = sys.platform if platform_name is None else str(platform_name)
     return platform.casefold() == "win32"
 
+
+def communication_context_unchanged(active: bool, previous: bool, known: bool) -> bool:
+    """Skip polling work only after at least one successful context probe."""
+    return bool(known) and bool(active) == bool(previous)
+
 COMMUNICATION_APP_NAMES = frozenset({
     "discord", "discordptb", "discordcanary",
     "teams", "ms-teams", "skype", "skypeapp",

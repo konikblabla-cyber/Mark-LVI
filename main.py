@@ -87,6 +87,7 @@ from core.echo                 import EchoGuard
 from core.live_session_policy import go_away_notice, live_turn_is_active
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
+    communication_context_unchanged, initial_communication_gate,
     should_auto_wake, should_forward_microphone,
 )
 from core.desktop_context import get_desktop_context, should_run_proactive_checkin
@@ -595,7 +596,7 @@ class JarvisLive:
         # In known communication apps, PC audio stays local until a local wake-word
         # match or an explicit push-to-talk hold opens one request.
         # Fail closed until the first Windows audio-session probe confirms there is no call.
-        self._communication_app_active = (sys.platform == "win32")
+        self._communication_app_active = initial_communication_gate()
         self._communication_context_known = False
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
@@ -826,8 +827,9 @@ class JarvisLive:
                 print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
                 continue
 
-            if (self._communication_context_known
-                    and active == self._communication_app_active):
+            if communication_context_unchanged(
+                    active, self._communication_app_active,
+                    self._communication_context_known):
                 # This remains a local decision. Recent keyboard/mouse input can
                 # wake a sleeping JARVIS for a direct command, but never in a
                 # known communication context.
