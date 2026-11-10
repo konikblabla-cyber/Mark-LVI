@@ -19,6 +19,7 @@ MAX_BUILD_ATTEMPTS = 3
 # fallback ladder. Writing a model name here is what left this file hanging
 # forever whenever that one alias was unwell.
 from core import gemini
+from core.safe_file_write import safe_write_text
 from core import confirm as confirm_gate
 
 
@@ -78,9 +79,7 @@ def _read_file(file_path: str) -> tuple[str, str]:
 
 def _save_file(path: Path, content: str) -> str:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        return f"Saved to: {path}"
+        return safe_write_text(path, content, undo_label=f"code file {path.name}")
     except Exception as e:
         return f"Could not save: {e}"
 
