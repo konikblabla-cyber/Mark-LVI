@@ -136,7 +136,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
             ["running", "pending", "pending"],
         )
 
-    def test_blocked_step_pauses_mission_and_resume_reopens_it(self):
+    def test_blocked_step_resume_requires_recovery_without_replay(self):
         mission_id = self.plan()
         self.start(mission_id)
         blocked = mission_control.run({
@@ -151,7 +151,9 @@ class MissionControlReliabilityTests(unittest.TestCase):
             {"action": "resume", "mission_id": mission_id},
             session_memory=self.scope,
         )
-        self.assertIn("[MISSION_CONTINUE]", resumed)
+        self.assertIn("[MISSION_RECOVERY]", resumed)
+        self.assertIn("Do NOT repeat", resumed)
+        self.assertNotIn("[MISSION_CONTINUE]", resumed)
         mission = mission_control._read()["missions"][0]
         self.assertEqual(mission["status"], "active")
         self.assertEqual(mission["steps"][0]["status"], "running")

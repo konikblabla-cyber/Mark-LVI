@@ -548,8 +548,9 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     # A previously running step is recovery: never replay it.
                     for step in mission.get("steps", []):
                         if step.get("status") == "blocked":
-                            step["status"] = "pending"
-                            step["blocked_reason"] = ""
+                            # A blocked action may have partially affected the real world.
+                            # Resume it as recovery, never as a fresh execution.
+                            step["status"] = "running"
                             step["updated_at"] = _now()
                     mission["status"] = "active"
                     next_step = _next_open_step(mission)
