@@ -1,0 +1,39 @@
+name: Install smoke checks
+
+on:
+  pull_request:
+    paths:
+      - "requirements.txt"
+      - "setup.py"
+      - ".github/workflows/install-smoke.yml"
+
+jobs:
+  install:
+    name: Install dependencies (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+      - name: Install the declared runtime dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Check for broken or conflicting dependencies
+        run: python -m pip check
+      - name: Import core runtime dependencies
+        run: >-
+          python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,
+          httpx, requests, bs4, playwright, PIL, cv2, psutil, send2trash,
+          pptx, fastapi, uvicorn, cryptography, multipart, qrcode, ddgs,
+          pdfplumber, PyPDF2, docx, pynvml"
+      - name: Verify Windows audio and UI dependencies
+        if: runner.os == 'Windows'
+        run: >-
+          python -c "import comtypes, pycaw.pycaw, win32api, win32gui,
+          win32com.client, wmi, pywinauto"
