@@ -87,7 +87,10 @@ class DevAgentLaunchSafetyTests(unittest.TestCase):
             with patch("actions.dev_agent.shutil.which", return_value=executable), \
                  patch("actions.dev_agent.os.path.isfile", return_value=True), \
                  patch("actions.dev_agent.subprocess.Popen") as popen, \
-                 patch("actions.dev_agent.time.sleep"):
+                 patch("actions.dev_agent.time.sleep"), \
+                 patch("builtins.print", side_effect=UnicodeEncodeError(
+                     "cp1252", "💻", 0, 1, "console cannot encode this glyph"
+                 )):
                 self.assertTrue(_open_vscode(project))
 
             args, kwargs = popen.call_args

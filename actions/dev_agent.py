@@ -645,11 +645,15 @@ def _open_vscode(project_dir: Path) -> bool:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            time.sleep(1.5)
-            print(f"[DevAgent] 💻 VSCode opened: {project_dir}")
-            return True
         except Exception:
             continue
+        time.sleep(1.5)
+        # Console encoding must never turn a successful launch into a failure.
+        try:
+            print(f"[DevAgent] 💻 VSCode opened: {project_dir}")
+        except Exception:
+            pass
+        return True
 
     return False
 
