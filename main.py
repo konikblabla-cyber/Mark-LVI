@@ -85,7 +85,8 @@ from core                      import audio_devices
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.communication_context import (
-    get_running_communication_apps, is_communication_app, should_forward_microphone,
+    get_active_communication_apps, is_communication_context,
+    should_forward_microphone,
 )
 from core.desktop_context import get_desktop_context, desktop_is_idle
 from core.viseme               import VisemeStream
@@ -802,14 +803,14 @@ class JarvisLive:
             await asyncio.sleep(1.0)
             try:
                 context = await asyncio.to_thread(get_desktop_context, include_app=True)
-                foreground_is_call_app = bool(
-                    isinstance(context, dict)
-                    and is_communication_app(context.get("foreground_app", ""))
+                foreground_app = (
+                    context.get("foreground_app", "")
+                    if isinstance(context, dict) else ""
                 )
-                # Keep the gate active when Discord/Teams moves behind a game
-                # or another window. Running-app names stay on this machine.
-                running_call_apps = await asyncio.to_thread(get_running_communication_apps)
-                active = foreground_is_call_app or bool(running_call_apps)
+                # A running chat client alone is not a call. Use active WASAPI
+                # sessions to keep privacy while a real call runs in background.
+                active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
+                active = is_communication_context(foreground_app, active_audio_apps)
             except Exception as exc:
                 print(f"[CommunicationGuard] context check failed: {exc}")
                 continue

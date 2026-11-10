@@ -33,27 +33,49 @@ def is_communication_app(process_name: object) -> bool:
     return normalize_process_name(process_name) in COMMUNICATION_APP_NAMES
 
 
-def get_running_communication_apps() -> set[str]:
-    """Return known communication app processes currently running, locally only.
+def get_active_communication_apps() -> set[str] | None:
+    """Return communication apps with active Windows audio sessions.
 
-    Process enumeration is intentionally conservative: an open Discord/Teams
-    client counts as a potential call even if its window is not foreground.
-    This avoids reopening the mic just because the user switches to a game.
+    An open Discord window is not proof of a call. WASAPI session state is a
+    better signal: active playback/call sessions remain visible while the app
+    is behind a game. Returns None when the Windows audio-session API is
+    unavailable, allowing the caller to fall back to foreground-app detection.
     """
     try:
-        import psutil
+        from pycaw.pycaw import AudioUtilities
+    except Exception:
+        return None
+
+    try:
         names = set()
-        for process in psutil.process_iter(["name"]):
+        for session in AudioUtilities.GetAllSessions():
             try:
-                name = process.info.get("name")
-                normalized = normalize_process_name(name)
-                if normalized in COMMUNICATION_APP_NAMES:
-                    names.add(normalized)
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                if int(session.State) != 1:  # AudioSessionStateActive
+                    continue
+                process = session.Process
+                if process is None:
+                    continue
+                name = normalize_process_name(process.name())
+                if name in COMMUNICATION_APP_NAMES:
+                    names.add(name)
+            except Exception:
+                # An exited/protected process must not break the audio loop.
                 continue
         return names
     except Exception:
-        return set()
+        return None
+
+
+def is_communication_context(
+    foreground_app: object,
+    active_audio_apps: set[str] | None,
+) -> bool:
+    """Treat a focused chat app or an active call audio session as private."""
+    if is_communication_app(foreground_app):
+        return True
+    return bool(active_audio_apps and any(
+        is_communication_app(name) for name in active_audio_apps
+    ))
 
 
 def should_forward_microphone(

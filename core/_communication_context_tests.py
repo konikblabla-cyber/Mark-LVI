@@ -3,6 +3,7 @@ import unittest
 
 from core.communication_context import (
     is_communication_app,
+    is_communication_context,
     normalize_process_name,
     should_forward_microphone,
 )
@@ -30,10 +31,21 @@ class CommunicationContextTests(unittest.TestCase):
         self.assertFalse(is_communication_app("chrome.exe"))
         self.assertFalse(is_communication_app(""))
 
-    def test_running_app_scan_results_can_be_classified(self):
-        self.assertTrue(is_communication_app("Discord"))
-        self.assertTrue(is_communication_app("PhoneExperienceHost.exe"))
-        self.assertFalse(is_communication_app("notepad.exe"))
+    def test_open_chat_app_alone_does_not_count_as_background_call(self):
+        self.assertFalse(is_communication_context("opera.exe", set()))
+
+    def test_focused_chat_app_is_private_even_without_audio_session(self):
+        self.assertTrue(is_communication_context("Discord.exe", set()))
+
+    def test_active_background_call_is_private_while_game_is_foreground(self):
+        self.assertTrue(is_communication_context("game.exe", {"discord"}))
+
+    def test_unknown_background_audio_does_not_trigger_privacy_gate(self):
+        self.assertFalse(is_communication_context("game.exe", {"musicplayer"}))
+
+    def test_audio_api_failure_falls_back_to_foreground_app(self):
+        self.assertTrue(is_communication_context("Teams.exe", None))
+        self.assertFalse(is_communication_context("opera.exe", None))
 
     def test_microphone_is_blocked_in_call_apps_without_explicit_address(self):
         self.assertFalse(should_forward_microphone(True, False, False))
