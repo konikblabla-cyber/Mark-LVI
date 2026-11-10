@@ -1,4 +1,4 @@
-name: Model router checks
+name: Model router and JARVIS capability checks
 
 on:
   pull_request:
