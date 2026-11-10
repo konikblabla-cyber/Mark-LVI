@@ -5,7 +5,7 @@ import re
 import shlex
 from typing import Any
 
-from core.project_env import dependency_name
+from core.project_env import dependency_name, npm_dependency_name
 from core.project_path_policy import validate_relative_project_path
 
 MAX_PROJECT_FILES = 40
@@ -26,7 +26,7 @@ def _supported_runner(value: str) -> bool:
     return runner in _ALLOWED_RUNNERS or bool(re.fullmatch(r"python3\.\d+", runner))
 
 
-def validate_project_plan(plan: Any) -> dict:
+def validate_project_plan(plan: Any, language: str = "python") -> dict:
     """Reject malformed, oversized, unsafe, or internally inconsistent plans."""
     if not isinstance(plan, dict):
         raise ValueError("Project planner must return a JSON object.")
@@ -84,7 +84,16 @@ def validate_project_plan(plan: Any) -> dict:
     dependencies = plan.get("dependencies", [])
     if not isinstance(dependencies, list) or len(dependencies) > MAX_PROJECT_DEPENDENCIES:
         raise ValueError(f"Project plan may declare at most {MAX_PROJECT_DEPENDENCIES} dependencies.")
-    names = [dependency_name(value) for value in dependencies]
+    lang = str(language or "python").strip().lower()
+    if lang in {"javascript", "typescript", "js", "ts", "node"}:
+        names = [npm_dependency_name(value) for value in dependencies]
+    elif lang in {"python", "py"}:
+        names = [dependency_name(value) for value in dependencies]
+    else:
+        if any(not isinstance(value, str) or not value.strip() or len(value) > 200
+               or any(ord(ch) < 32 for ch in value) for value in dependencies):
+            raise ValueError("Language-native dependencies must be short, plain text entries.")
+        names = [value.strip().casefold() for value in dependencies]
     if len(set(names)) != len(names):
         raise ValueError("Project plan contains duplicate dependencies.")
 

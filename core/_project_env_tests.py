@@ -21,6 +21,19 @@ class ProjectEnvironmentTests(unittest.TestCase):
                 with self.assertRaises((TypeError, ValueError)):
                     dependency_name(value)
 
+    def test_accepts_safe_npm_package_specs(self):
+        from core.project_env import npm_dependency_name
+        self.assertEqual(npm_dependency_name("react@18.2.0"), "react")
+        self.assertEqual(npm_dependency_name("@vitejs/plugin-react@^4.0.0"), "@vitejs/plugin-react")
+
+    def test_rejects_npm_urls_flags_and_shell_characters(self):
+        from core.project_env import npm_dependency_name
+        for value in ("--registry=https://evil.invalid", "git+https://example.invalid/pkg",
+                      "file:../local", "react@18&&whoami"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    npm_dependency_name(value)
+
     def test_does_not_create_environment_unless_requested(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "project"

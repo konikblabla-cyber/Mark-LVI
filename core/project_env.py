@@ -28,6 +28,27 @@ def dependency_name(spec: str) -> str:
     return re.sub(r"[-_.]+", "-", match.group(1)).lower()
 
 
+_NPM_REQUIREMENT_RE = re.compile(
+    r"^(?P<name>(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*)"
+    r"(?:@(?P<version>[A-Za-z0-9.*+!~_-]+))?$",
+    re.IGNORECASE,
+)
+
+
+def npm_dependency_name(spec: str) -> str:
+    """Accept registry package names and simple versions; reject URLs and flags."""
+    if not isinstance(spec, str):
+        raise TypeError("Node dependency entries must be text.")
+    value = spec.strip()
+    match = _NPM_REQUIREMENT_RE.fullmatch(value)
+    if not match or any(ch in value for ch in "&|<>%^$"):
+        raise ValueError(f"Unsupported npm dependency specification: {value!r}")
+    name = match.group("name").lower()
+    if name.startswith("@") and "/" not in name:
+        raise ValueError("Scoped npm packages must include a package name.")
+    return name
+
+
 def project_venv_python(project_dir: Path, create: bool = False,
                         timeout: int = 180) -> Path | None:
     """Return this project's interpreter, creating .venv only when requested."""

@@ -84,6 +84,17 @@ class ProjectPlanTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_project_plan(plan)
 
+    def test_validates_language_specific_dependencies(self):
+        js = valid_plan()
+        js["dependencies"] = ["react@18.2.0", "@vitejs/plugin-react@^4.0.0"]
+        self.assertEqual(
+            validate_project_plan(js, language="javascript")["dependencies"],
+            js["dependencies"],
+        )
+        js["dependencies"] = ["--registry=https://evil.invalid"]
+        with self.assertRaises(ValueError):
+            validate_project_plan(js, language="javascript")
+
     def test_rejects_invalid_project_names(self):
         for name in ("../outside", "bad/name", "", "x" * 61):
             plan = valid_plan()
