@@ -856,7 +856,7 @@ TOOL = {
     # Used in place of `description` only when a small model is on a tool
     # budget - Gemini still gets the full text. See providers/schema.py.
     "brief": (
-        "Controls the computer: type, click, hotkeys, scroll, screenshots, and close_app to close a named application (put its name in 'app_name'). Use open_app to open one."
+        "Controls the computer: call foreground_app to inspect the active executable before typing or clicking, then pass it as target_app; use close_app to close a named app and open_app to launch one."
     ),
     "parameters": {
         "type": "OBJECT",

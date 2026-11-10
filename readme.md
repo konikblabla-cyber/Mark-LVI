@@ -66,6 +66,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
 | 🖱️ Verified UI Workflows | Run 2–8 exact clicks in one application, verify every visible result before continuing, stop on ambiguity and pause critical steps for HUD confirmation |
+| 🎯 Foreground-Aware Input | Read the active executable locally before sending mouse/keyboard input; verify the same target again immediately before delayed clicks |
 | 📝 Safe UI Text Entry | Fill one explicitly requested, labelled non-sensitive field locally; verify without returning the field value; never submits the form |
 | 🎚️ Verified UI Sliders | Set one exact visible Windows slider value, check its live range, and verify the result locally without returning the value |
 | 🌳 Verified Tree Navigation | Expand or collapse one exact visible Windows TreeItem and verify the resulting state |
