@@ -128,7 +128,12 @@ def atomic_write_project_text(
     if not parts or any(part in {"", ".", ".."} for part in parts):
         raise ValueError("Project path contains an unsafe component.")
 
-    root = Path(project_dir).resolve(strict=True)
+    root_arg = Path(project_dir)
+    if root_arg.is_symlink():
+        raise ValueError("Project root cannot be a symbolic link.")
+    root = root_arg.resolve(strict=True)
+    if not root.is_dir():
+        raise ValueError("Project root is not a directory.")
     # Create parent directories one component at a time, rechecking each one.
     for index in range(1, len(parts)):
         parent_rel = "/".join(parts[:index])

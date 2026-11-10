@@ -91,6 +91,20 @@ class ProjectPathPolicyTests(unittest.TestCase):
                 atomic_write_project_text(root, "ordinary.py", "overwritten", expected_text="API_KEY=secret")
             self.assertEqual(secret.read_text(encoding="utf-8"), "API_KEY=secret")
 
+    def test_atomic_writer_refuses_symlinked_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            real = base / "real"
+            real.mkdir()
+            link = base / "linked"
+            try:
+                link.symlink_to(real, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is unavailable on this platform")
+            with self.assertRaises(ValueError):
+                atomic_write_project_text(link, "main.py", "unsafe", expect_missing=True)
+            self.assertFalse((real / "main.py").exists())
+
     def test_refuses_symlinked_parent_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
