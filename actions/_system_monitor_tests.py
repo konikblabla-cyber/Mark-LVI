@@ -78,6 +78,30 @@ class SystemHealthTests(unittest.TestCase):
             alert = monitor.check()
         self.assertIsNone(alert)
 
+    def test_diagnose_computer_reports_health_without_changing_state(self):
+        snapshot = {
+            "cpu_percent": 92.0, "ram_percent": 65.0,
+            "ram_used_gb": 10.4, "ram_total_gb": 16.0,
+            "cpu_temp_c": 55.0, "gpu_percent": 42.0,
+            "disk": {"total_gb": 500.0, "free_gb": 80.0, "free_percent": 16.0},
+            "battery": {"percent": 70.0, "plugged": True},
+            "uptime": "3h 20m", "process_count": 120,
+            "top_memory_processes": [{"name": "Code.exe", "memory_mb": 1400.0}],
+        }
+        with patch.object(system_monitor, "_OS", "Windows"), \\
+             patch.object(system_monitor, "get_system_status", return_value=snapshot):
+            report = system_monitor.diagnose_computer({})
+        self.assertIn("CPU 92%", report)
+        self.assertIn("CPU is heavily loaded", report)
+        self.assertIn("Code.exe", report)
+        self.assertIn("read-only", report)
+        self.assertIn("no process was stopped", report)
+
+    def test_diagnose_computer_is_windows_only(self):
+        with patch.object(system_monitor, "_OS", "Linux"):
+            report = system_monitor.diagnose_computer({})
+        self.assertIn("Windows only", report)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
