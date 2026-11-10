@@ -618,46 +618,38 @@ def _install_dependencies(dependencies: list[str], project_dir: Path,
     except Exception as e:
         return f"Install error (non-fatal): {e}"
 def _open_vscode(project_dir: Path) -> bool:
-
-    vscode_candidates = [
-
-        "code",
-
-        rf"C:\Users\{Path.home().name}\AppData\Local\Programs\Microsoft VS Code\bin\code.cmd",
-
-        r"C:\Program Files\Microsoft VS Code\bin\code.cmd",
-
+    """Open the project with the real VS Code executable, never through a shell."""
+    candidates = [
+        shutil.which("Code.exe"),
+        shutil.which("code.exe"),
+        str(Path.home() / "AppData" / "Local" / "Programs" / "Microsoft VS Code" / "Code.exe"),
+        r"C:\Program Files\Microsoft VS Code\Code.exe",
     ]
 
-    for cmd in vscode_candidates:
-
+    seen = set()
+    for raw in candidates:
+        if not raw or raw in seen:
+            continue
+        seen.add(raw)
+        executable = Path(raw)
+        # Do not launch .cmd/.bat shims: shell interpretation of a user path
+        # could turn characters such as '&' into additional commands.
+        if executable.suffix.casefold() != ".exe" or not executable.is_file():
+            continue
         try:
-
             subprocess.Popen(
-
-                [cmd, str(project_dir)],
-
-                shell=True,
-
+                [str(executable), str(project_dir)],
+                shell=False,
                 stdout=subprocess.DEVNULL,
-
-                stderr=subprocess.DEVNULL
-
+                stderr=subprocess.DEVNULL,
             )
-
             time.sleep(1.5)
-
             print(f"[DevAgent] 💻 VSCode opened: {project_dir}")
-
             return True
-
         except Exception:
-
             continue
 
     return False
-
-
 
 def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     print(f"[DevAgent] 🚀 Running: {run_command}")
