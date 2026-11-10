@@ -558,18 +558,16 @@ def _install_dependencies(dependencies: list[str], project_dir: Path,
             return "npm was not found. Install Node.js/npm to enable JavaScript dependencies."
         try:
             command, use_shell = npm_install_invocation(npm, dependencies)
-            result = subprocess.run(
-                command,
-                shell=use_shell,
-                capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
-                timeout=240, cwd=str(project_dir)
+            result = run_bounded_process(
+                command, cwd=project_dir, timeout=240, shell=use_shell
             )
+            if result.timed_out:
+                return "npm install timed out and was stopped (non-fatal)."
+            if result.output_limited:
+                return "npm install exceeded the 1 MB output limit and was stopped."
             if result.returncode == 0:
                 return f"Installed npm packages locally: {', '.join(package_names)}"
             return f"npm install warning: {result.stderr[:200]}"
-        except subprocess.TimeoutExpired:
-            return "npm install timed out (non-fatal)."
         except Exception as e:
             return f"npm install error (non-fatal): {e}"
 
@@ -605,17 +603,17 @@ def _install_dependencies(dependencies: list[str], project_dir: Path,
 
     print(f"[DevAgent] Installing into the project's isolated environment: {to_install}")
     try:
-        result = subprocess.run(
+        result = run_bounded_process(
             [str(python_exe), "-m", "pip", "install"] + to_install,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=180, cwd=str(project_dir)
+            cwd=project_dir, timeout=180
         )
+        if result.timed_out:
+            return "Dependency install timed out and was stopped (non-fatal)."
+        if result.output_limited:
+            return "Dependency installer exceeded the 1 MB output limit and was stopped."
         if result.returncode == 0:
             return f"Installed in .venv: {', '.join(to_install)}"
         return f"Install warning (non-fatal): {result.stderr[:200]}"
-    except subprocess.TimeoutExpired:
-        return "Dependency install timed out (non-fatal)."
     except Exception as e:
         return f"Install error (non-fatal): {e}"
 def _open_vscode(project_dir: Path) -> bool:
@@ -696,57 +694,29 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     except Exception as e:
         return f"Run error: {e}"
 def _try_auto_install(error_output: str, project_dir: Path) -> bool:
-
     """Install a missing package only inside this project's virtual environment."""
-
     pattern = re.compile(
-
         r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]", re.IGNORECASE
-
     )
-
     match = pattern.search(error_output)
-
     if not match:
-
         return False
-
-
 
     pkg = match.group(1).replace("_", "-").split(".")[0]
-
     try:
-
         dependency_name(pkg)
-
         python_exe = project_venv_python(project_dir, create=True)
-
     except (TypeError, ValueError, RuntimeError):
-
         return False
 
-
-
-    print(f"[DevAgent] 🔧 Installing missing package in .venv: {pkg}")
-
+    print(f"[DevAgent] Installing missing package in .venv: {pkg}")
     try:
-
-        result = subprocess.run(
-
+        result = run_bounded_process(
             [str(python_exe), "-m", "pip", "install", pkg],
-
-            capture_output=True, text=True,
-
-            encoding="utf-8", errors="replace",
-
-            timeout=120, cwd=str(project_dir)
-
+            cwd=project_dir, timeout=120
         )
-
-        return result.returncode == 0
-
+        return result.returncode == 0 and not result.timed_out and not result.output_limited
     except Exception:
-
         return False
 
 def _fix_files(

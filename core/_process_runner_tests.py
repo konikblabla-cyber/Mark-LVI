@@ -38,6 +38,17 @@ class ProcessRunnerTests(unittest.TestCase):
         self.assertTrue(result.timed_out)
         self.assertIsNotNone(result.returncode)
 
+    def test_supports_explicit_shell_for_prevalidated_platform_commands(self):
+        import os
+        if os.name == "nt":
+            self.skipTest("POSIX shell invocation test")
+        with tempfile.TemporaryDirectory() as temp:
+            result = run_bounded_process(
+                "printf safe", cwd=Path(temp), timeout=5, shell=True
+            )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "safe")
+
     def test_requires_valid_limits(self):
         with tempfile.TemporaryDirectory() as temp:
             with self.assertRaises(ValueError):

@@ -43,8 +43,9 @@ def _kill_process_tree(process: subprocess.Popen) -> None:
 
 
 def run_bounded_process(args, *, cwd: Path, timeout: float,
-                        env=None, output_limit: int = DEFAULT_OUTPUT_LIMIT) -> BoundedProcessResult:
-    """Run without a shell, capturing at most output_limit bytes in total."""
+                        env=None, output_limit: int = DEFAULT_OUTPUT_LIMIT,
+                        shell: bool = False) -> BoundedProcessResult:
+    """Run with bounded output and lifetime; shell is reserved for validated commands."""
     if not args:
         raise ValueError("A process command is required.")
     if timeout <= 0:
@@ -58,7 +59,7 @@ def run_bounded_process(args, *, cwd: Path, timeout: float,
         "env": env,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
-        "shell": False,
+        "shell": bool(shell),
         "bufsize": 0,
     }
     if os.name == "nt":
