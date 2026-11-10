@@ -84,7 +84,7 @@ from core                      import confirm as confirm_gate
 from core                      import audio_devices
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
-from core.live_session_policy import go_away_notice
+from core.live_session_policy import go_away_notice, live_turn_is_active
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     should_auto_wake, should_forward_microphone,
@@ -1946,6 +1946,19 @@ class JarvisLive:
     async def _receive_audio(self):
         print("[JARVIS] 👂 Recv started")
         out_buf, in_buf = [], []
+        _go_away_pending = False
+
+        async def _drain_before_session_resume():
+            # Preserve the current reply on speakers. Do not let a server-side
+            # session lifetime warning cut off audio that is already queued.
+            _deadline = time.monotonic() + 15.0
+            while (not self.audio_in_queue.empty()) and time.monotonic() < _deadline:
+                await asyncio.sleep(0.05)
+            with self._speaking_lock:
+                _still_speaking = self._is_speaking
+            if _still_speaking or not self.audio_in_queue.empty():
+                print("[JARVIS] ⚠️ Audio did not drain before session resume; continuing reconnect")
+            raise _ReconnectSignal(keep_context=True)
 
         try:
             while True:
@@ -1969,15 +1982,29 @@ class JarvisLive:
                                 print("[JARVIS] 🔗 Session resumption armed")
                             self._resume_handle = _sru.new_handle
 
-                    # The server sends GoAway before the WebSocket connection
-                    # reaches its lifetime limit. Reconnect immediately with
-                    # the newest resumable handle, keeping the same conversation
-                    # rather than waiting for an abrupt socket close.
+                    # GoAway announces the session lifetime boundary. Record it
+                    # now, but let an active response/tool call finish before
+                    # reconnecting; an idle session can be resumed immediately.
                     _go_away = go_away_notice(response)
                     if _go_away is not None:
+                        _go_away_pending = True
                         _time_left = getattr(_go_away, "time_left", None)
-                        print(f"[JARVIS] 🔗 Server GoAway received (time left: {_time_left}); resuming session")
-                        raise _ReconnectSignal(keep_context=True)
+                        print(f"[JARVIS] 🔗 Server GoAway received (time left: {_time_left}); scheduling session resume")
+                        _server_content = getattr(response, "server_content", None)
+                        _input_part = getattr(_server_content, "input_transcription", None)
+                        _output_part = getattr(_server_content, "output_transcription", None)
+                        with self._speaking_lock:
+                            _assistant_speaking = self._is_speaking
+                        _active_turn = live_turn_is_active(
+                            input_pending=bool(in_buf) or bool(getattr(_input_part, "text", None)),
+                            output_pending=bool(out_buf) or bool(getattr(_output_part, "text", None)),
+                            response_payload=bool(response.data),
+                            audio_pending=not self.audio_in_queue.empty(),
+                            assistant_speaking=_assistant_speaking,
+                            tool_call_pending=bool(response.tool_call),
+                        )
+                        if not _active_turn:
+                            raise _ReconnectSignal(keep_context=True)
 
                     if response.data:
                         if self._interrupted:
@@ -2029,6 +2056,9 @@ class JarvisLive:
                                 in_buf  = []
                                 out_buf = []
                                 self._visemes.reset()
+                                if (_go_away_pending and sc.turn_complete
+                                        and not response.tool_call):
+                                    await _drain_before_session_resume()
                                 continue
 
                             full_in = " ".join(in_buf).strip()
@@ -2105,6 +2135,11 @@ class JarvisLive:
                             function_responses=fn_responses
                         )
                         await self._flush_pending_vision()
+
+                    if (_go_away_pending and response.server_content
+                            and response.server_content.turn_complete
+                            and not response.tool_call):
+                        await _drain_before_session_resume()
         except Exception as e:
             print(f"[JARVIS] ❌ Recv: {e}")
             traceback.print_exc()
