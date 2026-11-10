@@ -45,4 +45,5 @@ TOOL = {
         "Remembers a short metadata summary in local project memory."
     ),
     "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+    "handler": run,
 }
