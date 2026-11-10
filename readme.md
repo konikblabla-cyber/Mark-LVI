@@ -79,6 +79,9 @@ It's not just an assistant — it's an extension of your digital life.
 | ⚠️ Real Confirmation | Shutdown, restart and WiFi wait for a button **you** press — the model cannot confirm its own irreversible actions |
 | 🎧 Audio Device Picker | Choose the microphone and speakers by name, filtered to the short list your OS shows — and measured, so every entry actually works |
 | 🩺 Audio Self-Recovery | Detect a stopped speaker stream or a microphone callback stalled for 5 seconds; reconnect the voice session while preserving conversation context |
+| 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. Shared with check-ins only when desktop awareness is enabled; no window titles or screen contents |
+| 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
+| 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
 | 🔗 Session Continuity | A dropped connection, a voice change or a device change no longer wipes the conversation |
 | 🧩 Plugin System | Drop a single `.py` file into `plugins/` — JARVIS learns a new skill on next launch |
 | 📄 Linux Office Aliases | Say Word, Excel or PowerPoint to open LibreOffice Writer, Calc or Impress when LibreOffice is installed; process verification recognises the actual runtime executable |
