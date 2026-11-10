@@ -91,7 +91,8 @@ class ComputerControlSafetyTests(unittest.TestCase):
 
     def test_disruptive_hotkey_waits_for_hud_confirmation(self):
         request = {}
-        with patch.object(control.confirm, "request",
+        with patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control.confirm, "request",
                           side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
              patch.object(control, "_hotkey") as execute:
             result = control.computer_control({"action": "hotkey", "keys": "alt+f4"})
@@ -125,7 +126,8 @@ class ComputerControlSafetyTests(unittest.TestCase):
 
     def test_delete_key_waits_for_hud_confirmation(self):
         request = {}
-        with patch.object(control.confirm, "request",
+        with patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control.confirm, "request",
                           side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
              patch.object(control, "_press") as execute:
             result = control.computer_control({"action": "press", "key": "delete"})
