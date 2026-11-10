@@ -135,7 +135,9 @@ def _show(player, title: str, body: str) -> bool:
 def run(parameters: dict, player=None, session_memory=None) -> str:
     action = str(parameters.get("action") or "list").strip().lower()
     try:
-        root = _root()
+        # Normalize the vault root once. Windows may expose the temp/home path
+        # through an 8.3 alias while resolve() returns its long canonical path.
+        root = _root().resolve()
         if action == "list":
             notes = _notes(root)
             body = "\n".join(p.relative_to(root).as_posix() for p in notes) or "The vault has no Markdown notes yet."
