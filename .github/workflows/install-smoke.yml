@@ -77,7 +77,7 @@ jobs:
           from core.plugin_loader import discover_plugins;
           reserved = {item['name'] for item in main.TOOL_DECLARATIONS};
           actions = discover_actions(Path('actions'), reserved_names=reserved, logger=lambda _: None);
-          required_actions = {'desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder'};
+          required_actions = {'desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
           missing_actions = sorted(required_actions - actions.names());
           assert not missing_actions, f'Missing actions: {missing_actions}';
           plugins = discover_plugins(Path('plugins'), reserved | actions.names(), logger=lambda _: None);
