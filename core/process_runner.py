@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import signal
 import subprocess
 import threading
@@ -13,6 +14,21 @@ from pathlib import Path
 
 DEFAULT_OUTPUT_LIMIT = 1_000_000
 _CHUNK_SIZE = 64 * 1024
+_SENSITIVE_ENV_NAME = re.compile(
+    r"(?:API[_-]?KEY|ACCESS[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|"
+    r"PRIVATE[_-]?KEY|AUTHORIZATION|COOKIE|SESSION[_-]?KEY|"
+    r"DATABASE[_-]?URL|DB[_-]?URL|REDIS[_-]?URL|GIT_ASKPASS|SSH_AUTH_SOCK)",
+    re.IGNORECASE,
+)
+
+
+def _safe_child_environment(env=None) -> dict:
+    """Copy runtime variables while withholding common credentials from child code."""
+    source = os.environ if env is None else env
+    return {
+        key: value for key, value in source.items()
+        if not _SENSITIVE_ENV_NAME.search(str(key))
+    }
 
 
 @dataclass(frozen=True)
@@ -60,7 +76,9 @@ def run_bounded_process(args, *, cwd: Path, timeout: float,
     kwargs = {
         "args": args,
         "cwd": str(cwd),
-        "env": env,
+        # Child projects and installers do not need the assistant's API keys,
+        # tokens, passwords, or credential-bearing connection strings.
+        "env": _safe_child_environment(env),
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "shell": bool(shell),
