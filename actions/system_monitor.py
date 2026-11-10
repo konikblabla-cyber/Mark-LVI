@@ -298,3 +298,70 @@ class SystemMonitor:
                 self._record("battery")
 
         return " ".join(alerts) if alerts else None
+
+
+def diagnose_computer(parameters: dict, player=None, session_memory=None) -> str:
+    """Return a read-only Windows health report with actionable observations."""
+    if _OS != "Windows":
+        return "Computer diagnostics are currently supported on Windows only."
+    try:
+        status = get_system_status()
+    except Exception as exc:
+        return f"Could not collect system diagnostics: {type(exc).__name__}."
+
+    findings = []
+    cpu = status["cpu_percent"]
+    ram = status["ram_percent"]
+    if cpu >= 90:
+        findings.append(f"CPU is heavily loaded ({cpu:.0f}%).")
+    if ram >= 90:
+        findings.append(f"Memory is nearly full ({ram:.0f}%).")
+    disk = status.get("disk") or {}
+    free_percent = disk.get("free_percent")
+    if free_percent is not None and free_percent <= 10:
+        findings.append(
+            f"System drive is low on space ({disk.get('free_gb', '?')} GB free, "
+            f"{free_percent:.1f}%)."
+        )
+    temp = status.get("cpu_temp_c")
+    if temp is not None and temp >= 85:
+        findings.append(f"CPU temperature is high ({temp:.0f}°C).")
+    battery = status.get("battery")
+    if battery and not battery.get("plugged") and battery.get("percent", 100) <= 15:
+        findings.append(f"Battery is low ({battery['percent']:.0f}%) and power is disconnected.")
+
+    top = status.get("top_memory_processes") or []
+    top_text = ", ".join(
+        f"{item['name']} ({item['memory_mb']:.0f} MB)" for item in top[:3]
+    ) or "unavailable"
+    disk_text = (
+        f"{disk.get('free_gb', '?')} GB free of {disk.get('total_gb', '?')} GB"
+        if disk else "unavailable"
+    )
+    gpu = status.get("gpu_percent")
+    gpu_text = f"{gpu:.0f}%" if gpu is not None else "not exposed by the installed driver"
+    temp_text = f"{temp:.0f}°C" if temp is not None else "not exposed by the installed driver"
+    summary = "No critical resource warning detected." if not findings else " ".join(findings)
+    return (
+        f"Windows health report: CPU {cpu:.0f}%; RAM {ram:.0f}% "
+        f"({status['ram_used_gb']:.1f}/{status['ram_total_gb']:.1f} GB); "
+        f"GPU {gpu_text}; CPU temperature {temp_text}; system drive {disk_text}; "
+        f"uptime {status['uptime']}; {status['process_count']} processes. "
+        f"Top memory users: {top_text}. {summary} "
+        "This report is read-only; no process was stopped and no files or settings were changed."
+    )
+
+
+TOOL = {
+    "name": "diagnose_computer",
+    "description": (
+        "Run a read-only Windows computer health check. Reports CPU, RAM, GPU "
+        "when available, CPU temperature when exposed by the driver, system "
+        "drive space, battery, uptime and top memory-using process names. Use "
+        "when the user asks what is wrong, whether the PC is overloaded, or "
+        "for a system health report. Never claim unavailable sensor readings. "
+        "This action never kills processes, deletes files or changes settings."
+    ),
+    "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+    "handler": diagnose_computer,
+}
