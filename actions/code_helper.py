@@ -21,6 +21,7 @@ MAX_BUILD_ATTEMPTS = 3
 from core import gemini
 from core.safe_file_write import safe_write_text
 from core import confirm as confirm_gate
+from core.timeout_policy import bounded_timeout
 
 
 def _get_api_key() -> str:
@@ -550,7 +551,7 @@ def code_helper(
     file_path   = p.get("file_path", "").strip()
     code        = p.get("code", "").strip()
     args        = p.get("args", [])
-    timeout     = int(p.get("timeout", 30))
+    timeout     = bounded_timeout(p.get("timeout", 30))
 
     if action == "auto":
         action = _detect_intent(description, file_path, code)
