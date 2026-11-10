@@ -3,6 +3,8 @@ name: Model router checks
 on:
   pull_request:
     paths:
+      - "requirements.txt"
+      - "setup.py"
       - "core/model_router.py"
       - "dashboard/server.py"
       - "dashboard/static/app.html"
