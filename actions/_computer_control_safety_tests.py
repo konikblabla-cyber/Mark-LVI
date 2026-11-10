@@ -93,10 +93,10 @@ class ComputerControlSafetyTests(unittest.TestCase):
                           side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
              patch.object(control, "_hotkey") as execute:
             result = control.computer_control({"action": "hotkey", "keys": "alt+f4"})
-        self.assertIn("[CONFIRMATION_PENDING]", result)
-        execute.assert_not_called()
-        request["run"]()
-        execute.assert_called_once_with("alt", "f4")
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            execute.assert_not_called()
+            request["run"]()
+            execute.assert_called_once_with("alt", "f4")
 
     def test_delete_key_waits_for_hud_confirmation(self):
         request = {}
@@ -104,10 +104,10 @@ class ComputerControlSafetyTests(unittest.TestCase):
                           side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
              patch.object(control, "_press") as execute:
             result = control.computer_control({"action": "press", "key": "delete"})
-        self.assertIn("[CONFIRMATION_PENDING]", result)
-        execute.assert_not_called()
-        request["run"]()
-        execute.assert_called_once_with("delete")
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            execute.assert_not_called()
+            request["run"]()
+            execute.assert_called_once_with("delete")
 
 
 if __name__ == "__main__":
