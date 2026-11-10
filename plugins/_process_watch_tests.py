@@ -32,7 +32,7 @@ class ProcessWatchTests(unittest.TestCase):
             alerts = process_watch.check_all()
         self.assertEqual(len(alerts), 1)
         self.assertIn("has started", alerts[0]["message"])
-        self.assertEqual(process_watch.check_all(), [])
+        self.assertEqual(process_watch.check_all(), alerts)
         self.assertEqual(process_watch.acknowledge_alerts([alerts[0]["id"]]), 1)
         self.assertEqual(process_watch._read()["watchers"], [])
 
