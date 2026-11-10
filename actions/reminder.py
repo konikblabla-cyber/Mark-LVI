@@ -4,6 +4,8 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -33,6 +35,107 @@ def _scripts_dir() -> Path:
     return d
 
 
+_REMINDER_ID = re.compile(r"^JARVISReminder_\d{8}_\d{6}$")
+
+
+def _registry_path() -> Path:
+    return _scripts_dir() / "reminders.json"
+
+
+def _read_registry() -> dict:
+    path = _registry_path()
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError("The reminder list is unreadable; refusing to overwrite it.") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError("The reminder list has an invalid structure.")
+    return value
+
+
+def _write_registry(value: dict) -> None:
+    path = _registry_path()
+    fd, temp_name = tempfile.mkstemp(prefix=".reminders-", suffix=".tmp", dir=str(path.parent))
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            json.dump(value, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _list_reminders() -> str:
+    try:
+        entries = _read_registry()
+        changed = False
+        visible = []
+        scripts = _scripts_dir()
+        for reminder_id, record in list(entries.items()):
+            if not _REMINDER_ID.fullmatch(str(reminder_id)) or not isinstance(record, dict):
+                continue
+            script_name = str(record.get("script") or "")
+            if script_name != f"{reminder_id}.py":
+                continue
+            # The notification script deletes itself after firing. Prune its
+            # registry row the next time the user asks for the list.
+            if not (scripts / script_name).is_file():
+                entries.pop(reminder_id, None)
+                changed = True
+                continue
+            visible.append((reminder_id, record))
+        if changed:
+            _write_registry(entries)
+        if not visible:
+            return "There are no pending JARVIS reminders."
+        rows = []
+        for reminder_id, record in sorted(visible, key=lambda item: (
+                str(item[1].get("date", "")), str(item[1].get("time", "")))):
+            rows.append(
+                f"{reminder_id} — {record.get('date', '')} {record.get('time', '')}: "
+                f"{str(record.get('message', 'Reminder'))[:120]}"
+            )
+        return "Pending reminders:\n" + "\n".join(rows[:30])
+    except Exception as exc:
+        return f"Could not read reminders: {str(exc)[:160]}"
+
+
+def _cancel_windows_reminder(reminder_id: str) -> str:
+    if not _REMINDER_ID.fullmatch(reminder_id):
+        return "That reminder ID is invalid. Use the exact ID from the reminder list."
+    try:
+        entries = _read_registry()
+        record = entries.get(reminder_id)
+        if not isinstance(record, dict):
+            return "That reminder was not found or has already fired."
+        result = subprocess.run(
+            ["schtasks", "/Delete", "/TN", reminder_id, "/F"],
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=10, **_CNW,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            return f"Windows could not cancel that reminder: {detail[:140]}"
+        script_name = str(record.get("script") or "")
+        if script_name == f"{reminder_id}.py":
+            try:
+                (_scripts_dir() / script_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+        entries.pop(reminder_id, None)
+        _write_registry(entries)
+        return f"Cancelled reminder {reminder_id}."
+    except Exception as exc:
+        return f"Could not cancel reminder: {type(exc).__name__}."
 def _sanitise(text: str, max_len: int = 200) -> str:
     return (
         text.replace("\\", "")
@@ -290,11 +393,20 @@ def reminder(
     player=None,
     session_memory=None,
 ) -> str:
+    action = str(parameters.get("action") or "set").strip().lower()
+    if action == "list":
+        return _list_reminders()
+    if action == "cancel":
+        reminder_id = str(parameters.get("reminder_id") or "").strip()
+        if _get_os() != "windows":
+            return "Reminder cancellation is currently available on Windows only."
+        return _cancel_windows_reminder(reminder_id)
+    if action != "set":
+        return "Choose reminder action 'set', 'list' or 'cancel'."
 
-    date_str = parameters.get("date", "").strip()
-    time_str = parameters.get("time", "").strip()
-    message  = parameters.get("message", "Reminder").strip()
-
+    date_str = str(parameters.get("date") or "").strip()
+    time_str = str(parameters.get("time") or "").strip()
+    message = str(parameters.get("message") or "Reminder").strip()
     if not date_str or not time_str:
         return "I need both a date and a time to set a reminder."
 
@@ -306,9 +418,9 @@ def reminder(
     if target_dt <= datetime.now():
         return "That time has already passed — I can't set a reminder in the past."
 
-    os_name    = _get_os()
-    safe_msg   = _sanitise(message)
-    task_name  = f"JARVISReminder_{target_dt.strftime('%Y%m%d_%H%M%S')}"
+    os_name = _get_os()
+    safe_msg = _sanitise(message)
+    task_name = f"JARVISReminder_{target_dt.strftime('%Y%m%d_%H%M%S')}"
 
     try:
         script_path = _write_notify_script(task_name, safe_msg, os_name)
@@ -330,38 +442,44 @@ def reminder(
     if not job_id:
         return "I couldn't register the reminder with the system scheduler."
 
+    try:
+        entries = _read_registry()
+        entries[job_id] = {
+            "date": date_str,
+            "time": time_str,
+            "message": safe_msg,
+            "script": script_path.name,
+        }
+        _write_registry(entries)
+    except Exception as exc:
+        if os_name == "windows":
+            _cancel_windows_reminder(job_id)
+        script_path.unlink(missing_ok=True)
+        return f"Windows scheduled the reminder, but its local record could not be saved: {type(exc).__name__}."
+
     if player:
         player.write_log(f"[Reminder] ✅ {date_str} {time_str} — {safe_msg[:40]}")
 
     friendly_time = target_dt.strftime("%B %d at %I:%M %p")
-    return f"Reminder set for {friendly_time}."
-
-
+    return f"Reminder set for {friendly_time}. ID: {job_id}."
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "reminder",
-    "description": "Sets a timed reminder using Task Scheduler.",
+    "description": (
+        "Set, list or cancel a timed reminder on this Windows computer. "
+        "Use action='set' with a date, time and message; action='list' to show pending reminders; "
+        "action='cancel' with the exact reminder_id returned by the list or set action."
+    ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "date": {
-                "type": "STRING",
-                "description": "Date in YYYY-MM-DD format"
-            },
-            "time": {
-                "type": "STRING",
-                "description": "Time in HH:MM format (24h)"
-            },
-            "message": {
-                "type": "STRING",
-                "description": "Reminder message text"
-            }
+            "action": {"type": "STRING", "description": "set, list or cancel; defaults to set"},
+            "date": {"type": "STRING", "description": "For set: date in YYYY-MM-DD format"},
+            "time": {"type": "STRING", "description": "For set: time in HH:MM format (24h)"},
+            "message": {"type": "STRING", "description": "For set: reminder message"},
+            "reminder_id": {"type": "STRING", "description": "For cancel: exact ID from the reminder list"},
         },
-        "required": [
-            "date",
-            "time",
-            "message"
-        ]
+        "required": [],
     },
     "handler": reminder,
 }
