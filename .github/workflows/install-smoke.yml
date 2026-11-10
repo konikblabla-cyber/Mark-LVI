@@ -6,6 +6,7 @@ on:
       - "requirements.txt"
       - "setup.py"
       - ".github/workflows/install-smoke.yml"
+      - "core/_browser_runtime_smoke.py"
 
 jobs:
   install:
@@ -24,6 +25,14 @@ jobs:
           cache-dependency-path: requirements.txt
       - name: Install the declared runtime dependencies
         run: python -m pip install -r requirements.txt
+      - name: Install headless Chromium and Linux browser dependencies
+        if: runner.os == 'Linux'
+        run: python -m playwright install --with-deps chromium
+      - name: Install headless Chromium on Windows and macOS
+        if: runner.os != 'Linux'
+        run: python -m playwright install chromium
+      - name: Launch Chromium and render a local page
+        run: python -m core._browser_runtime_smoke
       - name: Check for broken or conflicting dependencies
         run: python -m pip check
       - name: Install PortAudio runtime for Linux sounddevice
