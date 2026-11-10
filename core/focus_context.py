@@ -55,7 +55,7 @@ _LABELS = {
 
 def normalise_executable(value: object) -> str:
     """Reduce a process path/name to a safe lowercase executable basename."""
-    name = ntpath.basename(str(value or "").replace("/", "\")).strip().casefold()
+    name = ntpath.basename(str(value or "").replace("/", "\\")).strip().casefold()
     return name[:-4] if name.endswith(".exe") else name
 
 
