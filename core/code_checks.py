@@ -45,6 +45,8 @@ import os
 import re
 import shutil
 import subprocess
+
+from core.process_runner import run_bounded_process
 import sys
 from pathlib import Path
 
@@ -475,14 +477,22 @@ def runtime_problems(folder: Path, written: dict[str, str], originals: dict[str,
                OPENBLAS_NUM_THREADS="1", PYTHONDONTWRITEBYTECODE="1")
     limit = min(timeout, 30 + 10 * len(plugin_runs))
     try:
-        r = subprocess.run(
-            [stack["python"], str(_HARNESS), str(folder),
-             json.dumps({"imports": imports, "plugins": plugin_runs,
-                         "profile": "jarvis" if "jarvis" in stack["profiles"] else ""})],
-            cwd=str(folder), env=env, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=limit)
+        command = [
+            stack["python"], str(_HARNESS), str(folder),
+            json.dumps({"imports": imports, "plugins": plugin_runs,
+                        "profile": "jarvis" if "jarvis" in stack["profiles"] else ""}),
+        ]
+        r = run_bounded_process(command, cwd=folder, env=env, timeout=limit)
     except subprocess.TimeoutExpired as e:
         return _froze(e, plugin_runs or py[:1], limit)
+    except OSError as e:
+        return {(plugin_runs or py)[0]: f"Could not start the isolated test process: {str(e)[:200]}"}
+    if r.timed_out:
+        timed_out = subprocess.TimeoutExpired(command, limit, output=r.stdout, stderr=r.stderr)
+        return _froze(timed_out, plugin_runs or py[:1], limit)
+    if r.output_limited:
+        return {rel: "The isolated test process exceeded the 1 MB output limit and was stopped."
+                for rel in (plugin_runs or py[:1])}
     raw = r.stdout.rpartition("@@REPORT@@")[2].strip()
     try:
         report = json.loads(raw)
@@ -558,15 +568,19 @@ def run_tests(folder: Path, stack: dict) -> dict | None:
     env = dict(os.environ, CI="1", PYTHONDONTWRITEBYTECODE="1", QT_QPA_PLATFORM="offscreen",
                PYTHONIOENCODING="utf-8")
     try:
-        r = subprocess.run(cmd, cwd=str(folder), env=env, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=_TEST_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "failed": ["(the test run timed out)"],
-                "output": f"Tests did not finish within {_TEST_TIMEOUT}s."}
+        r = run_bounded_process(
+            cmd, cwd=folder, env=env, timeout=_TEST_TIMEOUT
+        )
     except OSError as e:
         return None if "not found" in str(e).lower() else \
             {"ok": False, "failed": ["(could not start)"], "output": str(e)}
+    if r.timed_out:
+        return {"ok": False, "failed": ["(the test run timed out)"],
+                "output": f"Tests did not finish within {_TEST_TIMEOUT}s."}
     output = (r.stdout or "") + "\n" + (r.stderr or "")
+    if r.output_limited:
+        return {"ok": False, "failed": ["(test output exceeded the 1 MB safety limit)"],
+                "output": output[-3000:] + "\nTest process was stopped after 1 MB of output."}
     failed = sorted({m for rx in _FAIL_RE for m in rx.findall(output)})
     # "no tests ran" (pytest 5, unittest "Ran 0 tests") is not a failure.
     if r.returncode == 5 or re.search(r"Ran 0 tests", output):
