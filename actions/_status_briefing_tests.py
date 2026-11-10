@@ -31,6 +31,7 @@ class StatusBriefingTests(unittest.TestCase):
                  }), \
                  patch("plugins.process_watch.list_watchers", return_value="Watching python.exe"), \
                  patch("actions.windows_startup.run", return_value="JARVIS is not registered to start with Windows."), \
+                 patch("actions.routine_mode.run", return_value="Cinema: 2 app(s), 2 smart-home action(s)"), \
                  patch("actions.system_monitor.get_system_status", return_value={
                      "cpu_percent": 20.0, "ram_percent": 40.0,
                      "disk": {"free_gb": 100.0, "free_percent": 20.0},
@@ -47,6 +48,7 @@ class StatusBriefingTests(unittest.TestCase):
             self.assertIn("Work", report)
             self.assertIn("Watching python.exe", report)
             self.assertIn("JARVIS is not registered to start with Windows.", report)
+            self.assertIn("Cinema: 2 app(s), 2 smart-home action(s)", report)
             self.assertIn("battery 78% charging", report)
             self.assertIn("2 network adapter(s) up", report)
             self.assertIn("Code.exe 1000 MB", report)
