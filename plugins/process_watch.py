@@ -13,6 +13,7 @@ import re
 import tempfile
 import threading
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import psutil
@@ -113,7 +114,7 @@ def add_watcher(process_name: object, event: object = "exit") -> str:
                 "event": mode,
                 "seen_running": bool(active),
                 "pending": False,
-                "created_at": __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds"),
+                "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             })
             _write(data)
         verb = "start" if mode == "start" else "finish"
