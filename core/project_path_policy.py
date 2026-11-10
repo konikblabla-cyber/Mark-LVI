@@ -1,4 +1,7 @@
 """Path boundary checks for files generated inside a new project."""
+import os
+import stat
+import tempfile
 from pathlib import Path, PureWindowsPath
 
 
