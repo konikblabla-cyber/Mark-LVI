@@ -1,0 +1,114 @@
+"""Offline regression tests for desktop-control safety boundaries."""
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from actions import computer_control as control
+
+
+class _FakeDesktop:
+    def __init__(self, size=(100, 80)):
+        self._size = size
+        self.clicks = []
+        self.moves = []
+        self.drags = []
+
+    def size(self):
+        return self._size
+
+    def click(self, *args, **kwargs):
+        self.clicks.append((args, kwargs))
+
+    def moveTo(self, *args, **kwargs):
+        self.moves.append((args, kwargs))
+
+    def dragTo(self, *args, **kwargs):
+        self.drags.append((args, kwargs))
+
+
+class ComputerControlSafetyTests(unittest.TestCase):
+    def test_focus_window_never_interpolates_user_text_into_shell(self):
+        match = SimpleNamespace(pid=42, name="editor.exe", score=100,
+                                is_self=False, titles=["Editor"], label="editor")
+        hostile = 'Editor"); Start-Process calc; #'
+        with patch.object(control.appidentity, "running", return_value=[match]) as running, \
+             patch.object(control.appidentity, "focus", return_value=True) as focus, \
+             patch.object(control.subprocess, "run") as subprocess_run:
+            result = control._focus_window(hostile)
+        running.assert_called_once_with(hostile)
+        focus.assert_called_once_with(match)
+        subprocess_run.assert_not_called()
+        self.assertIn("status=done", result)
+        self.assertIn("action=computer_control", result)
+
+    def test_focus_window_asks_when_top_matches_are_ambiguous(self):
+        first = SimpleNamespace(pid=10, name="editor.exe", score=65,
+                                is_self=False, titles=["one"], label="editor")
+        second = SimpleNamespace(pid=11, name="editor.exe", score=65,
+                                 is_self=False, titles=["two"], label="editor")
+        with patch.object(control.appidentity, "running", return_value=[first, second]), \
+             patch.object(control.appidentity, "focus") as focus:
+            result = control._focus_window("editor")
+        self.assertIn("status=ask", result)
+        focus.assert_not_called()
+
+    def test_focus_window_refuses_empty_or_missing_targets(self):
+        with patch.object(control.appidentity, "running", return_value=[]) as running:
+            result = control._focus_window("")
+        self.assertIn("status=failed", result)
+        running.assert_not_called()
+        with patch.object(control.appidentity, "running", return_value=[]):
+            result = control._focus_window("missing-app")
+        self.assertIn("status=failed", result)
+
+    def test_click_requires_explicit_in_bounds_coordinates(self):
+        desktop = _FakeDesktop()
+        with patch.object(control, "_PYAUTOGUI", True), \
+             patch.object(control, "pyautogui", desktop):
+            result = control._click()
+        self.assertIn("status=failed", result)
+        self.assertEqual(desktop.clicks, [])
+
+    def test_click_rejects_out_of_bounds_and_invalid_buttons(self):
+        desktop = _FakeDesktop()
+        with patch.object(control, "_PYAUTOGUI", True), \
+             patch.object(control, "pyautogui", desktop):
+            out = control._click(100, 20)
+            button = control._click(10, 20, button="launch")
+        self.assertIn("status=failed", out)
+        self.assertIn("status=failed", button)
+        self.assertEqual(desktop.clicks, [])
+
+    def test_click_accepts_only_an_in_bounds_target(self):
+        desktop = _FakeDesktop()
+        with patch.object(control, "_PYAUTOGUI", True), \
+             patch.object(control, "pyautogui", desktop):
+            result = control._click(99, 79)
+        self.assertIn("Clicked (99, 79)", result)
+        self.assertEqual(len(desktop.clicks), 1)
+
+    def test_disruptive_hotkey_waits_for_hud_confirmation(self):
+        request = {}
+        with patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_hotkey") as execute:
+            result = control.computer_control({"action": "hotkey", "keys": "alt+f4"})
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        execute.assert_not_called()
+        request["run"]()
+        execute.assert_called_once_with("alt", "f4")
+
+    def test_delete_key_waits_for_hud_confirmation(self):
+        request = {}
+        with patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_press") as execute:
+            result = control.computer_control({"action": "press", "key": "delete"})
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        execute.assert_not_called()
+        request["run"]()
+        execute.assert_called_once_with("delete")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

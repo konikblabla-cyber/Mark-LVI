@@ -15,7 +15,7 @@ import time
 import random
 from pathlib import Path
 
-from core import appidentity, outcome
+from core import appidentity, confirm, outcome
 from core.lazyimport import LazyModule, installed
 
 # pyautogui and pyperclip are imported on first USE, not at launch — see
@@ -197,17 +197,46 @@ def _smart_type(text: str, clear_first: bool = True) -> str:
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
+def _screen_point(x, y) -> tuple[int, int] | None:
+    """Accept only explicit coordinates inside the current display bounds."""
+    if x is None or y is None or isinstance(x, bool) or isinstance(y, bool):
+        return None
+    try:
+        px, py = int(x), int(y)
+        if float(x) != px or float(y) != py:
+            return None
+        width, height = pyautogui.size()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+    except Exception:
+        return None
+    if width <= 0 or height <= 0 or not (0 <= px < width and 0 <= py < height):
+        return None
+    return px, py
+
+
 def _click(x=None, y=None, button: str = "left", clicks: int = 1) -> str:
     _require_pyautogui()
-    if x is not None and y is not None:
-        pyautogui.click(x, y, button=button, clicks=clicks)
-        return f"{'Double-c' if clicks == 2 else 'C'}licked ({x}, {y}) [{button}]"
-    pyautogui.click(button=button, clicks=clicks)
-    return f"Clicked at current position [{button}]"
+    point = _screen_point(x, y)
+    if point is None:
+        return outcome.failed(
+            "computer_control",
+            "click requires explicit x/y coordinates inside the current screen; "
+            "a click at the unknown current pointer position is refused",
+        )
+    button = str(button or "left").strip().lower()
+    if button not in {"left", "right", "middle"} or clicks not in {1, 2}:
+        return outcome.failed("computer_control", "unsupported mouse button or click count")
+    px, py = point
+    pyautogui.click(px, py, button=button, clicks=clicks)
+    return f"{'Double-c' if clicks == 2 else 'C'}licked ({px}, {py}) [{button}]"
 
 
 def _hotkey(*keys) -> str:
     _require_pyautogui()
+    if (not keys or len(keys) > 4
+            or any(not isinstance(k, str) or not k.strip() or len(k) > 24 for k in keys)):
+        return outcome.failed("computer_control", "invalid or oversized hotkey")
     pyautogui.hotkey(*keys)
     return f"Hotkey: {'+'.join(keys)}"
 
@@ -228,15 +257,23 @@ def _scroll(direction: str = "down", amount: int = 3) -> str:
 
 def _move(x: int, y: int, duration: float = 0.3) -> str:
     _require_pyautogui()
-    pyautogui.moveTo(x, y, duration=duration)
-    return f"Mouse → ({x}, {y})"
+    point = _screen_point(x, y)
+    if point is None:
+        return outcome.failed("computer_control", "mouse target is outside the current screen")
+    px, py = point
+    pyautogui.moveTo(px, py, duration=duration)
+    return f"Mouse → ({px}, {py})"
 
 
 def _drag(x1: int, y1: int, x2: int, y2: int, duration: float = 0.5) -> str:
     _require_pyautogui()
-    pyautogui.moveTo(x1, y1, duration=0.2)
-    pyautogui.dragTo(x2, y2, duration=duration, button="left")
-    return f"Dragged ({x1},{y1}) → ({x2},{y2})"
+    start = _screen_point(x1, y1)
+    end = _screen_point(x2, y2)
+    if start is None or end is None:
+        return outcome.failed("computer_control", "drag endpoints must be inside the current screen")
+    pyautogui.moveTo(*start, duration=0.2)
+    pyautogui.dragTo(*end, duration=duration, button="left")
+    return f"Dragged ({start[0]},{start[1]}) → ({end[0]},{end[1]})"
 
 
 def _clipboard_get() -> str:
@@ -275,59 +312,38 @@ def _clear_field() -> str:
     return "Field cleared"
 
 def _focus_window(title: str) -> str:
-    os_name = _get_os()
-
-    if os_name == "windows":
-        try:
-            script = f'(New-Object -ComObject WScript.Shell).AppActivate("{title}")'
-            subprocess.run(
-                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True, timeout=5, **_WIN_HIDE,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (Windows) failed: {e}"
-
-    if os_name == "mac":
-        script = (
-            f'tell application "System Events" to '
-            f'set frontmost of (first process whose name contains "{title}") to true'
+    """Focus a uniquely identified running process without interpolating user text into shell code."""
+    query = str(title or "").strip()
+    if not query:
+        return outcome.failed("computer_control", "no window or application name was supplied")
+    try:
+        matches = appidentity.running(query)
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control", f"could not safely inspect running applications ({type(exc).__name__})"
         )
-        try:
-            subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except Exception as e:
-            return f"focus_window (macOS) failed: {e}"
+    if not matches:
+        return outcome.failed("computer_control", f"no visible running window matched '{query[:100]}'")
 
-    if os_name == "linux":
-        try:
-            result = subprocess.run(
-                ["wmctrl", "-a", title],
-                capture_output=True, timeout=5,
-            )
-            if result.returncode == 0:
-                time.sleep(0.3)
-                return f"Focused window: {title}"
-        except FileNotFoundError:
-            pass
-        try:
-            result = subprocess.run(
-                ["xdotool", "search", "--name", title, "windowactivate"],
-                capture_output=True, timeout=5,
-            )
-            time.sleep(0.3)
-            return f"Focused window: {title}"
-        except FileNotFoundError:
-            return "focus_window (Linux) requires wmctrl or xdotool"
-        except Exception as e:
-            return f"focus_window (Linux) failed: {e}"
+    best_score = matches[0].score
+    best = [item for item in matches if item.score == best_score]
+    if len(best) != 1:
+        return outcome.ask(
+            "computer_control",
+            f"more than one window matches '{query[:80]}'; name the application or window more precisely",
+            candidates=len(best),
+        )
 
-    return f"focus_window: unknown OS '{os_name}'"
+    match = best[0]
+    try:
+        focused = appidentity.focus(match)
+    except Exception as exc:
+        return outcome.failed("computer_control", f"window focus failed ({type(exc).__name__})")
+    if not focused:
+        return outcome.failed(
+            "computer_control", f"could not verify focus for {match.label}", application=match.label
+        )
+    return outcome.done("computer_control", focused=match.label, verified=True)
 
 def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
     """Close the application the user named — that one, and never this one.
@@ -593,12 +609,35 @@ def computer_control(
             )
 
         if action == "hotkey":
-            raw  = params.get("keys", "")
-            keys = [k.strip() for k in raw.split("+")] if isinstance(raw, str) else raw
-            return _hotkey(*keys)
+            raw = params.get("keys", "")
+            keys = [k.strip().lower() for k in raw.split("+")] if isinstance(raw, str) else raw
+            dangerous = {
+                frozenset(("alt", "f4")), frozenset(("ctrl", "w")),
+                frozenset(("ctrl", "q")), frozenset(("win", "l")),
+                frozenset(("ctrl", "shift", "delete")),
+                frozenset(("ctrl", "alt", "delete")),
+            }
+            if isinstance(keys, list) and frozenset(keys) in dangerous:
+                return confirm.request(
+                    key="computer_control.dangerous_hotkey",
+                    title="Confirm potentially disruptive keyboard shortcut",
+                    detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
+                    run=lambda: _hotkey(*keys),
+                )
+            return _hotkey(*keys) if isinstance(keys, list) else outcome.failed(
+                "computer_control", "hotkey must be supplied as a plus-separated string"
+            )
 
         if action == "press":
-            return _press(params.get("key", "enter"))
+            key = str(params.get("key", "enter") or "enter").strip().lower()
+            if key == "delete":
+                return confirm.request(
+                    key="computer_control.delete_key",
+                    title="Confirm Delete key",
+                    detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
+                    run=lambda: _press(key),
+                )
+            return _press(key)
 
         if action == "scroll":
             return _scroll(

@@ -11,6 +11,7 @@ import subprocess
 import threading
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import TYPE_CHECKING, Optional
 
 from core import appidentity, confirm, outcome
@@ -110,19 +111,39 @@ async def _locator_is_sensitive(locator) -> bool:
 
 
 def _normalize_url(url: str) -> str:
-    """
-    Bare words like "instagram" → "https://instagram.com"
-    Domains like "instagram.com" → "https://instagram.com"
-    Full URLs pass through unchanged.
-    """
-    url = url.strip()
-    if not url:
+    """Normalise a web address and reject active/local-file URL schemes."""
+    raw = str(url or "").strip()
+    if not raw:
         return "about:blank"
-    if "://" in url:
-        return url
-    if "." not in url:
-        url = url + ".com"
-    return "https://" + url
+    if raw.lower() == "about:blank":
+        return "about:blank"
+    if any(ch.isspace() or ord(ch) < 32 for ch in raw) or "\\\\" in raw:
+        raise ValueError("URL contains whitespace, control characters or backslashes")
+    if raw.startswith("//"):
+        raise ValueError("Protocol-relative URLs are not accepted")
+
+    is_web_url = bool(re.match(r"^https?://", raw, re.IGNORECASE))
+    host_port = bool(re.match(
+        r"^(?:[A-Za-z0-9.-]+|\\[[0-9A-Fa-f:]+\\]):[0-9]+(?:/|$)", raw
+    ))
+    explicit_scheme = re.match(r"^([A-Za-z][A-Za-z0-9+.-]*):", raw)
+    if explicit_scheme and not is_web_url and not host_port:
+        raise ValueError(f"URL scheme '{explicit_scheme.group(1).lower()}' is blocked; use HTTP or HTTPS")
+
+    candidate = raw if is_web_url else "https://" + (
+        raw + ".com" if "." not in raw.split("/", 1)[0] and ":" not in raw.split("/", 1)[0]
+        else raw
+    )
+    try:
+        parsed = urlsplit(candidate)
+        _ = parsed.port  # Force malformed ports to fail during validation.
+    except ValueError as exc:
+        raise ValueError("URL host or port is malformed") from exc
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("Only HTTP and HTTPS web addresses are allowed")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("URLs containing embedded credentials are blocked")
+    return candidate
 
 
 def _user_agent() -> str:
@@ -463,7 +484,10 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
     session restore) — exactly as if the user had opened it themselves.
     Works on all three of Windows / macOS / Linux.
     """
-    url = _normalize_url(url) if url and url.strip() else ""
+    try:
+        url = _normalize_url(url) if url and str(url).strip() else ""
+    except ValueError as exc:
+        return outcome.failed("browser_control", str(exc), url=str(url or "")[:160])
     if url == "about:blank":
         url = ""
 
@@ -772,8 +796,11 @@ class _BrowserSession:
 
     async def go_to(self, url: str) -> str:
 
-        url      = _normalize_url(url)
-        page     = await self._get_page()
+        try:
+            url = _normalize_url(url)
+        except ValueError as exc:
+            return outcome.failed("browser_control", str(exc), url=str(url or "")[:160])
+        page = await self._get_page()
         prev_url = page.url
 
         async def _do_goto(p: Page) -> str:

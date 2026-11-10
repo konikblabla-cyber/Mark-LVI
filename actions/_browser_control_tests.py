@@ -133,6 +133,31 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         execute.assert_called_once()
         request.assert_not_called()
 
+    def test_url_normalizer_allows_only_http_and_https(self):
+        self.assertEqual(browser._normalize_url("example.com"), "https://example.com")
+        self.assertEqual(browser._normalize_url("instagram"), "https://instagram.com")
+        self.assertEqual(browser._normalize_url("http://example.com"), "http://example.com")
+        self.assertEqual(browser._normalize_url("about:blank"), "about:blank")
+
+    def test_url_normalizer_rejects_active_and_local_file_schemes(self):
+        for value in ("file:///C:/Users/me/secret.txt", "javascript:alert(1)",
+                      "data:text/html,hello", "chrome://settings", "about:config",
+                      "//example.com/path"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    browser._normalize_url(value)
+
+    def test_url_normalizer_rejects_embedded_credentials(self):
+        with self.assertRaisesRegex(ValueError, "credentials"):
+            browser._normalize_url("https://user:password@example.com")
+
+    def test_navigation_rejects_unsafe_url_before_creating_a_page(self):
+        opened = []
+        session = SimpleNamespace(_get_page=lambda: _async_value(opened.append("page")))
+        result = asyncio.run(browser._BrowserSession.go_to(session, "file:///C:/secret.txt"))
+        self.assertIn("status=failed", result)
+        self.assertEqual(opened, [])
+
 
 async def _async_value(value):
     return value
