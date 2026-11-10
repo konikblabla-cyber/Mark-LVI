@@ -84,29 +84,8 @@ class DevAgentLaunchSafetyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             executable = str(Path(temp) / "Code.exe")
             project = Path(temp) / "workspace & echo INJECTED"
-
-            class FakeExecutablePath:
-                suffix = ".exe"
-
-                def __init__(self, raw):
-                    self.raw = raw
-
-                def is_file(self):
-                    return True
-
-                def __str__(self):
-                    return self.raw
-
-            class FakePathFactory:
-                def __new__(cls, raw):
-                    return FakeExecutablePath(raw)
-
-                @staticmethod
-                def home():
-                    return Path.home()
-
             with patch("actions.dev_agent.shutil.which", return_value=executable), \
-                 patch("actions.dev_agent.Path", FakePathFactory), \
+                 patch("actions.dev_agent.os.path.isfile", return_value=True), \
                  patch("actions.dev_agent.subprocess.Popen") as popen, \
                  patch("actions.dev_agent.time.sleep"):
                 self.assertTrue(_open_vscode(project))

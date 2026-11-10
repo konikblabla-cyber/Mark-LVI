@@ -634,10 +634,9 @@ def _open_vscode(project_dir: Path) -> bool:
         if not raw or raw in seen:
             continue
         seen.add(raw)
-        executable = Path(raw)
         # Do not launch .cmd/.bat shims: shell interpretation of a user path
         # could turn characters such as '&' into additional commands.
-        if executable.suffix.casefold() != ".exe" or not executable.is_file():
+        if os.path.splitext(raw)[1].casefold() != ".exe" or not os.path.isfile(raw):
             continue
         try:
             subprocess.Popen(
