@@ -139,7 +139,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
              patch.object(control.appidentity, "own_exes",
                           return_value={sys.executable}), \
              patch.object(control, "_type") as execute:
-            result = control.computer_control({"action": "type", "text": "unsafe"})
+            result = control.computer_control({"action": "type", "text": "unsafe", "target_app": app})
         self.assertIn("status=failed", result)
         self.assertIn("JARVIS is the active window", result)
         execute.assert_not_called()
@@ -149,7 +149,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
              patch("core.desktop_context.get_desktop_context",
                    return_value={"available": True, "foreground_app": ""}), \
              patch.object(control, "_type") as execute:
-            result = control.computer_control({"action": "type", "text": "unsafe"})
+            result = control.computer_control({"action": "type", "text": "unsafe", "target_app": "notepad.exe"})
         self.assertIn("status=failed", result)
         self.assertIn("no input was sent", result)
         execute.assert_not_called()
@@ -180,6 +180,54 @@ class ComputerControlSafetyTests(unittest.TestCase):
             execute.assert_not_called()
             request["run"]()
             execute.assert_called_once_with("delete")
+
+    def test_input_requires_an_explicit_target_application(self):
+        with patch.object(control, "_get_os", return_value="windows"), \
+             patch.object(control, "_type") as execute:
+            result = control.computer_control({"action": "type", "text": "unsafe"})
+        self.assertIn("target_app is required", result)
+        execute.assert_not_called()
+
+    def test_input_refuses_when_foreground_does_not_match_target(self):
+        with patch.object(control, "_get_os", return_value="windows"), \
+             patch("core.desktop_context.get_desktop_context",
+                   return_value={"available": True, "foreground_app": "chrome.exe"}), \
+             patch.object(control.appidentity, "own_exes", return_value=set()), \
+             patch.object(control, "_type") as execute:
+            result = control.computer_control({
+                "action": "type", "text": "unsafe", "target_app": "notepad.exe",
+            })
+        self.assertIn("does not match", result)
+        execute.assert_not_called()
+
+    def test_input_runs_only_when_exact_target_is_foreground(self):
+        with patch.object(control, "_get_os", return_value="windows"), \
+             patch("core.desktop_context.get_desktop_context",
+                   return_value={"available": True, "foreground_app": "notepad.exe"}), \
+             patch.object(control.appidentity, "own_exes", return_value=set()), \
+             patch.object(control, "_type", return_value="typed") as execute:
+            result = control.computer_control({
+                "action": "type", "text": "safe", "target_app": "Notepad",
+            })
+        self.assertEqual(result, "typed")
+        execute.assert_called_once_with("safe")
+
+    def test_confirmed_hotkey_rechecks_the_same_target_application(self):
+        request = {}
+        blocked = "status=failed action=computer_control reason=foreground changed"
+        with patch.object(control, "_input_window_guard", side_effect=["", blocked]) as guard, \
+             patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_hotkey") as execute:
+            result = control.computer_control({
+                "action": "hotkey", "keys": "alt+f4", "target_app": "notepad.exe",
+            })
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            confirmed_result = request["run"]()
+        self.assertEqual(confirmed_result, blocked)
+        self.assertEqual(guard.call_args_list[0].args, ("notepad.exe",))
+        self.assertEqual(guard.call_args_list[1].args, ("notepad.exe",))
+        execute.assert_not_called()
 
 
 if __name__ == "__main__":

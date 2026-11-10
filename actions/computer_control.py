@@ -1,6 +1,7 @@
 #computer_control.py
 import io
 import json
+import ntpath
 import platform
 import re
 import string
@@ -537,10 +538,24 @@ _INPUT_ACTIONS = {
 }
 
 
-def _input_window_guard() -> str:
-    """Refuse synthetic input to JARVIS itself; fail closed if Windows cannot identify focus."""
+def _app_process_token(value: object) -> str:
+    """Compare executable basenames, accepting an optional .exe suffix."""
+    name = ntpath.basename(str(value or "").strip()).casefold()
+    stem, suffix = ntpath.splitext(name)
+    return stem if suffix in {".exe", ".app"} else name
+
+
+def _input_window_guard(target_app: str | None = None) -> str:
+    """Allow input only when the explicitly named target is foreground on Windows."""
     if _get_os() != "windows":
         return ""
+    expected = _app_process_token(target_app)
+    if not expected:
+        return outcome.failed(
+            "computer_control",
+            "target_app is required for desktop input; identify the intended application "
+            "and pass its executable name (for example notepad.exe); no input was sent",
+        )
     try:
         from core.desktop_context import get_desktop_context
         context = get_desktop_context(include_app=True)
@@ -550,17 +565,25 @@ def _input_window_guard() -> str:
                 "computer_control",
                 "foreground application could not be identified safely; no input was sent",
             )
+        foreground_token = _app_process_token(foreground)
         own_exes = {
-            Path(exe).name.casefold()
+            _app_process_token(exe)
             for exe in appidentity.own_exes()
             if exe
         }
-        own_exes.add(Path(sys.executable).name.casefold())
-        if foreground.casefold() in own_exes:
+        own_exes.add(_app_process_token(sys.executable))
+        if foreground_token in own_exes:
             return outcome.failed(
                 "computer_control",
                 "JARVIS is the active window; refusing synthetic input into its own interface",
                 foreground_app=foreground,
+            )
+        if foreground_token != expected:
+            return outcome.failed(
+                "computer_control",
+                "active application does not match the requested target; no input was sent",
+                foreground_app=foreground,
+                expected_app=str(target_app)[:100],
             )
         return ""
     except Exception as exc:
@@ -570,9 +593,9 @@ def _input_window_guard() -> str:
         )
 
 
-def _run_confirmed_input(action):
-    """Recheck the foreground app when a delayed HUD confirmation is accepted."""
-    blocked = _input_window_guard()
+def _run_confirmed_input(action, target_app: str | None = None):
+    """Recheck the exact target application when delayed HUD approval is accepted."""
+    blocked = _input_window_guard(target_app)
     return blocked if blocked else action()
 
 
@@ -597,6 +620,7 @@ def computer_control(
       amount        : scroll amount (default: 3)
       seconds       : wait duration
       title         : window title fragment for focus_window
+      target_app    : exact foreground process name for all synthetic input
       description   : natural-language element description for screen_find/click
       type          : data type for random_data
       field         : memory field name for user_data
@@ -631,8 +655,9 @@ def computer_control(
     if not action:
         return "No action specified for computer_control."
 
+    target_app = params.get("target_app")
     if action in _INPUT_ACTIONS:
-        blocked = _input_window_guard()
+        blocked = _input_window_guard(target_app)
         if blocked:
             return blocked
 
@@ -689,7 +714,7 @@ def computer_control(
                     key="computer_control.dangerous_hotkey",
                     title="Confirm potentially disruptive keyboard shortcut",
                     detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
-                    run=lambda: _run_confirmed_input(lambda: _hotkey(*keys)),
+                    run=lambda: _run_confirmed_input(lambda: _hotkey(*keys), target_app),
                 )
             return _hotkey(*keys) if isinstance(keys, list) else outcome.failed(
                 "computer_control", "hotkey must be supplied as a plus-separated string"
@@ -702,7 +727,7 @@ def computer_control(
                     key="computer_control.delete_key",
                     title="Confirm Delete key",
                     detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
-                    run=lambda: _run_confirmed_input(lambda: _press(key)),
+                    run=lambda: _run_confirmed_input(lambda: _press(key), target_app),
                 )
             return _press(key)
 
@@ -778,7 +803,9 @@ def computer_control(
 TOOL = {
     "name": "computer_control",
     "description": (
-        "Direct computer control: type, click, hotkeys, scroll, move mouse, "
+        "Direct computer control: type, click, hotkeys, scroll, move mouse. "
+        "Every input action must include target_app, the exact foreground process "
+        "name (for example notepad.exe); the action is refused if another app is active. "
         "screenshots, find elements on screen, and CLOSE an application. "
         "Use action='close_app' with 'app_name' whenever the user asks to "
         "close, quit or exit a program - 'close Spotify', 'quit Chrome'. "
@@ -817,6 +844,10 @@ TOOL = {
                     "application was meant AND the user answered. Pass their "
                     "answer in 'app_name'."
                 )
+            },
+            "target_app": {
+                "type": "STRING",
+                "description": "Required for every mouse/keyboard/clipboard action: exact target application's foreground process name, e.g. notepad.exe or chrome.exe. Do not guess; inspect the foreground app or focus the named app first."
             },
             "text": {
                 "type": "STRING",
