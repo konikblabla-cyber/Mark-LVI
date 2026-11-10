@@ -42,6 +42,16 @@ jobs:
       - name: Smoke-test Windows and macOS desktop-control imports
         if: runner.os != 'Linux'
         run: python -c "import pyautogui, pyperclip, mss; print('PyAutoGUI screen:', pyautogui.size())"
+      - name: Verify the PortAudio runtime can be loaded
+        run: python -c "import sounddevice as sd; version = sd.get_portaudio_version(); print('PortAudio:', version); assert version is not None"
+      - name: Create and paint an offscreen Qt window
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: >-
+          python -c "from PyQt6.QtWidgets import QApplication, QWidget;
+          app = QApplication([]); window = QWidget(); window.resize(800, 600);
+          window.show(); app.processEvents(); assert window.isVisible();
+          window.close(); app.processEvents(); print('Qt offscreen window OK')"
       - name: Import core runtime dependencies
         run: >-
           python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,
