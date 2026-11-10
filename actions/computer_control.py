@@ -195,7 +195,7 @@ def _type(text: str, interval: float = 0.03) -> str:
     return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
-def _smart_type(text: str, clear_first: bool = True) -> str:
+def _smart_type(text: str, clear_first: bool = False) -> str:
     _require_pyautogui()
     if clear_first:
         _clear_field()
@@ -660,12 +660,12 @@ def computer_control(
       description   : natural-language element description for screen_find/click
       type          : data type for random_data
       field         : memory field name for user_data
-      clear_first   : bool, clear field before typing (default: true)
+      clear_first   : bool, replace active text only after confirmation (default: false)
       path          : save path for screenshot (must be inside home dir)
 
     Actions:
       type          — type text at cursor
-      smart_type    — clear field + type (clipboard-backed)
+      smart_type    — type text; replacing all active text requires confirmation
       click         — left click
       double_click  — double left click
       right_click   — right click
@@ -678,7 +678,7 @@ def computer_control(
       paste         — write + paste clipboard
       screenshot    — capture screen (safe path only)
       wait          — sleep N seconds
-      clear_field   — select-all + delete
+      clear_field   — select-all + delete (HUD confirmation required)
       focus_window  — bring window to foreground
       screen_find   — AI element finder (returns x,y)
       screen_click  — AI element finder + click
@@ -714,10 +714,18 @@ def computer_control(
             return _type(params.get("text", ""))
 
         if action == "smart_type":
-            return _smart_type(
-                params.get("text", ""),
-                clear_first=params.get("clear_first", True),
-            )
+            text = str(params.get("text", "") or "")
+            clear_first = bool(params.get("clear_first", False))
+            if clear_first:
+                return confirm.request(
+                    key="computer_control.smart_type.replace_text",
+                    title="Confirm replacing active text",
+                    detail="This selects all text in the active application before typing the replacement. Confirm only if the intended field or document is active.",
+                    run=lambda: _run_confirmed_input(
+                        lambda: _smart_type(text, clear_first=True), target_app
+                    ),
+                )
+            return _smart_type(text, clear_first=False)
 
         if action in ("click", "left_click"):
             return _click(params.get("x"), params.get("y"), "left", 1)
@@ -811,7 +819,12 @@ def computer_control(
             return f"Waited {secs}s"
 
         if action == "clear_field":
-            return _clear_field()
+            return confirm.request(
+                key="computer_control.clear_field",
+                title="Confirm clearing active text",
+                detail="This selects all text in the active application and deletes it. Confirm only if the intended field or document is active.",
+                run=lambda: _run_confirmed_input(_clear_field, target_app),
+            )
 
         if action == "focus_window":
             return _focus_window(params.get("title", ""))

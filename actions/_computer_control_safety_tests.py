@@ -226,6 +226,51 @@ class ComputerControlSafetyTests(unittest.TestCase):
             result = control._clipboard_paste("hello clipboard")
         self.assertIn("Typed instead of clipboard paste", result)
         gui.typewrite.assert_called_once_with("hello clipboard", interval=0.04)
+    def test_smart_type_does_not_clear_active_content_by_default(self):
+        with patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_smart_type", return_value="typed") as execute, \
+             patch.object(control.confirm, "request") as confirm_request:
+            result = control.computer_control({
+                "action": "smart_type", "text": "new text", "target_app": "notepad.exe",
+            })
+        self.assertEqual(result, "typed")
+        execute.assert_called_once_with("new text", clear_first=False)
+        confirm_request.assert_not_called()
+
+    def test_smart_type_replace_requires_confirmation_and_rechecks_target(self):
+        request = {}
+        blocked = "status=failed action=computer_control reason=foreground changed"
+        with patch.object(control, "_input_window_guard", side_effect=["", blocked]) as guard, \
+             patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_smart_type") as execute:
+            result = control.computer_control({
+                "action": "smart_type", "text": "replace", "clear_first": True,
+                "target_app": "notepad.exe",
+            })
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            confirmed_result = request["run"]()
+        self.assertEqual(confirmed_result, blocked)
+        self.assertEqual(guard.call_args_list[0].args, ("notepad.exe",))
+        self.assertEqual(guard.call_args_list[1].args, ("notepad.exe",))
+        execute.assert_not_called()
+
+    def test_clear_field_requires_confirmation_and_rechecks_target(self):
+        request = {}
+        blocked = "status=failed action=computer_control reason=foreground changed"
+        with patch.object(control, "_input_window_guard", side_effect=["", blocked]) as guard, \
+             patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_clear_field") as execute:
+            result = control.computer_control({
+                "action": "clear_field", "target_app": "notepad.exe",
+            })
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            confirmed_result = request["run"]()
+        self.assertEqual(confirmed_result, blocked)
+        self.assertEqual(guard.call_args_list[0].args, ("notepad.exe",))
+        self.assertEqual(guard.call_args_list[1].args, ("notepad.exe",))
+        execute.assert_not_called()
     def test_foreground_app_reports_only_the_active_process_name(self):
         with patch("core.desktop_context.get_desktop_context",
                    return_value={"available": True, "foreground_app": "notepad.exe"}):
