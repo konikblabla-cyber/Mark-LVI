@@ -545,6 +545,32 @@ def _app_process_token(value: object) -> str:
     return stem if suffix in {".exe", ".app"} else name
 
 
+def _foreground_app() -> str:
+    """Read the active executable name without capturing window titles or content."""
+    try:
+        from core.desktop_context import get_desktop_context
+        context = get_desktop_context(include_app=True)
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"could not inspect the foreground application ({type(exc).__name__})",
+        )
+    if not isinstance(context, dict) or not context.get("available"):
+        return outcome.failed(
+            "computer_control",
+            "foreground process inspection is unavailable on this operating system",
+        )
+    name = str(context.get("foreground_app") or "").strip()
+    if not name:
+        return outcome.failed(
+            "computer_control",
+            "the active application's process name could not be identified",
+        )
+    return outcome.done(
+        "computer_control", foreground_app=name, verified=True,
+        note="Use this exact process name as target_app for the next input action.",
+    )
+
 def _input_window_guard(target_app: str | None = None) -> str:
     """Allow input only when the explicitly named target is foreground on Windows."""
     if _get_os() != "windows":
@@ -670,6 +696,9 @@ def computer_control(
     _safe_print(f"[ComputerControl] action={action}")
 
     try:
+
+        if action == "foreground_app":
+            return _foreground_app()
 
         if action == "type":
             return _type(params.get("text", ""))
@@ -810,8 +839,9 @@ TOOL = {
     "name": "computer_control",
     "description": (
         "Direct computer control: type, click, hotkeys, scroll, move mouse. "
-        "Every input action must include target_app, the exact foreground process "
-        "name (for example notepad.exe); the action is refused if another app is active. "
+        "Before typing or clicking, call action='foreground_app' to read the exact "
+        "active executable name, then pass it as target_app on the input action. "
+        "Every input action requires target_app and is refused if another app is active. "
         "screenshots, find elements on screen, and CLOSE an application. "
         "Use action='close_app' with 'app_name' whenever the user asks to "
         "close, quit or exit a program - 'close Spotify', 'quit Chrome'. "
@@ -833,7 +863,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | random_data | user_data"
+                "description": "foreground_app | type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | random_data | user_data"
             },
             "app_name": {
                 "type": "STRING",

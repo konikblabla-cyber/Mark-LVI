@@ -195,6 +195,20 @@ class ComputerControlSafetyTests(unittest.TestCase):
             request["run"]()
             execute.assert_called_once_with("delete")
 
+    def test_foreground_app_reports_only_the_active_process_name(self):
+        with patch("core.desktop_context.get_desktop_context",
+                   return_value={"available": True, "foreground_app": "notepad.exe"}):
+            result = control.computer_control({"action": "foreground_app"})
+        self.assertIn("status=done action=computer_control", result)
+        self.assertIn("foreground_app=notepad.exe", result)
+        self.assertIn("verified=true", result)
+
+    def test_foreground_app_fails_when_process_identity_is_unavailable(self):
+        with patch("core.desktop_context.get_desktop_context",
+                   return_value={"available": True, "foreground_app": ""}):
+            result = control.computer_control({"action": "foreground_app"})
+        self.assertIn("status=failed action=computer_control", result)
+        self.assertIn("could not be identified", result)
     def test_input_requires_an_explicit_target_application(self):
         with patch.object(control, "_get_os", return_value="windows"), \
              patch.object(control, "_type") as execute:
