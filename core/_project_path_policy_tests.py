@@ -4,8 +4,10 @@ import unittest
 from pathlib import Path
 
 from core.project_path_policy import (
+    atomic_write_project_text,
     require_new_project_file,
     resolve_project_file,
+    resolve_project_path_without_symlinks,
     validate_project_root,
 )
 
@@ -71,6 +73,69 @@ class ProjectPathPolicyTests(unittest.TestCase):
                 validate_project_root(projects, link)
             with self.assertRaises(ValueError):
                 resolve_project_file(link, "main.py")
+
+    def test_refuses_symlink_alias_to_protected_internal_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            root.mkdir()
+            secret = root / ".env"
+            secret.write_text("API_KEY=secret", encoding="utf-8")
+            alias = root / "ordinary.py"
+            try:
+                alias.symlink_to(secret)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is unavailable on this platform")
+            with self.assertRaises(ValueError):
+                resolve_project_path_without_symlinks(root, "ordinary.py")
+            with self.assertRaises(ValueError):
+                atomic_write_project_text(root, "ordinary.py", "overwritten", expected_text="API_KEY=secret")
+            self.assertEqual(secret.read_text(encoding="utf-8"), "API_KEY=secret")
+
+    def test_refuses_symlinked_parent_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            root = base / "project"
+            root.mkdir()
+            outside = base / "outside"
+            outside.mkdir()
+            (outside / "secret.txt").write_text("keep", encoding="utf-8")
+            try:
+                (root / "linked").symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("Symlink creation is unavailable on this platform")
+            with self.assertRaises(ValueError):
+                resolve_project_path_without_symlinks(root, "linked/secret.txt")
+            with self.assertRaises(ValueError):
+                atomic_write_project_text(root, "linked/secret.txt", "bad", expected_text="keep")
+            self.assertEqual((outside / "secret.txt").read_text(encoding="utf-8"), "keep")
+
+    def test_atomic_write_rejects_concurrent_user_edit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            root.mkdir()
+            target = root / "main.py"
+            target.write_text("original", encoding="utf-8")
+            target.write_text("user's newer edit", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                atomic_write_project_text(root, "main.py", "model output", expected_text="original")
+            self.assertEqual(target.read_text(encoding="utf-8"), "user's newer edit")
+
+    def test_atomic_create_never_overwrites_existing_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            root.mkdir()
+            target = root / "main.py"
+            target.write_text("user file", encoding="utf-8")
+            with self.assertRaises(FileExistsError):
+                atomic_write_project_text(root, "main.py", "generated", expect_missing=True)
+            self.assertEqual(target.read_text(encoding="utf-8"), "user file")
+
+    def test_atomic_write_creates_nested_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            root.mkdir()
+            target = atomic_write_project_text(root, "src/main.py", "print('ok')", expect_missing=True)
+            self.assertEqual(target.read_text(encoding="utf-8"), "print('ok')")
 
     def test_refuses_existing_file_without_overwriting(self):
         with tempfile.TemporaryDirectory() as temp:

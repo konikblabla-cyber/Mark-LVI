@@ -18,7 +18,7 @@ import threading
 
 import time
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 
 
@@ -57,9 +57,11 @@ from core.timeout_policy import bounded_timeout
 from core.process_runner import run_bounded_process
 
 from core.project_path_policy import (
-
-    require_new_project_file, resolve_project_file, validate_project_root,
-
+    atomic_write_project_text,
+    require_new_project_file,
+    resolve_project_file,
+    resolve_project_path_without_symlinks,
+    validate_project_root,
 )
 
 
@@ -519,11 +521,8 @@ Code for {file_path}:"""
 
 
 
-        full_path = require_new_project_file(project_dir, file_path)
-
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-
-        full_path.write_text(code, encoding="utf-8")
+        require_new_project_file(project_dir, file_path)
+        atomic_write_project_text(project_dir, file_path, code, expect_missing=True)
 
 
 
@@ -901,11 +900,11 @@ Fixed code for {fix_path}:"""
 
 
 
-            full_path = resolve_project_file(project_dir, fix_path)
-
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-
-            full_path.write_text(fixed, encoding="utf-8")
+            resolve_project_file(project_dir, fix_path)
+            atomic_write_project_text(
+                project_dir, fix_path, fixed,
+                expected_text=file_codes.get(fix_path, ""),
+            )
 
 
 
@@ -1731,13 +1730,23 @@ def _scan(folder: Path) -> tuple[list[str], dict[str, str], dict[str, str]]:
 
     for root, dirs, files in os.walk(folder):
 
-        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+        dirs[:] = sorted(
+            d for d in dirs
+            if d not in _SKIP_DIRS and not (Path(root) / d).is_symlink()
+        )
 
         for name in sorted(files):
 
             full = Path(root) / name
 
             rel = full.relative_to(folder).as_posix()
+
+            if full.is_symlink():
+                tree.append(f"{rel}   [SYMLINK: never read, never change]")
+                continue
+            if _safe_rel(folder, rel) is None:
+                tree.append(f"{rel}   [UNSAFE PATH: never read, never change]")
+                continue
 
             if protection.reason(rel):
 
@@ -1848,36 +1857,20 @@ def _json_object(text: str) -> dict:
 
 
 def _safe_rel(folder: Path, rel: str) -> str | None:
-
-    """A model-supplied path, as a clean relative path inside the folder, or
-
-    None if it points anywhere else."""
-
-    rel = str(rel or "").strip().replace("\\", "/").lstrip("/")
-
-    if not rel or rel.startswith("~") or ":" in rel:
-
+    """Accept only a non-symlink relative path contained by the project."""
+    rel = str(rel or "").strip().replace("\\", "/")
+    if (not rel or rel.startswith("/") or rel.startswith("~")
+            or PureWindowsPath(rel).drive or ":" in rel):
         return None
 
-    parts = Path(rel).parts
-
-    if ".." in parts or any(p in _SKIP_DIRS for p in parts):
-
+    parts = rel.split("/")
+    if any(part in {"", ".", ".."} or part in _SKIP_DIRS for part in parts):
         return None
-
     try:
-
-        (folder / rel).resolve().relative_to(folder)
-
+        resolve_project_path_without_symlinks(folder, rel)
     except (ValueError, OSError):
-
         return None
-
-    return Path(rel).as_posix()
-
-
-
-
+    return "/".join(parts)
 
 def _plan_changes(folder: Path, instruction: str, context: str) -> dict:
 
@@ -2573,10 +2566,13 @@ def _test_and_fix(folder: Path, written: dict[str, str], changes: list,
 
                 continue
 
-            (folder / rel).write_text(new, encoding="utf-8", newline="")
+            try:
+                atomic_write_project_text(folder, rel, new, expected_text=written[rel])
+            except Exception as e:
+                _log(player, f"Kept {rel}; it changed or became unsafe during repair: {str(e)[:120]}")
+                continue
 
             written[rel] = new
-
             _update(file=rel, file_state="done")
 
     return problems
@@ -2769,77 +2765,58 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
 
 
 
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-
+    stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{time.time_ns()}"
     backup = folder / _BACKUP_DIR / stamp
-
     edited: list[str] = []
-
     created: list[str] = []
-
     written: dict[str, str] = {}
 
-
+    try:
+        if any(c["action"] == "edit" for c in changes):
+            backup_root = resolve_project_path_without_symlinks(folder, _BACKUP_DIR)
+            if not backup_root.exists():
+                backup_root.mkdir()
+            if not backup_root.is_dir():
+                raise ValueError("Project backup path is not a directory.")
+            backup = resolve_project_path_without_symlinks(folder, f"{_BACKUP_DIR}/{stamp}")
+            backup.mkdir()
+    except Exception as e:
+        return f"Could not create a safe project backup; nothing was changed: {str(e)[:160]}"
 
     for c in changes:
-
         rel = c["path"]
-
-        target = folder / rel
-
         current = texts.get(rel, "")
-
         _update(file=rel, file_state="writing")
-
         _log(player, f"Writing {rel}…")
 
         try:
+            new = _write_change(c, plan, instruction, context, current, written=written)
+            why = _rejected(rel, current, new)
+            if why:
+                _update(file=rel, file_state="skipped")
+                _log(player, f"Kept {rel} as it was — {why}.")
+                continue
 
-            new = _write_change(c, plan, instruction, context, current,
+            if c["action"] == "edit":
+                target = resolve_project_path_without_symlinks(folder, rel)
+                if not target.is_file():
+                    raise FileNotFoundError(f"Project file is no longer a regular file: {rel}")
+                if target.read_bytes() != current.encode("utf-8"):
+                    raise RuntimeError(f"{rel} changed after the project was scanned; leaving it untouched.")
+                backup_rel = f"{_BACKUP_DIR}/{stamp}/{rel}"
+                atomic_write_project_text(folder, backup_rel, current, expect_missing=True)
+                atomic_write_project_text(folder, rel, new, expected_text=current)
+                edited.append(rel)
+            else:
+                atomic_write_project_text(folder, rel, new, expect_missing=True)
+                created.append(rel)
 
-                                written=written)
-
+            written[rel] = new
+            _update(file=rel, file_state="done")
         except Exception as e:
-
             _update(file=rel, file_state="failed")
-
-            _log(player, f"Could not write {rel}: {str(e)[:150]}")
-
+            _log(player, f"Could not safely write {rel}: {str(e)[:150]}")
             continue
-
-        why = _rejected(rel, current, new)
-
-        if why:
-
-            _update(file=rel, file_state="skipped")
-
-            _log(player, f"Kept {rel} as it was — {why}.")
-
-            continue
-
-        if c["action"] == "edit":
-
-            dest = backup / rel
-
-            dest.parent.mkdir(parents=True, exist_ok=True)
-
-            shutil.copy2(target, dest)
-
-            edited.append(rel)
-
-        else:
-
-            created.append(rel)
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        target.write_text(new, encoding="utf-8", newline="")
-
-        written[rel] = new
-
-        _update(file=rel, file_state="done")
-
-
 
     if not written:
 
@@ -2893,11 +2870,14 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
 
         else:
 
-            (folder / rel).write_text(new, encoding="utf-8", newline="")
+            try:
+                atomic_write_project_text(folder, rel, new, expected_text=written[rel])
+            except Exception as e:
+                _log(player, f"Kept {rel}; it changed or became unsafe during repair: {str(e)[:120]}")
+                continue
 
             written[rel] = new
-
-        _update(file=rel, file_state="done")
+            _update(file=rel, file_state="done")
 
     if not mismatched:
 
@@ -2943,10 +2923,13 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
 
             else:
 
-                (folder / rel).write_text(new, encoding="utf-8", newline="")
+                try:
+                atomic_write_project_text(folder, rel, new, expected_text=written[rel])
+            except Exception as e:
+                _log(player, f"Kept {rel}; it changed or became unsafe during repair: {str(e)[:120]}")
+                continue
 
-                written[rel] = new
-
+            written[rel] = new
             _update(file=rel, file_state="done")
 
     still_broken = [rel for rel, text in written.items() if _syntax_error(rel, text)]
@@ -2968,29 +2951,31 @@ def _improve_folder(folder: Path, instruction: str, player=None) -> str:
 
 
     def restore() -> str:
-
+        skipped = []
         for rel in edited:
-
             try:
-
-                shutil.copy2(backup / rel, folder / rel)
-
-            except OSError:
-
-                pass
+                backup_rel = f"{_BACKUP_DIR}/{stamp}/{rel}"
+                original = resolve_project_path_without_symlinks(folder, backup_rel).read_bytes().decode("utf-8")
+                atomic_write_project_text(
+                    folder, rel, original, expected_text=written[rel]
+                )
+            except Exception:
+                skipped.append(rel)
 
         for rel in created:
-
             try:
+                target = resolve_project_path_without_symlinks(folder, rel)
+                if not target.is_file() or target.read_bytes() != written[rel].encode("utf-8"):
+                    skipped.append(rel)
+                    continue
+                target.unlink()
+            except Exception:
+                skipped.append(rel)
 
-                (folder / rel).unlink()
-
-            except OSError:
-
-                pass
-
+        if skipped:
+            return ("Restored files that were unchanged since my edits. "
+                    "Left later user changes or unsafe paths untouched: " + ", ".join(skipped))
         return f"Put '{folder.name}' back as it was before the change."
-
 
 
     try:
