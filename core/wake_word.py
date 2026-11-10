@@ -87,17 +87,28 @@ def install_and_download(logger: Callable[[str], None] = print,
             if r.returncode != 0:
                 tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or [""]
                 return False, f"pip install failed: {tail[0][:160]}"
-        # Download the pretrained melspectrogram/embedding + wake models.
+        # Download in a separate process too: the upstream downloader does not
+        # expose a timeout, so a stalled network request must not hang the UI.
         logger("Wake word: downloading models…")
         _tell("Wake word: downloading models…")
+        download_code = (
+            "import openwakeword.utils as u\n"
+            "try:\n"
+            "    u.download_models(['hey_jarvis'])\n"
+            "except TypeError:\n"
+            "    u.download_models()\n"
+        )
         try:
-            import openwakeword.utils as _u
-            try:
-                _u.download_models([WAKE_MODEL])
-            except TypeError:
-                _u.download_models()   # older signature downloads the default set
-        except Exception as e:
-            return False, f"model download failed: {e}"
+            result = subprocess.run(
+                [sys.executable, "-c", download_code],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "model download timed out after 300 seconds; check the internet connection and try again."
+        if result.returncode != 0:
+            tail = (result.stderr or result.stdout or "").strip().splitlines()[-1:] or [""]
+            return False, f"model download failed: {tail[0][:160]}"
 
         if not is_ready():
             return False, "installed, but the wake model could not be loaded."
