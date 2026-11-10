@@ -622,7 +622,7 @@ def computer_control(
         # core/outcome.is_problem().
         print(f"[ComputerControl] {action}")
 
-    print(f"[ComputerControl] ▶ {action}  {params}")
+    print(f"[ComputerControl] action={action}")
 
     try:
 
