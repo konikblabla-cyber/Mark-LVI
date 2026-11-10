@@ -1,10 +1,12 @@
 """Offline tests for safe external-editor launching."""
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
-from actions.dev_agent import _classify_error, _has_error, _open_vscode
+from actions.dev_agent import _classify_error, _has_error, _open_vscode, _run_project
+from actions.code_helper import _run_file
 from core.code_checks import _walk, detect_stack
 
 
@@ -55,6 +57,27 @@ class DevAgentLaunchSafetyTests(unittest.TestCase):
 
     def test_empty_successful_output_remains_valid(self):
         self.assertFalse(_has_error("", "python main.py"))
+
+    def test_unknown_process_status_is_not_success(self):
+        output = "Process status unknown; termination could not be confirmed."
+        self.assertTrue(_has_error(output, "python main.py"))
+        self.assertEqual(_classify_error(output), "runtime_error")
+
+    def test_project_runner_does_not_claim_success_without_exit_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result = SimpleNamespace(stdout="", stderr="", returncode=None,
+                                     timed_out=False, output_limited=False)
+            with patch("actions.dev_agent.run_bounded_process", return_value=result):
+                self.assertIn("status unknown", _run_project("python main.py", Path(temp)))
+
+    def test_code_helper_does_not_claim_success_without_exit_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            script = Path(temp) / "main.py"
+            script.write_text("pass", encoding="utf-8")
+            result = SimpleNamespace(stdout="", stderr="", returncode=None,
+                                     timed_out=False, output_limited=False)
+            with patch("actions.code_helper.run_bounded_process", return_value=result):
+                self.assertIn("status unknown", _run_file(script, [], 5))
 
     def test_vscode_launch_does_not_use_a_shell_for_user_paths(self):
         with tempfile.TemporaryDirectory() as temp:

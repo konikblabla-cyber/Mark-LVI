@@ -244,6 +244,8 @@ def _run_file(path: Path, args: list, timeout: int) -> str:
         )
         if result.timed_out:
             return f"Timed out after {timeout}s."
+        if result.returncode is None:
+            return "Process status unknown; termination could not be confirmed."
         parts = []
         if result.stdout.strip():
             parts.append(f"Output:\n{result.stdout.strip()}")

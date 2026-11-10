@@ -241,6 +241,7 @@ def _classify_error(output: str) -> str:
         "zerodivisionerror", "filenotfounderror", "permissionerror",
         "process exited with code", "timed out", "output truncated",
         "output limit", "command not found", "run error:",
+        "process status unknown",
 
     )):
 
@@ -673,6 +674,8 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
         )
         if result.timed_out:
             return f"Timed out after {timeout}s — process was stopped."
+        if result.returncode is None:
+            return "Process status unknown; termination could not be confirmed."
         combined_parts = []
         if result.stdout.strip():
             combined_parts.append(f"STDOUT:\n{result.stdout.strip()}")
