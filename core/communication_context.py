@@ -33,6 +33,29 @@ def is_communication_app(process_name: object) -> bool:
     return normalize_process_name(process_name) in COMMUNICATION_APP_NAMES
 
 
+def get_running_communication_apps() -> set[str]:
+    """Return known communication app processes currently running, locally only.
+
+    Process enumeration is intentionally conservative: an open Discord/Teams
+    client counts as a potential call even if its window is not foreground.
+    This avoids reopening the mic just because the user switches to a game.
+    """
+    try:
+        import psutil
+        names = set()
+        for process in psutil.process_iter(["name"]):
+            try:
+                name = process.info.get("name")
+                normalized = normalize_process_name(name)
+                if normalized in COMMUNICATION_APP_NAMES:
+                    names.add(normalized)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        return names
+    except Exception:
+        return set()
+
+
 def should_forward_microphone(
     communication_app_active: bool,
     addressed_turn_open: bool,

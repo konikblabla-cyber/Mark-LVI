@@ -30,6 +30,11 @@ class CommunicationContextTests(unittest.TestCase):
         self.assertFalse(is_communication_app("chrome.exe"))
         self.assertFalse(is_communication_app(""))
 
+    def test_running_app_scan_results_can_be_classified(self):
+        self.assertTrue(is_communication_app("Discord"))
+        self.assertTrue(is_communication_app("PhoneExperienceHost.exe"))
+        self.assertFalse(is_communication_app("notepad.exe"))
+
     def test_microphone_is_blocked_in_call_apps_without_explicit_address(self):
         self.assertFalse(should_forward_microphone(True, False, False))
 
