@@ -11,6 +11,13 @@ on:
       - "core/_ui_runtime_smoke.py"
       - "core/audio_devices.py"
       - "core/_audio_devices_tests.py"
+      - "actions/**"
+      - "plugins/**"
+      - "main.py"
+      - "core/action_loader.py"
+      - "core/plugin_loader.py"
+      - "core/focus_context.py"
+      - "core/project_context.py"
 
 jobs:
   install:
