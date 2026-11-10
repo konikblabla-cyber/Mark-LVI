@@ -1,6 +1,7 @@
 """Offline tests for the metadata-only project context inspector."""
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from core.project_context import format_project_context, inspect_project_folder
@@ -47,6 +48,26 @@ class ProjectContextTests(unittest.TestCase):
             snapshot = inspect_project_folder(root, max_files=2)
             self.assertEqual(snapshot["file_count"], 2)
             self.assertTrue(snapshot["truncated"])
+
+
+    def test_project_snapshot_can_be_remembered_without_storing_path_or_source(self):
+        snapshot = {
+            "project_name": "Jarvis",
+            "file_count": 42,
+            "languages": [("Python", 30), ("JavaScript", 12)],
+            "git_branch": "feature/agent",
+        }
+        with mock.patch(
+            "memory.memory_manager.update_memory"
+        ) as save:
+            from core.project_context import remember_project_snapshot
+            self.assertTrue(remember_project_snapshot(snapshot))
+        payload = save.call_args.args[0]
+        value = payload["projects"]["local_project_jarvis"]
+        self.assertIn("technologies: Python, JavaScript", value)
+        self.assertIn("Git branch: feature/agent", value)
+        self.assertNotIn("C:\\", value)
+        self.assertNotIn("absolute path", value.split("source code")[0])
 
 
 if __name__ == "__main__":
