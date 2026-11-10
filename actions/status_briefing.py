@@ -78,6 +78,12 @@ def build_status_briefing() -> str:
         sections.append(f"PROCESS WATCHES: unavailable ({type(exc).__name__}).")
 
     try:
+        from actions.windows_startup import run as startup_status
+        sections.append("WINDOWS AUTO-START: " + startup_status({"action": "status"}))
+    except Exception as exc:
+        sections.append(f"WINDOWS AUTO-START: unavailable ({type(exc).__name__}).")
+
+    try:
         from actions.system_monitor import get_system_status
         status = get_system_status()
         disk = status.get("disk") or {}
