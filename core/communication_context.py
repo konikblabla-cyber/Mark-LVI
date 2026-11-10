@@ -95,6 +95,21 @@ def is_communication_context(
     ))
 
 
+def should_auto_wake(
+    idle_seconds: object,
+    communication_active: bool,
+    max_idle_seconds: float = 3.0,
+) -> bool:
+    """Wake an armed assistant on fresh local input, never during a call."""
+    if communication_active:
+        return False
+    try:
+        idle = float(idle_seconds)
+    except (TypeError, ValueError):
+        return False
+    return 0.0 <= idle <= max(0.0, float(max_idle_seconds))
+
+
 def should_forward_microphone(
     communication_app_active: bool,
     addressed_turn_open: bool,

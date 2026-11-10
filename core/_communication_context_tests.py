@@ -6,6 +6,7 @@ from core.communication_context import (
     is_communication_app,
     is_communication_context,
     normalize_process_name,
+    should_auto_wake,
     should_forward_microphone,
 )
 
@@ -76,6 +77,15 @@ class CommunicationContextTests(unittest.TestCase):
     def test_audio_api_failure_falls_back_to_foreground_app(self):
         self.assertTrue(is_communication_context("Teams.exe", None))
         self.assertFalse(is_communication_context("opera.exe", None))
+
+    def test_fresh_desktop_input_auto_wakes_outside_calls(self):
+        self.assertTrue(should_auto_wake(0.0, False))
+        self.assertTrue(should_auto_wake(2.5, False))
+        self.assertFalse(should_auto_wake(4.0, False))
+        self.assertFalse(should_auto_wake(None, False))
+
+    def test_desktop_activity_never_auto_wakes_inside_a_call(self):
+        self.assertFalse(should_auto_wake(0.1, True))
 
     def test_microphone_is_blocked_in_call_apps_without_explicit_address(self):
         self.assertFalse(should_forward_microphone(True, False, False))

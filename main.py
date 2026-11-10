@@ -86,7 +86,7 @@ from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
-    should_forward_microphone,
+    should_auto_wake, should_forward_microphone,
 )
 from core.desktop_context import get_desktop_context, desktop_is_idle
 from core.viseme               import VisemeStream
@@ -816,11 +816,25 @@ class JarvisLive:
                 continue
 
             if active == self._communication_app_active:
+                # This remains a local decision. Recent keyboard/mouse input can
+                # wake a sleeping JARVIS for a direct command, but never in a
+                # known communication context.
+                if (not active and self._wake_enabled and not self._awake
+                        and should_auto_wake(
+                            context.get("idle_seconds") if isinstance(context, dict) else None,
+                            active,
+                        )):
+                    self.wake(reason="desktop activity")
                 continue
 
             self._communication_app_active = active
             self._communication_turn_open = False
             self._communication_turn_deadline = 0.0
+            if not active and self._wake_enabled and not self._awake:
+                if should_auto_wake(
+                        context.get("idle_seconds") if isinstance(context, dict) else None,
+                        active):
+                    self.wake(reason="desktop activity")
             if active:
                 if wake_is_ready():
                     ready = self._ensure_wake_detector()
