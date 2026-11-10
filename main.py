@@ -83,6 +83,10 @@ from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
 from core.audio_recovery import callback_is_stalled, stream_is_active
+from core.focus_context import FocusContextTracker
+from core.project_context import (
+    inspect_project_folder, format_project_context, remember_project_snapshot,
+)
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.live_session_policy import go_away_notice, live_turn_is_active
@@ -599,6 +603,9 @@ class JarvisLive:
         # Fail closed until the first Windows audio-session probe confirms there is no call.
         self._communication_app_active = initial_communication_gate()
         self._communication_context_known = False
+        # Foreground categories stay local unless desktop awareness is opted in.
+        self._focus_tracker = FocusContextTracker(stable_seconds=8.0)
+        self._focus_context = None
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
@@ -823,6 +830,11 @@ class JarvisLive:
                 # sessions to keep privacy while a real call runs in background.
                 active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
                 active = is_communication_context(foreground_app, active_audio_apps)
+                # The executable is already read locally for call privacy. A
+                # stable category provides broad context, never window contents.
+                focus_change = self._focus_tracker.observe(foreground_app, time.monotonic())
+                if focus_change is not None:
+                    self._focus_context = focus_change
             except Exception as exc:
                 # A failed privacy probe is not evidence that no call is active.
                 # Close the mic gate immediately; the next successful poll may
@@ -2615,6 +2627,8 @@ class JarvisLive:
                             inspect_project_folder, selected_folder
                         )
                         project_context = format_project_context(snapshot)
+                        if snapshot:
+                            await asyncio.to_thread(remember_project_snapshot, snapshot)
                 prompt = self._proactive.build_prompt(
                     memory       = memory,
                     monitors     = monitors or None,
