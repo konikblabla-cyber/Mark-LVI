@@ -57,6 +57,7 @@ _HARNESS = Path(__file__).with_name("_smoke_harness.py")
 _SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
               "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build",
               ".idea", ".vscode", ".next", "target", ".jarvis_backup"}
+_SKIP_DIRS_CASEFOLD = {name.casefold() for name in _SKIP_DIRS}
 _TEST_TIMEOUT = 180
 
 
@@ -180,7 +181,7 @@ def dropped_data(rel: str, old: str, new: str) -> str:
 def _walk(folder: Path, limit: int = 20_000):
     n = 0
     for root, dirs, files in os.walk(folder):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS]
+        dirs[:] = [d for d in dirs if d.casefold() not in _SKIP_DIRS_CASEFOLD]
         for f in files:
             yield Path(root) / f
             n += 1

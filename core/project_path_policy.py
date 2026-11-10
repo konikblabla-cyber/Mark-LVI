@@ -91,6 +91,13 @@ def resolve_project_path_without_symlinks(project_dir: Path, relative_path: str)
     parts = normalized.split("/")
     if any(part in {"", ".", ".."} for part in parts):
         raise ValueError("Project path contains an unsafe component.")
+    excluded = {
+        ".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
+        "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build",
+        ".idea", ".vscode", ".next", "target",
+    }
+    if any(part.casefold() in excluded for part in parts):
+        raise ValueError("Project metadata, dependencies and build output are not editable.")
     windows_devices = {"CON", "PRN", "AUX", "NUL"}
     windows_devices.update(f"COM{i}" for i in range(1, 10))
     windows_devices.update(f"LPT{i}" for i in range(1, 10))

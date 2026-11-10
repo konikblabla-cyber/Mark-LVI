@@ -1316,6 +1316,7 @@ _SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "venv", ".venv", "env",
               "__pycache__", ".mypy_cache", ".pytest_cache", "dist", "build",
 
               ".idea", ".vscode", ".next", "target", ".jarvis_backup"}
+_SKIP_DIRS_CASEFOLD = {name.casefold() for name in _SKIP_DIRS}
 
 _BACKUP_DIR     = ".jarvis_backup"
 
@@ -1703,7 +1704,7 @@ def _scan(folder: Path) -> tuple[list[str], dict[str, str], dict[str, str]]:
 
         dirs[:] = sorted(
             d for d in dirs
-            if d not in _SKIP_DIRS and not (Path(root) / d).is_symlink()
+            if d.casefold() not in _SKIP_DIRS_CASEFOLD and not (Path(root) / d).is_symlink()
         )
 
         for name in sorted(files):

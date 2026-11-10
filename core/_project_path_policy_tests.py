@@ -144,6 +144,33 @@ class ProjectPathPolicyTests(unittest.TestCase):
                 atomic_write_project_text(root, "main.py", "generated", expect_missing=True)
             self.assertEqual(target.read_text(encoding="utf-8"), "user file")
 
+    def test_refuses_case_variants_of_dependency_and_metadata_dirs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            root.mkdir()
+            blocked = (
+                ".GIT/config",
+                ".Git/hooks/pre-commit",
+                "NODE_MODULES/pkg/index.js",
+                ".VENV/pyvenv.cfg",
+                "Target/debug/app",
+            )
+            for rel in blocked:
+                with self.subTest(path=rel):
+                    with self.assertRaises(ValueError):
+                        resolve_project_path_without_symlinks(root, rel)
+                    with self.assertRaises(ValueError):
+                        atomic_write_project_text(root, rel, "bad", expect_missing=True)
+
+    def test_backup_directory_remains_available_for_agent_undo(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "project"
+            root.mkdir()
+            backup = atomic_write_project_text(
+                root, ".jarvis_backup/restore/main.py", "original", expect_missing=True
+            )
+            self.assertEqual(backup.read_text(encoding="utf-8"), "original")
+
     def test_atomic_write_creates_nested_file(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "project"
