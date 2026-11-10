@@ -2,6 +2,7 @@
 import unittest
 
 from core.communication_context import (
+    communication_apps_from_sessions,
     is_communication_app,
     is_communication_context,
     normalize_process_name,
@@ -30,6 +31,35 @@ class CommunicationContextTests(unittest.TestCase):
         self.assertFalse(is_communication_app("notepad.exe"))
         self.assertFalse(is_communication_app("chrome.exe"))
         self.assertFalse(is_communication_app(""))
+
+    def test_only_active_audio_sessions_count_as_background_calls(self):
+        class Process:
+            def __init__(self, name):
+                self._name = name
+            def name(self):
+                return self._name
+
+        class Session:
+            def __init__(self, state, name):
+                self.State = state
+                self.Process = Process(name)
+
+        sessions = [
+            Session(1, "Discord.exe"),
+            Session(0, "Teams.exe"),
+            Session(1, "spotify.exe"),
+        ]
+        self.assertEqual(
+            communication_apps_from_sessions(sessions),
+            {"discord"},
+        )
+
+    def test_expired_and_processless_sessions_are_ignored(self):
+        class Session:
+            State = 2
+            Process = None
+
+        self.assertEqual(communication_apps_from_sessions([Session()]), set())
 
     def test_open_chat_app_alone_does_not_count_as_background_call(self):
         self.assertFalse(is_communication_context("opera.exe", set()))

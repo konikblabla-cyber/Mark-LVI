@@ -33,6 +33,25 @@ def is_communication_app(process_name: object) -> bool:
     return normalize_process_name(process_name) in COMMUNICATION_APP_NAMES
 
 
+def communication_apps_from_sessions(sessions) -> set[str]:
+    """Extract known communication clients from active WASAPI session objects."""
+    names = set()
+    for session in sessions or ():
+        try:
+            if int(session.State) != 1:  # AudioSessionStateActive
+                continue
+            process = session.Process
+            if process is None:
+                continue
+            name = normalize_process_name(process.name())
+            if name in COMMUNICATION_APP_NAMES:
+                names.add(name)
+        except Exception:
+            # An exited/protected process must not break the audio loop.
+            continue
+    return names
+
+
 def get_active_communication_apps() -> set[str] | None:
     """Return communication apps with active Windows audio sessions.
 
@@ -42,28 +61,26 @@ def get_active_communication_apps() -> set[str] | None:
     unavailable, allowing the caller to fall back to foreground-app detection.
     """
     try:
+        import comtypes
         from pycaw.pycaw import AudioUtilities
     except Exception:
         return None
 
+    initialized = False
     try:
-        names = set()
-        for session in AudioUtilities.GetAllSessions():
-            try:
-                if int(session.State) != 1:  # AudioSessionStateActive
-                    continue
-                process = session.Process
-                if process is None:
-                    continue
-                name = normalize_process_name(process.name())
-                if name in COMMUNICATION_APP_NAMES:
-                    names.add(name)
-            except Exception:
-                # An exited/protected process must not break the audio loop.
-                continue
-        return names
+        # asyncio.to_thread uses worker threads; initialize COM in that thread
+        # before asking WASAPI for its session enumerator.
+        comtypes.CoInitialize()
+        initialized = True
+        return communication_apps_from_sessions(AudioUtilities.GetAllSessions())
     except Exception:
         return None
+    finally:
+        if initialized:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
 
 
 def is_communication_context(
