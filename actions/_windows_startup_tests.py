@@ -54,6 +54,9 @@ class WindowsStartupTests(unittest.TestCase):
             self.assertIn("registered", windows_startup.run({"action": "status"}))
             self.assertIn("not registered", windows_startup.run({"action": "status"}))
 
+    def test_action_registers_its_handler(self):
+        self.assertTrue(callable(windows_startup.TOOL.get("handler")))
+
     def test_non_windows_is_explicitly_unsupported(self):
         with patch.object(windows_startup.platform, "system", return_value="Linux"):
             result = windows_startup.run({"action": "enable"})
