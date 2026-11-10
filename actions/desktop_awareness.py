@@ -67,4 +67,5 @@ TOOL = {
         "keystrokes or clipboard. Use when asked what the user currently has open or is doing."
     ),
     "parameters": {"type": "OBJECT", "properties": {}, "required": []},
+    "handler": run,
 }
