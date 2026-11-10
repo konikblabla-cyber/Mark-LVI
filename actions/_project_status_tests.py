@@ -38,6 +38,9 @@ class ProjectStatusTests(unittest.TestCase):
             file_path.write_text("x", encoding="utf-8")
             self.assertIsNone(project_status.inspect_selected_project(FakePlayer(file_path)))
 
+    def test_action_registers_its_handler(self):
+        self.assertTrue(callable(project_status.TOOL.get("handler")))
+
     def test_missing_project_is_reported_clearly(self):
         result = project_status.run({}, player=None)
         self.assertIn("No project folder is selected", result)
