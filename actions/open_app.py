@@ -37,6 +37,7 @@ WHY IT IS NOT A LIST OF APPLICATIONS
 import os
 import platform
 import shutil
+import shlex
 import subprocess
 import threading
 import time
@@ -158,6 +159,19 @@ _LINUX_TERMINALS = [
 ]
 
 
+def _linux_launcher_command(app_name: str) -> list[str] | None:
+    """Resolve a launcher command (including alias arguments) without a shell."""
+    try:
+        parts = shlex.split(str(app_name or ""))
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    executable = shutil.which(parts[0])
+    if not executable:
+        return None
+    return [executable, *parts[1:]]
+
 def _launch_linux(app_name: str) -> bool:
     # "terminal" means whichever one this distribution actually ships.
     if app_name in ("x-terminal-emulator", "gnome-terminal", "terminal"):
@@ -172,6 +186,18 @@ def _launch_linux(app_name: str) -> bool:
                 return True
             except Exception:
                 continue
+
+    # Cross-platform aliases may include arguments, e.g. "libreoffice --writer".
+    # Resolve the executable only and keep each argument separate; never use a shell.
+    command = _linux_launcher_command(app_name)
+    if command:
+        try:
+            subprocess.Popen(
+                command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            return True
+        except Exception:
+            pass
 
     binary = (
         shutil.which(app_name)
