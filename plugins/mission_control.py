@@ -122,18 +122,19 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
         return ("\n[MISSION_COMPLETE] All mission steps have verified outcomes. "
                 "Report the completed result to the user; do not invent extra work.")
     if step.get("status") == "running" and recovery:
+        identity = f"MISSION_ID={mission['id']} STEP_ID={step['id']}. "
         if _has_valid_persisted_tool_evidence(step):
-            return ("\n[MISSION_RECOVERY] The previous session has a persisted receipt from "
+            return ("\n[MISSION_RECOVERY] " + identity + "The previous session has a persisted receipt from "
                     "a tool that returned status=done verified=true. Do NOT repeat the action. Call "
                     "complete_step for this exact step; the application will accept it only "
                     "if the persisted receipt still matches the running mission step.")
         if step.get("ui_action"):
-            return ("\n[MISSION_RECOVERY] A UI action plan was persisted before the last "
+            return ("\n[MISSION_RECOVERY] " + identity + "A UI action plan was persisted before the last "
                     "session ended. The action may or may not have happened. Do NOT issue "
                     "or repeat it. First inspect the real state using read-only tools. "
                     "Only complete the step after a fresh tool result verifies the outcome; "
                     "otherwise block_step and stop.")
-        return ("\n[MISSION_RECOVERY] This step was already running before the current "
+        return ("\n[MISSION_RECOVERY] " + identity + "This step was already running before the current "
                 "execution context. Its action may already have happened. Do NOT repeat "
                 "side effects. Inspect with read-only tools and obtain a fresh verifiable "
                 "result; otherwise block_step and stop.")
