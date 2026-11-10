@@ -25,6 +25,19 @@ _PYAUTOGUI = installed("pyautogui")
 _PYPERCLIP = installed("pyperclip")
 
 
+def _safe_print(message: object) -> None:
+    """Write diagnostics without letting console codepages crash actions."""
+    try:
+        stream = sys.stdout
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        rendered = str(message).encode(encoding, errors="backslashreplace").decode(encoding)
+        stream.write(rendered + "\n")
+    except Exception:
+        # Logging must never break a desktop action.
+        pass
+
+
+
 def _configure_pyautogui(module) -> None:
     """Settings that used to sit beside the import, run once when it happens."""
     module.FAILSAFE = True
@@ -437,7 +450,7 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
                 f"{', '.join(tied[:4])} - which one should be closed?",
                 app=app_name, candidates=len(tied),
             )
-        print(f"[ComputerControl] close_app: '{app_name}' -> {target_name} "
+        _safe_print(f"[ComputerControl] close_app: '{app_name}' -> {target_name} "
               f"(also matched: {', '.join(n for n, _ in ranked[1:5])})")
 
     closed, still_open, reason = 0, 0, ""
@@ -475,7 +488,7 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
 def _screen_find(description: str) -> tuple[int, int] | None:
     api_key = _get_api_key()
     if not api_key:
-        print("[ComputerControl] ⚠️ No API key for screen_find")
+        _safe_print("[ComputerControl] ⚠️ No API key for screen_find")
         return None
 
     try:
@@ -513,7 +526,7 @@ def _screen_find(description: str) -> tuple[int, int] | None:
             return int(match.group(1)), int(match.group(2))
 
     except Exception as e:
-        print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
+        _safe_print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
 
     return None
 
@@ -555,6 +568,13 @@ def _input_window_guard() -> str:
             "computer_control",
             f"foreground safety check failed ({type(exc).__name__}); no input was sent",
         )
+
+
+def _run_confirmed_input(action):
+    """Recheck the foreground app when a delayed HUD confirmation is accepted."""
+    blocked = _input_window_guard()
+    return blocked if blocked else action()
+
 
 
 def computer_control(
@@ -620,9 +640,9 @@ def computer_control(
         # Terminal, not the HUD: the activity log is for the conversation and
         # for problems, not a receipt for every keystroke. See
         # core/outcome.is_problem().
-        print(f"[ComputerControl] {action}")
+        _safe_print(f"[ComputerControl] {action}")
 
-    print(f"[ComputerControl] action={action}")
+    _safe_print(f"[ComputerControl] action={action}")
 
     try:
 
@@ -667,7 +687,7 @@ def computer_control(
                     key="computer_control.dangerous_hotkey",
                     title="Confirm potentially disruptive keyboard shortcut",
                     detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
-                    run=lambda: _hotkey(*keys),
+                    run=lambda: _run_confirmed_input(lambda: _hotkey(*keys)),
                 )
             return _hotkey(*keys) if isinstance(keys, list) else outcome.failed(
                 "computer_control", "hotkey must be supplied as a plus-separated string"
@@ -680,7 +700,7 @@ def computer_control(
                     key="computer_control.delete_key",
                     title="Confirm Delete key",
                     detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
-                    run=lambda: _press(key),
+                    run=lambda: _run_confirmed_input(lambda: _press(key)),
                 )
             return _press(key)
 
@@ -733,7 +753,7 @@ def computer_control(
         if action == "random_data":
             dt     = params.get("type", "name")
             result = _random_data(dt)
-            print(f"[ComputerControl] 🎲 random {dt} → {result}")
+            _safe_print(f"[ComputerControl] 🎲 random {dt} → {result}")
             return result
 
         if action == "user_data":
@@ -742,13 +762,13 @@ def computer_control(
             value   = profile.get(field, "")
             if not value:
                 value = _random_data(field)
-                print(f"[ComputerControl] ⚠️ No '{field}' in memory, using random: {value}")
+                _safe_print(f"[ComputerControl] ⚠️ No '{field}' in memory, using random: {value}")
             return value
 
         return f"Unknown action: '{action}'"
 
     except Exception as e:
-        print(f"[ComputerControl] ❌ {action}: {e}")
+        _safe_print(f"[ComputerControl] ❌ {action}: {e}")
         return f"computer_control '{action}' failed: {e}"
 
 

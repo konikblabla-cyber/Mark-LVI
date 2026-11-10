@@ -101,6 +101,20 @@ class ComputerControlSafetyTests(unittest.TestCase):
             request["run"]()
             execute.assert_called_once_with("alt", "f4")
 
+    def test_confirmed_hotkey_rechecks_foreground_before_execution(self):
+        request = {}
+        blocked = "status=failed action=computer_control reason=foreground changed"
+        with patch.object(control, "_input_window_guard", side_effect=["", blocked]) as guard, \
+             patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_hotkey") as execute:
+            result = control.computer_control({"action": "hotkey", "keys": "alt+f4"})
+            self.assertIn("[CONFIRMATION_PENDING]", result)
+            confirmed_result = request["run"]()
+        self.assertEqual(confirmed_result, blocked)
+        self.assertEqual(guard.call_count, 2)
+        execute.assert_not_called()
+
     def test_input_refuses_to_type_into_jarvis_foreground_window(self):
         app = Path(sys.executable).name
         with patch.object(control, "_get_os", return_value="windows"), \
@@ -123,6 +137,21 @@ class ComputerControlSafetyTests(unittest.TestCase):
         self.assertIn("status=failed", result)
         self.assertIn("no input was sent", result)
         execute.assert_not_called()
+
+    def test_console_print_sanitizes_unencodable_unicode(self):
+        class Console:
+            encoding = "cp1252"
+
+            def __init__(self):
+                self.value = ""
+
+            def write(self, value):
+                self.value += value
+
+        console = Console()
+        with patch.object(control.sys, "stdout", console):
+            control._safe_print("direction ▶")
+        self.assertIn(r"\u25b6", console.value)
 
     def test_delete_key_waits_for_hud_confirmation(self):
         request = {}
