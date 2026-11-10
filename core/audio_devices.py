@@ -286,10 +286,10 @@ def _query() -> dict[str, list[str]]:
             """(index, name) for named, non-pseudo devices on one side that can
             be opened at the rate that side runs at."""
             chan = "max_input_channels" if kind == "input" else "max_output_channels"
-            found, seen = [], set()
+            found = []
             for idx, dev in enumerate(devices):
                 name = (dev.get("name") or "").strip()
-                if not name or _is_pseudo(name) or name in seen:
+                if not name or _is_pseudo(name):
                     continue
                 if dev.get(chan, 0) <= 0:
                     continue
@@ -299,7 +299,6 @@ def _query() -> dict[str, list[str]]:
                         continue
                 if not _usable(idx, kind):
                     continue
-                seen.add(name)
                 found.append((idx, name))
             return found
 
@@ -315,10 +314,17 @@ def _query() -> dict[str, list[str]]:
                     continue
                 # Test every selectable endpoint. A silent first endpoint must
                 # not cause the entire host API to be rejected.
-                working = [
-                    (idx, name) for idx, name in found
-                    if _transport_works(idx, kind, api_filter)
-                ]
+                working = []
+                working_names = set()
+                for idx, name in found:
+                    # Do not mark a name as seen until an endpoint proves it
+                    # transports audio. A silent duplicate must not hide a
+                    # working endpoint exposed under the same display name.
+                    if name in working_names:
+                        continue
+                    if _transport_works(idx, kind, api_filter):
+                        working.append((idx, name))
+                        working_names.add(name)
                 if not working:
                     continue
                 _chosen_api[kind] = api_filter

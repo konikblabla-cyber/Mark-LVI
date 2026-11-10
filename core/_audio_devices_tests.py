@@ -103,6 +103,32 @@ class AudioDeviceTests(unittest.TestCase):
         self.assertIsNone(audio_devices._chosen_api["output"])
 
 
+    def test_duplicate_name_does_not_hide_a_working_endpoint(self):
+        fake_sd = types.SimpleNamespace(
+            query_devices=lambda: [
+                {"name": "USB microphone", "hostapi": 0,
+                 "max_input_channels": 1, "max_output_channels": 0},
+                {"name": "USB microphone", "hostapi": 0,
+                 "max_input_channels": 1, "max_output_channels": 0},
+            ],
+            query_hostapis=lambda: [{"name": "Windows DirectSound"}],
+        )
+        with patch.dict(sys.modules, {"sounddevice": fake_sd}):
+            with patch("platform.system", return_value="Windows"):
+                with patch.object(audio_devices, "_PREFERRED_APIS",
+                                  {"Windows": ("directsound",)}):
+                    with patch.object(audio_devices, "_usable", return_value=True):
+                        with patch.object(audio_devices, "_transport_works",
+                                          side_effect=[False, True]):
+                            with patch.object(
+                                audio_devices, "_display_name",
+                                side_effect=lambda name, _devices: name,
+                            ):
+                                result = audio_devices._query()
+
+        self.assertEqual(result["input"], ["USB microphone"])
+
+
     def test_resolve_skips_a_silent_saved_endpoint(self):
         fake_sd = types.SimpleNamespace(
             query_devices=lambda: [
