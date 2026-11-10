@@ -83,6 +83,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
 | 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
 | 🧰 Windows Workspace Profiles | Save named app groups (work, study, gaming, etc.), list/delete them and launch a whole setup through the existing verified app launcher |
+| 🎛️ JARVIS Routines | Save one named routine that launches verified applications and runs selected, allowlisted Home Assistant actions; useful for work, study, gaming or cinema modes |
 | 🚀 Windows Auto-Start | Opt-in Task Scheduler entry starts JARVIS at the current user's sign-in with limited privileges; can be checked or disabled from voice commands |
 | 📋 Integrated Status Briefing | One local report combines active missions, pending reminders, monitored topics, saved workspaces and Windows health without changing anything |
 | 🧪 On-demand PC Diagnostics | Ask JARVIS for a read-only Windows health report with resource pressure, disk space, battery, uptime and top memory users; no automatic cleanup or process killing |
@@ -119,6 +120,7 @@ Python dependencies stay inside that project's local `.venv`; JavaScript and Typ
 Running or building code still requires an on-screen confirmation. A process is limited to 5 minutes and 1 MB of captured output; exceeding either limit stops it. The regular code helper writes atomically and supports Undo for files up to 1 MB, without undoing later edits made by the user.
 
 Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit entity map for `light.*`, `switch.*`, `fan.*` or `climate.*` under **Settings → Plugin Settings**. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint. Climate control changes the target temperature only; it does not change HVAC mode.
+Routines store only application names and Home Assistant aliases/actions. Activation uses the existing app launcher and the enabled smart-home plugin; every device action is checked against the current allowlist and read back from Home Assistant.
 
 Process Watch records only executable basenames and start/exit events in a local JSON file. Pending notices remain saved until delivered. It never records command lines, file contents or window text. Reminder cancellation uses the ID returned when a reminder is created or listed.
 
