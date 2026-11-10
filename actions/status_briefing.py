@@ -64,7 +64,7 @@ def build_status_briefing() -> str:
 
     try:
         from plugins.process_watch import list_watchers
-        sections.append("PROCESS WATCHES:\\n" + list_watchers()[:1200])
+        sections.append("PROCESS WATCHES:\n" + list_watchers()[:1200])
     except Exception as exc:
         sections.append(f"PROCESS WATCHES: unavailable ({type(exc).__name__}).")
 
