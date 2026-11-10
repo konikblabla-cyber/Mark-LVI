@@ -64,6 +64,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🗣️ Voice Interruption | Optional local barge-in — EchoGuard learns the room's speaker echo and stops JARVIS only after sustained human speech is detected; off by default |
 | 🧾 Conversation History | Optional local text transcript archive with retention controls, secret-pattern redaction, search and HUD-confirmed deletion; audio and screenshots are never saved |
 | 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
+| 🔁 Mission Recovery | After a restart, JARVIS finds the oldest interrupted authorised mission and resumes through read-only recovery; it never blindly repeats the in-flight action |
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
 | 🖱️ Verified UI Workflows | Run 2–8 exact clicks in one application, verify every visible result before continuing, stop on ambiguity and pause critical steps for HUD confirmation |
 | 🎯 Foreground-Aware Input | On Windows, read the active executable locally before sending mouse/keyboard input and verify the same target again before delayed clicks. macOS/Linux use their OS accessibility path without this Windows-only guard |
@@ -77,6 +78,7 @@ It's not just an assistant — it's an extension of your digital life.
 | ↩️ Undo | Take back what the assistant did — files it moved, renamed, created or wrote, and settings it changed |
 | ⚠️ Real Confirmation | Shutdown, restart and WiFi wait for a button **you** press — the model cannot confirm its own irreversible actions |
 | 🎧 Audio Device Picker | Choose the microphone and speakers by name, filtered to the short list your OS shows — and measured, so every entry actually works |
+| 🩺 Audio Self-Recovery | Detect a stopped speaker stream or a microphone callback stalled for 5 seconds; reconnect the voice session while preserving conversation context |
 | 🔗 Session Continuity | A dropped connection, a voice change or a device change no longer wipes the conversation |
 | 🧩 Plugin System | Drop a single `.py` file into `plugins/` — JARVIS learns a new skill on next launch |
 | 📄 Linux Office Aliases | Say Word, Excel or PowerPoint to open LibreOffice Writer, Calc or Impress when LibreOffice is installed; process verification recognises the actual runtime executable |
