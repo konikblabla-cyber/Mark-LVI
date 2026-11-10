@@ -6,6 +6,7 @@ for local microphone/privacy gating and is never sent to a model.
 from __future__ import annotations
 
 import ntpath
+import os
 
 
 # Windows executable basenames commonly used by desktop chat and calling apps.
