@@ -76,6 +76,11 @@ class ReminderManagementTests(unittest.TestCase):
         self.assertTrue(self.script.exists())
         self.assertIn(self.reminder_id, reminder._read_registry())
 
+    def test_reminder_ids_accept_legacy_and_collision_safe_formats(self):
+        self.assertTrue(reminder._REMINDER_ID.fullmatch("JARVISReminder_20261224_180000"))
+        self.assertTrue(reminder._REMINDER_ID.fullmatch("JARVISReminder_20261224_180000_a1b2c3"))
+        self.assertFalse(reminder._REMINDER_ID.fullmatch("JARVISReminder_20261224_180000_../../"))
+
     def test_cancel_action_is_exposed_by_the_tool(self):
         self.assertIn("cancel", reminder.TOOL["parameters"]["properties"]["action"]["description"])
         self.assertIn("reminder_id", reminder.TOOL["parameters"]["properties"])
