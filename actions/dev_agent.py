@@ -208,6 +208,12 @@ def _classify_error(output: str) -> str:
 
 
 
+    if any(marker in low for marker in ("timed out", "output truncated", "output limit")):
+
+        return "execution_limit"
+
+
+
     if any(x in low for x in ("no module named", "modulenotfounderror", "importerror")):
 
         return "dependency_error"
@@ -1130,6 +1136,16 @@ def _build_project(
         last_output = _run_project(run_command, project_dir, timeout)
 
         log(f"Output preview: {last_output[:150]}")
+
+
+
+        if _classify_error(last_output) == "execution_limit":
+
+            msg = f"Project test stopped by a safety limit: {last_output[:240]}"
+
+            if speak: speak(msg)
+
+            return f"{msg}\n\nProject files remain saved at: {project_dir}"
 
 
 

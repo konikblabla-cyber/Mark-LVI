@@ -18,9 +18,13 @@ class DevAgentLaunchSafetyTests(unittest.TestCase):
         self.assertTrue(_has_error(output, "python main.py"))
         self.assertEqual(_classify_error(output), "runtime_error")
 
-    def test_output_limit_is_not_reported_as_success(self):
+    def test_output_limit_is_not_reported_as_success_or_repaired_as_code(self):
         output = "Output truncated at the 1 MB safety limit; process stopped."
         self.assertTrue(_has_error(output, "python main.py"))
+        self.assertEqual(_classify_error(output), "execution_limit")
+
+    def test_timeout_is_classified_as_execution_limit(self):
+        self.assertEqual(_classify_error("Timed out after 30s."), "execution_limit")
 
     def test_empty_successful_output_remains_valid(self):
         self.assertFalse(_has_error("", "python main.py"))
