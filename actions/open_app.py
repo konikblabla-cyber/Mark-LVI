@@ -249,6 +249,17 @@ _LAUNCHERS = {
 }
 
 
+def _verification_name(spoken: str, launcher_name: str) -> str:
+    """Use the resolved Linux executable name for process evidence of command aliases."""
+    if _SYSTEM == "Linux":
+        try:
+            parts = shlex.split(str(launcher_name or ""))
+        except ValueError:
+            parts = []
+        if len(parts) > 1 and shutil.which(parts[0]):
+            return parts[0]
+    return spoken
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  HUD helpers — no-ops without a player, exactly as the whatsapp plugins do
 # ─────────────────────────────────────────────────────────────────────────────
@@ -272,7 +283,7 @@ def _say(player, instruction: str) -> None:
 #  Launch + verify, off the conversation's thread
 # ─────────────────────────────────────────────────────────────────────────────
 def _launch_and_verify(player, spoken: str, launcher_name: str,
-                       before: set[int]) -> None:
+                       before: set[int], verification_name: str | None = None) -> None:
     """The part that takes seconds. Speaks ONLY when something needs saying.
 
     Silence means it worked: the window is on the user's screen and a second
@@ -286,7 +297,7 @@ def _launch_and_verify(player, spoken: str, launcher_name: str,
             requested = launcher(spoken)
 
         appeared = appidentity.wait_for_launch(
-            spoken, before, timeout=_LAUNCH_TIMEOUT
+            verification_name or spoken, before, timeout=_LAUNCH_TIMEOUT
         )
         if appeared is not None:
             _log(player, f"JARVIS: {appeared.label} is open.")
@@ -337,7 +348,14 @@ def open_app(parameters=None, response=None, player=None,
     # application the assistant lives inside reports `started` and goes off to
     # launch a second copy of it — seen exactly that way, against a packaged
     # build whose siblings the close guard had just learnt to protect.
+    launcher_name = appidentity.launcher_name(spoken)
+    verification_name = _verification_name(spoken, launcher_name)
     existing = appidentity.running(spoken, include_self=True)
+    # On Linux, Office aliases launch a shared LibreOffice process (soffice).
+    # Check the executable identity too, or we may start a second instance and
+    # still fail to recognise the already-running Writer/Calc/Impress window.
+    if not existing and verification_name != spoken:
+        existing = appidentity.running(verification_name, include_self=True)
     if existing:
         best = existing[0]
         # ALREADY RUNNING IS NOT ALREADY DONE.
@@ -377,13 +395,12 @@ def open_app(parameters=None, response=None, player=None,
               f"raised — launching it instead, which is what brings back an "
               f"app that is only in the tray.")
 
-    launcher_name = appidentity.launcher_name(spoken)
     before = appidentity.snapshot()
     _log(player, f"JARVIS: Opening {spoken}…")
 
     threading.Thread(
         target=_launch_and_verify,
-        args=(player, spoken, launcher_name, before),
+        args=(player, spoken, launcher_name, before, verification_name),
         daemon=True, name=f"open-app-{spoken[:20]}",
     ).start()
 
