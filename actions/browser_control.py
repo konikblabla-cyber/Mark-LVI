@@ -119,6 +119,8 @@ async def _locator_is_high_impact(locator, target: object = "") -> bool:
             const form = el.form || (el.closest ? el.closest('form') : null);
             const tag = String(el.tagName || '').toLowerCase();
             const type = String(el.getAttribute('type') || '').toLowerCase();
+            const formAction = form ? (form.getAttribute('action') || '') : '';
+            const formMethod = form ? (form.getAttribute('method') || 'get').toLowerCase() : '';
             const submit = tag === 'input'
                 ? ['submit', 'image'].includes(type)
                 : tag === 'button' && form && (!type || type === 'submit');
@@ -129,11 +131,17 @@ async def _locator_is_high_impact(locator, target: object = "") -> bool:
                 node.innerText, node.getAttribute('aria-label'),
                 node.getAttribute('title'), node.getAttribute('name')
             ].filter(Boolean).join(' ')).join(' ');
+            const searchLike = !!form && (
+                !!form.querySelector('input[type="search"]')
+                || /search|query|find|szukaj|wyszukaj/i.test(labels)
+                || /search|query|find/i.test(formAction)
+            );
+            const highImpactSubmit = submit && !searchLike && (
+                formMethod !== 'get' || /checkout|order|purchase|payment|subscribe|delete/i.test(formAction)
+            );
             return [
-                tag, type, submit ? 'submit' : '',
-                form ? (form.getAttribute('action') || '') : '',
-                form ? (form.getAttribute('method') || '') : '',
-                labels
+                tag, type, highImpactSubmit ? 'submit' : '',
+                formAction, formMethod, labels
             ].join(' ');
         }""")
         if metadata:
