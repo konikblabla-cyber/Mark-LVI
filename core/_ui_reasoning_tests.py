@@ -199,5 +199,45 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["steps"][0]["risk"], "high")
 
 
+
+    def test_action_wrapper_replans_from_fresh_snapshot_and_actual_prior_result(self):
+        snapshot = {
+            "handle": 123,
+            "process_id": 456,
+            "records": [{"role": "TabItem", "name": "Privacy", "visible": True, "enabled": True}],
+            "clickables": [],
+        }
+        previous = {
+            "status": "failed",
+            "step": {
+                "tool": "select_tab_item",
+                "parameters": {"tab_label": "General"},
+            },
+        }
+        planned = {"status": "planned", "execution": "not_started", "steps": []}
+        with patch.object(ui_reasoning_action.ui, "_snapshot", return_value=snapshot) as inspect_ui, \
+             patch.object(ui_reasoning_action, "_replan_ui_task", return_value=planned) as replan:
+            result = json.loads(ui_reasoning_action.plan_current_ui_task({
+                "goal": "Open Privacy",
+                "previous_result": previous,
+            }))
+        inspect_ui.assert_called_once_with()
+        replan.assert_called_once_with("Open Privacy", snapshot, previous)
+        self.assertEqual(result, planned)
+
+    def test_action_wrapper_rejects_unverified_prior_outcome_without_retrying(self):
+        snapshot = {
+            "records": [{"role": "TabItem", "name": "Privacy", "visible": True, "enabled": True}],
+            "clickables": [],
+        }
+        with patch.object(ui_reasoning_action.ui, "_snapshot", return_value=snapshot):
+            result = json.loads(ui_reasoning_action.plan_current_ui_task({
+                "goal": "Open Privacy",
+                "previous_result": {"status": "unverified"},
+            }))
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "previous_action_unverified")
+        self.assertEqual(result["steps"], [])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
