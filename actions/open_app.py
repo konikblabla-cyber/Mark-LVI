@@ -138,16 +138,24 @@ def _windows_executable_path(app_name: str):
     candidates = []
     if key in {"opera", "operabrowser"}:
         candidates.extend([
+            os.path.join(local, "Programs", "Opera", "launcher.exe"),
             os.path.join(local, "Programs", "Opera", "opera.exe"),
+            os.path.join(roaming, "Opera Software", "Opera Stable", "launcher.exe"),
             os.path.join(roaming, "Opera Software", "Opera Stable", "opera.exe"),
+            os.path.join(pf, "Opera", "launcher.exe"),
             os.path.join(pf, "Opera", "opera.exe"),
+            os.path.join(pf86, "Opera", "launcher.exe"),
             os.path.join(pf86, "Opera", "opera.exe"),
         ])
     elif key == "operagx":
         candidates.extend([
+            os.path.join(local, "Programs", "Opera GX", "launcher.exe"),
             os.path.join(local, "Programs", "Opera GX", "opera.exe"),
+            os.path.join(roaming, "Opera Software", "Opera GX Stable", "launcher.exe"),
             os.path.join(roaming, "Opera Software", "Opera GX Stable", "opera.exe"),
+            os.path.join(pf, "Opera GX", "launcher.exe"),
             os.path.join(pf, "Opera GX", "opera.exe"),
+            os.path.join(pf86, "Opera GX", "launcher.exe"),
             os.path.join(pf86, "Opera GX", "opera.exe"),
         ])
     elif key in {"chrome", "googlechrome"}:
