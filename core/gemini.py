@@ -640,9 +640,14 @@ def _guard_provider_fallback(provider_id: str, contents) -> int:
     from core import model_router
 
     settings = model_router._settings()
-    # _assert_zero_cost_provider knows about the separately opted-in,
-    # coding-only Groq exception. All other cloud providers still require the
-    # explicit $0 acknowledgement.
+    # A provider must not bypass the $0 acknowledgement just because it is
+    # configured as a generic sidecar. The sole exception is the exact Groq
+    # endpoint after the owner separately opts in and selects it for CODING.
+    if (not settings.get("zero_cost_confirmed")
+            and not model_router._is_groq_provider(provider_id)):
+        raise model_router.RouterError(
+            "provider fallback blocked: verify the $0 plan or enable capped Groq for CODING"
+        )
     model_router._assert_zero_cost_provider(provider_id)
     return model_router._reserve(contents, settings)
 
