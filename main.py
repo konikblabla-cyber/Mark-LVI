@@ -59,12 +59,11 @@ from memory.memory_manager import (
 # The file-backed tools (open_app, web_search, browser_control, …) are no longer
 # imported or declared here — they self-describe via a TOOL dict in their own
 # actions/*.py file and are auto-discovered by core.action_loader at startup.
-# Only tools that are tied to live-session state stay inline in this file
-# (screen_process, close_camera, save_memory, manage_monitor, shutdown_jarvis,
-# system_status).
+# Only tools tied to live-session state stay inline here. MARK has no webcam
+# capture or camera-stream capability; visual inspection is screen-only.
 from core import outcome
 from core.action_loader import strip_meta
-from actions.screen_processor  import _capture_camera, _capture_screen
+from actions.screen_processor import _capture_screen
 from actions.system_monitor    import SystemMonitor, get_system_status
 from actions.proactive         import ProactiveEngine, can_deliver_proactive
 from actions.background_monitor import (
@@ -393,8 +392,8 @@ def _clean_transcript(text: str) -> str:
 TOOL_DECLARATIONS = [
     # ── Inline tools ─────────────────────────────────────────────────────────
     # These stay here (rather than in an actions/*.py TOOL dict) because their
-    # handling is woven into live-session state — vision capture/injection,
-    # camera stream, memory writes, the monitor engine, and shutdown. All other
+    # handling is woven into live-session state — one-shot screen capture/injection,
+    # memory writes, the monitor engine, and shutdown. All other
     # tools live in their own action file and are auto-discovered by
     # core.action_loader (see JarvisLive.__init__).
     {
@@ -412,30 +411,19 @@ TOOL_DECLARATIONS = [
     {
         "name": "screen_process",
         "description": (
-            "Captures the screen or webcam image and lets you analyze it. "
-            "MUST be called when user asks what is on screen, what you see, "
-            "look at camera, analyze my screen, etc. "
-            "You have NO visual ability without this tool. "
-            "After the image is captured it is sent directly to you — describe what you see and answer the user's question. "
-            "When using camera: the live view stays open until user says close it or calls close_camera."
+            "Capture one screenshot of the computer display for visual inspection. "
+            "Use only when the user explicitly asks what is on screen or requests visual "
+            "help with an application. This tool never accesses a webcam or any camera. "
+            "The screenshot is sent to the configured model for this one request; "
+            "never capture repeatedly or in the background."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "angle": {"type": "STRING", "description": "'screen' to capture display, 'camera' for webcam. Default: 'screen'"},
-                "text":  {"type": "STRING", "description": "The question or instruction about the captured image"}
+                "text": {"type": "STRING", "description": "Question or instruction about the captured screen"}
             },
             "required": ["text"]
         }
-    },
-    {
-        "name": "close_camera",
-        "description": (
-            "Closes the live camera view shown on screen. "
-            "Call when the user says (in ANY language): close camera, stop camera, "
-            "turn off camera, that's creepy, etc."
-        ),
-        "parameters": {"type": "OBJECT", "properties": {}, "required": []}
     },
     {
         "name": "manage_monitor",
@@ -645,8 +633,6 @@ class JarvisLive:
         self._in_call_addressing_enabled = get_in_call_addressing_enabled()
         self._proactive_audio_enabled = get_proactive_audio_enabled()
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
-        self._vision_cam_active    = False   # True if camera was opened for vision → auto-close after response
-        self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
@@ -1486,7 +1472,7 @@ class JarvisLive:
             _caps = self._engine_caps
             _blocked = set()
             if not _caps.get("vision"):
-                _blocked |= {"screen_process", "close_camera"}
+                _blocked |= {"screen_process"}
             if not _caps.get("tools"):
                 _blocked = {(d.get("name") if isinstance(d, dict)
                              else getattr(d, "name", "")) for d in _all_decls}
@@ -1679,31 +1665,17 @@ class JarvisLive:
             elif name == "screen_process":
                 import time as _t_mod
                 _now = _t_mod.monotonic()
-                _cooldown = 4.0  # seconds — covers echo window after speaking ends
+                _cooldown = 4.0
                 if self._vision_busy or (_now - self._vision_last_time) < _cooldown:
                     _wait = max(0, _cooldown - (_now - self._vision_last_time))
                     print(f"[Vision] ⏳ Cooldown active ({_wait:.1f}s remaining) — ignoring duplicate call")
                     result = "Vision is still processing the previous request. I will not call this again."
                 else:
-                    self._vision_busy      = True
+                    self._vision_busy = True
                     self._vision_last_time = _now
-                    angle     = args.get("angle", "screen").lower()
                     user_text = args.get("text", "What do you see?")
-                    if angle == "camera":
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_camera)
-                        self.ui.start_camera_stream()
-                        self._vision_cam_active = True
-                        print(f"[Vision] 📷 Camera: {len(img_b):,} bytes")
-                        _stall = "camera"
-                    else:
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
-                        print(f"[Vision] 🖥️  Screen: {len(img_b):,} bytes")
-                        _stall = "screen"
-                    # With task routing enabled, delegate the frame to Gemma
-                    # and return its grounded description as the tool result.
-                    # The live conversation remains on its current engine; only
-                    # this one-shot vision task is delegated. When routing is
-                    # off, preserve MARK's original same-session image injection.
+                    img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
+                    print(f"[Vision] 🖥️ Screen: {len(img_b):,} bytes")
                     try:
                         from core import model_router
                         _route_vision = model_router.is_enabled()
@@ -1712,15 +1684,11 @@ class JarvisLive:
                         result = f"Vision routing could not be checked safely: {type(_route_error).__name__}."
                     if _route_vision is None:
                         self._vision_busy = False
-                        if angle == "camera":
-                            self._vision_cam_active = False
-                            self.ui.stop_camera_stream()
                     elif _route_vision:
                         try:
                             from core import gemini
                             from google.genai import types as gtypes
-                            _image_part = gtypes.Part.from_bytes(
-                                data=img_b, mime_type=mime_t)
+                            _image_part = gtypes.Part.from_bytes(data=img_b, mime_type=mime_t)
                             _vision_reply = await loop.run_in_executor(
                                 None,
                                 lambda: gemini.call(
@@ -1739,26 +1707,13 @@ class JarvisLive:
                                       "No fallback model was tried.")
                         finally:
                             self._vision_busy = False
-                            if angle == "camera":
-                                self._vision_cam_active = False
-                                self.ui.stop_camera_stream()
                     else:
-                        self._pending_vision = (img_b, mime_t, user_text, angle)
-                        # The image is attached to this same exchange, so there is
-                        # nothing to stall for and nothing to announce. Asking for an
-                        # acknowledgement here is what produced two spoken answers —
-                        # the model filled that turn by answering the question from
-                        # imagination, then answered it again once it could see.
+                        self._pending_vision = (img_b, mime_t, user_text, "screen")
                         result = (
-                            f"[VISION_ACTIVE] {_stall.capitalize()} captured and attached to this "
-                            f"same exchange. Do not acknowledge and do not answer yet — the image "
-                            f"is arriving with this result. Reply once, from what you actually see "
-                            f"in it."
+                            "[VISION_ACTIVE] Screen captured and attached to this same exchange. "
+                            "Do not acknowledge or answer before the image arrives. Reply once, "
+                            "grounded only in the captured display."
                         )
-
-            elif name == "close_camera":
-                self.ui.stop_camera_stream()
-                result = "Camera closed."
 
             elif name == "system_status":
                 r = await loop.run_in_executor(None, get_system_status)
@@ -2134,8 +2089,7 @@ class JarvisLive:
         # the user's own sentence, and a screenshot of this app — which has a
         # face in the middle of it — got read as a photo of the user. What the
         # label *means* is explained once, in the generated [SELF] block.
-        src = ("[IMAGE SOURCE: WEBCAM]" if angle == "camera"
-               else "[IMAGE SOURCE: SCREEN CAPTURE]")
+        src = "[IMAGE SOURCE: SCREEN CAPTURE]"
         await self.session.send_client_content(
             turns={"role": "user", "parts": [
                 {"inline_data": {"mime_type": mime_t, "data": b64}},
@@ -2144,13 +2098,7 @@ class JarvisLive:
             turn_complete=True,
         )
 
-        if self._vision_cam_active:
-            # Camera: stay busy until JARVIS has finished speaking the answer,
-            # then close the preview.
-            self._vision_cam_active    = False
-            self._vision_close_pending = True
-        else:
-            self._vision_busy = False
+        self._vision_busy = False
         return True
 
     async def _receive_audio(self):
@@ -2341,15 +2289,6 @@ class JarvisLive:
                                         "for the next request."
                                     )
                             out_buf = []
-
-                            if self._vision_close_pending:
-                                # This turn_complete IS the vision answer — close camera + release busy flag
-                                self._vision_close_pending = False
-                                self._vision_busy = False
-                                async def _cam_close():
-                                    await asyncio.sleep(2.0)
-                                    self.ui.stop_camera_stream()
-                                asyncio.create_task(_cam_close())
 
                     if response.tool_call:
                         fn_responses = []
@@ -3179,8 +3118,6 @@ class JarvisLive:
 
                     # Reset transient state that must not carry over from a previous session
                     self._pending_vision       = None
-                    self._vision_cam_active    = False
-                    self._vision_close_pending = False
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
