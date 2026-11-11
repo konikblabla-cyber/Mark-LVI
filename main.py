@@ -3344,6 +3344,7 @@ class JarvisLive:
                             "SYS: In-call ADDRESS-AWARE consent was disabled because this Gemini "
                             "endpoint rejected Proactive Audio. PC microphone audio stays local in calls."
                         )
+                        self.ui.refresh_in_call_addressing_btn()
                     self.ui.write_log(
                         "SYS: Proactive Audio unavailable — address-aware filtering is off. "
                         "Use LOCAL PRIVACY mode or Push-to-Talk to avoid background speech."
