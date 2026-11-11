@@ -177,7 +177,8 @@ class RouterSafetyTests(unittest.TestCase):
 
     def test_verified_free_zai_model_is_allowed(self):
         config = {"model": "glm-4.7-flash", "base_url": "https://api.z.ai/api/paas/v4"}
-        with patch("memory.config_manager.get_provider_config", return_value=config), \
+        with patch.object(router, "_settings", return_value={"zero_cost_confirmed": True}), \
+             patch("memory.config_manager.get_provider_config", return_value=config), \
              patch("providers.registry.catalog_entry", return_value={"id": "zai", "local": False}):
             router._assert_zero_cost_provider("openai_compat@zai")
 
@@ -245,11 +246,11 @@ class RouterSafetyTests(unittest.TestCase):
 
     def test_groq_chat_body_has_a_hard_output_token_cap(self):
         from providers.llm_openai import OpenAICompatLLM
-        llm = OpenAICompatLLM({
-            "base_url": "https://api.groq.com/openai/v1",
-            "model": "openai/gpt-oss-120b",
-            "api_key": "test-key",
-        })
+        # Avoid importing optional httpx: _body only needs these four fields.
+        llm = object.__new__(OpenAICompatLLM)
+        llm.base = "https://api.groq.com/openai/v1"
+        llm.model = "openai/gpt-oss-120b"
+        llm.caps = {"tools": False}
         body = llm._body([{"role": "user", "content": "hello"}], None, False, None)
         self.assertEqual(body.get("max_completion_tokens"), 512)
 
