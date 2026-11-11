@@ -586,6 +586,8 @@ def _screen_click_verified_execute(
     description: str,
     expected_result: str,
     target_app: str,
+    expected_window_handle: int | None = None,
+    expected_process_id: int | None = None,
 ) -> str:
     """Use visual grounding for a control, then verify the exact result in that app."""
     description = " ".join(str(description or "").split())
@@ -599,6 +601,22 @@ def _screen_click_verified_execute(
         return outcome.failed("computer_control", "verified visual clicking currently requires Windows UI Automation")
     if not target or len(target) > 100:
         return outcome.failed("computer_control", "target_app must be the exact foreground executable name")
+    if (expected_window_handle is None) != (expected_process_id is None):
+        return outcome.failed(
+            "computer_control", "window handle and process ID must be supplied together",
+        )
+    if expected_window_handle is not None:
+        try:
+            expected_window_handle = int(expected_window_handle)
+            expected_process_id = int(expected_process_id)
+        except (TypeError, ValueError, OverflowError):
+            return outcome.failed(
+                "computer_control", "the planned target window identity is invalid",
+            )
+        if expected_window_handle <= 0 or expected_process_id <= 0:
+            return outcome.failed(
+                "computer_control", "the planned target window identity is invalid",
+            )
 
     blocked = _input_window_guard(target)
     if blocked:
@@ -621,6 +639,14 @@ def _screen_click_verified_execute(
     process_id = before.get("process_id")
     if not handle or not process_id:
         return outcome.failed("computer_control", "the target window has no stable identity; no click was sent")
+    if expected_window_handle is not None and (
+        int(handle) != expected_window_handle
+        or int(process_id) != expected_process_id
+    ):
+        return outcome.failed(
+            "computer_control",
+            "the active window is not the exact window selected by the mission planner; no click was sent",
+        )
     bounds = before.get("bounds")
     if not isinstance(bounds, (tuple, list)) or len(bounds) != 4:
         return outcome.failed(
@@ -971,6 +997,8 @@ def computer_control(
             desc = str(params.get("description") or "").strip()
             expected = str(params.get("expected_result") or "").strip()
             target = str(target_app or "").strip()
+            window_handle = params.get("target_window_handle")
+            process_id = params.get("target_process_id")
             if requires_ui_confirmation(
                 " ".join((desc, expected)),
                 user_request=scope_request(session_memory),
@@ -985,9 +1013,13 @@ def computer_control(
                         "MARK will locate the target from a screen capture, click once, "
                         "and verify the exact result in the same application."
                     )[:1600],
-                    run=lambda: _screen_click_verified_execute(desc, expected, target),
+                    run=lambda: _screen_click_verified_execute(
+                        desc, expected, target, window_handle, process_id,
+                    ),
                 )
-            return _screen_click_verified_execute(desc, expected, target)
+            return _screen_click_verified_execute(
+                desc, expected, target, window_handle, process_id,
+            )
 
         if action == "wait":
             secs = float(params.get("seconds", 1.0))
@@ -1135,6 +1167,14 @@ TOOL = {
             "expected_result": {
                 "type": "STRING",
                 "description": "For screen_click_verified: exact accessible label that must appear in the target app before success is reported."
+            },
+            "target_window_handle": {
+                "type": "INTEGER",
+                "description": "Internal exact HWND binding supplied by the Mission Control planner; do not invent it."
+            },
+            "target_process_id": {
+                "type": "INTEGER",
+                "description": "Internal process ID bound to target_window_handle by the Mission Control planner; do not invent it."
             },
             "type": {
                 "type": "STRING",
