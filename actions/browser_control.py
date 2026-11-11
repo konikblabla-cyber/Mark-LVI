@@ -1640,10 +1640,6 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
     if steps is None:
         return outcome.failed("browser_control", error)
 
-    _browser_sequence_progress(
-        player, f"Browser workflow started: {len(steps)} verified step(s)."
-    )
-
     pending = confirm.pending_title()
     if pending:
         return outcome.ask(
@@ -1652,6 +1648,9 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
             pending_title=pending,
         )
 
+    _browser_sequence_progress(
+        player, f"Browser workflow started: {len(steps)} verified step(s)."
+    )
     try:
         session = _registry.get(browser_name)
     except Exception as exc:
