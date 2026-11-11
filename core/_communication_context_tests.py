@@ -49,6 +49,30 @@ class CommunicationContextTests(unittest.TestCase):
         self.assertFalse(is_communication_app("chrome.exe"))
         self.assertFalse(is_communication_app(""))
 
+    def test_browser_is_only_a_protected_app_when_microphone_capture_is_active(self):
+        from core.communication_context import BROWSER_CAPTURE_APP_NAMES
+        class Process:
+            def __init__(self, name):
+                self._name = name
+            def name(self):
+                return self._name
+        class Session:
+            def __init__(self, state, name):
+                self.State = state
+                self.Process = Process(name)
+
+        browser_audio = [Session(1, "chrome.exe")]
+        self.assertEqual(communication_apps_from_sessions(browser_audio), set())
+        self.assertEqual(
+            communication_apps_from_sessions(
+                browser_audio, include_browser_capture=True
+            ),
+            {"chrome"},
+        )
+        self.assertIn("opera", BROWSER_CAPTURE_APP_NAMES)
+        self.assertFalse(is_communication_app("chrome.exe"))
+        self.assertTrue(is_communication_context("game.exe", {"chrome"}))
+
     def test_only_active_audio_sessions_count_as_background_calls(self):
         class Process:
             def __init__(self, name):
@@ -95,6 +119,7 @@ class CommunicationContextTests(unittest.TestCase):
         render_session = types.SimpleNamespace(State=1, Process=render_process)
 
         capture_process = types.SimpleNamespace(name=lambda: "Teams.exe")
+        browser_capture_process = types.SimpleNamespace(name=lambda: "chrome.exe")
         class CaptureControl:
             State = 1
             Process = capture_process
@@ -103,12 +128,18 @@ class CommunicationContextTests(unittest.TestCase):
                 return self
 
         control = CaptureControl()
+        class BrowserCaptureControl:
+            State = 1
+            Process = browser_capture_process
+            def QueryInterface(self, interface):
+                return self
+        browser_control = BrowserCaptureControl()
         class SessionEnumerator:
             def GetCount(self):
-                return 1
+                return 2
             def GetSession(self, index):
                 self.assert_index = index
-                return control
+                return (control, browser_control)[index]
 
         manager = types.SimpleNamespace(
             GetSessionEnumerator=lambda: SessionEnumerator()
@@ -154,7 +185,7 @@ class CommunicationContextTests(unittest.TestCase):
         }):
             result = get_active_communication_apps()
 
-        self.assertEqual(result, {"discord", "teams"})
+        self.assertEqual(result, {"discord", "teams", "chrome"})
         audio.GetAllDevices.assert_called_once_with(
             data_flow=1, device_state=1
         )
