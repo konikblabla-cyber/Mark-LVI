@@ -158,7 +158,8 @@ def _normalise_key_combo(value: object) -> tuple[str | None, str]:
     if len(parts) > 1:
         if any(part not in modifiers for part in parts[:-1]):
             return None, "only Ctrl, Alt and Shift modifiers are supported"
-        if len(set(parts[:-1])) != len(parts[:-1]):
+        canonical_modifiers = ["ctrl" if part == "control" else part for part in parts[:-1]]
+        if len(set(canonical_modifiers)) != len(canonical_modifiers):
             return None, "a modifier cannot be repeated"
     key = parts[-1]
     if key in modifiers or not (
@@ -648,15 +649,11 @@ TOOL = {
                         },
                         "expected_result": {
                             "type": "STRING",
-                            "description": "For click: exact accessible name of a distinctive UI element that should newly appear after the click.",
+                            "description": "For click: exact accessible name of a distinctive UI element that should newly appear. For press_keys: exact distinctive accessible text that must appear after the key is sent.",
                         },
                         "keys": {
                             "type": "STRING",
                             "description": "For press_keys: one key such as Tab/Enter or one Ctrl/Alt/Shift chord such as Ctrl+S; no arbitrary text.",
-                        },
-                        "expected_result": {
-                            "type": "STRING",
-                            "description": "For press_keys: exact distinctive accessible text that must appear after the key is sent.",
                         },
                         "field_label": {
                             "type": "STRING",
