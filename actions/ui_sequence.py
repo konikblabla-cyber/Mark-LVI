@@ -93,6 +93,43 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
+        if action == "set_checkbox_state":
+            allowed = {"action", "checkbox_label", "checked"}
+            label, desired = raw.get("checkbox_label"), raw.get("checked")
+            if set(raw) != allowed:
+                return None, f"checkbox step {index} must contain only action, checkbox_label and checked"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong checkbox_label"
+            if ui._is_sensitive_input_label(label) or not isinstance(desired, bool):
+                return None, f"step {index} has an unsupported checkbox label or non-boolean checked state"
+            validated.append({"action": action, "checkbox_label": " ".join(label.split()), "checked": desired})
+            continue
+
+        if action == "select_radio_option":
+            allowed = {"action", "radio_label"}
+            label = raw.get("radio_label")
+            if set(raw) != allowed:
+                return None, f"radio step {index} must contain only action and radio_label"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong radio_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a sensitive radio option"
+            validated.append({"action": action, "radio_label": " ".join(label.split())})
+            continue
+
+        if action == "select_dropdown_option":
+            allowed = {"action", "combo_label", "option_label"}
+            combo, option = raw.get("combo_label"), raw.get("option_label")
+            if set(raw) != allowed:
+                return None, f"dropdown step {index} must contain only action, combo_label and option_label"
+            if (not isinstance(combo, str) or not combo.strip() or len(combo.strip()) > 120
+                    or not isinstance(option, str) or not option.strip() or len(option.strip()) > 120):
+                return None, f"step {index} needs exact combo_label and option_label values"
+            if ui._is_sensitive_input_label(combo) or ui._is_sensitive_input_label(option):
+                return None, f"step {index} targets a sensitive dropdown field or option"
+            validated.append({"action": action, "combo_label": " ".join(combo.split()), "option_label": " ".join(option.split())})
+            continue
+
         if action == "press_keys":
             allowed = {"action", "keys", "expected_result"}
             if set(raw) != allowed:
@@ -265,6 +302,33 @@ def _prepare_step(step: dict, snapshot: dict,
     }, ""
 
 
+def _run_pattern_step(action: str, worker, args: tuple,
+                       success_statuses: set[str]) -> str:
+    """Run one pinned-window UIA pattern operation with the shared bounded worker."""
+    try:
+        completed, result, error = ui._run_uia(
+            lambda cancelled: worker(*args, cancelled),
+            ui._INVOKE_TIMEOUT_SECONDS,
+            exclusive_lock=ui._INVOKE_LOCK,
+            pass_cancel_event=True,
+        )
+        if not completed or error is not None:
+            return outcome.unverified(action, "the control may have changed; inspect it before retrying")
+        if not isinstance(result, tuple) or len(result) != 2:
+            return outcome.failed(action, "UI Automation returned an invalid result")
+        status, reason = result
+        if status in success_statuses:
+            return outcome.done(action, verified=True, changed=status not in {"already_set", "already_selected"})
+        if status in {"uncertain", "unverified"}:
+            return outcome.unverified(action, reason)
+        if status in {"busy", "cancelled", "ambiguous_checkbox", "ambiguous_option",
+                      "ambiguous_combo", "ambiguous_item", "missing_option"}:
+            return outcome.ask(action, reason or status)
+        return outcome.failed(action, reason or status)
+    except Exception as exc:
+        return outcome.failed(action, f"the UI Automation operation failed ({type(exc).__name__})")
+
+
 def _stop_with_step_result(state: dict, index: int, result: str) -> str:
     completed = state["completed"]
     facts = {
@@ -328,6 +392,58 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            if step["action"] in {"set_checkbox_state", "select_radio_option", "select_dropdown_option"}:
+                action = step["action"]
+                if action == "set_checkbox_state":
+                    from actions import ui_checkbox
+                    label = step["checkbox_label"]
+                    worker = ui_checkbox._set_on_window
+                    args = (state["window_handle"], state["process_id"], label, step["checked"])
+                    needs_confirmation = ui_checkbox._needs_confirmation(label, step["checked"], state.get("session_memory"))
+                    success = {"changed", "already_set"}
+                    progress_label = label
+                    title = f"Confirm checkbox: {label}"
+                    detail = f"MARK will set '{label}' to {'checked' if step['checked'] else 'unchecked'}. It will not submit or save the form."
+                elif action == "select_radio_option":
+                    from actions import ui_radio, ui_checkbox
+                    label = step["radio_label"]
+                    worker = ui_radio._select_on_window
+                    args = (state["window_handle"], state["process_id"], label)
+                    needs_confirmation = ui_checkbox._needs_confirmation(label)
+                    success = {"selected", "already_selected"}
+                    progress_label = label
+                    title = f"Confirm option: {label}"
+                    detail = f"MARK will select '{label}'. It will not submit or save the form."
+                else:
+                    from actions import ui_dropdown
+                    combo, option = step["combo_label"], step["option_label"]
+                    worker = ui_dropdown._select_worker
+                    args = (state["window_handle"], state["process_id"], combo, option)
+                    needs_confirmation = ui._requires_confirmation(combo, option)
+                    success = {"selected", "already_selected"}
+                    progress_label = f"{combo}: {option}"
+                    title = f"Confirm selection: {option}"
+                    detail = f"MARK will select '{option}' in '{combo}'. It will not submit or save the form."
+                def perform_pattern_step():
+                    result = _run_pattern_step(action, worker, args, success)
+                    if not result.startswith("status=done "):
+                        return _stop_with_step_result(state, index, result)
+                    state["completed"] += 1
+                    state["completed_labels"].append(progress_label)
+                    return _continue_sequence(state, index + 1)
+                if needs_confirmation:
+                    return confirm.request(
+                        key=f"run_ui_sequence.{action}", title=title, detail=detail,
+                        run=perform_pattern_step,
+                        on_cancel=lambda: _release_sequence(state["id"]),
+                    )
+                result = _run_pattern_step(action, worker, args, success)
+                if not result.startswith("status=done "):
+                    return _stop_with_step_result(state, index, result)
+                state["completed"] += 1
+                state["completed_labels"].append(progress_label)
+                continue
+
             if step["action"] == "press_keys":
                 dangerous = frozenset(step["key_combo"].split("+")) in _DANGEROUS_KEY_COMBOS
                 if dangerous:
@@ -557,6 +673,7 @@ def _start_sequence(steps: list[dict], initial_snapshot: dict,
     state = {
         "id": token,
         "steps": steps,
+        "session_memory": session_memory,
         "started_at": time.monotonic(),
         "completed": 0,
         "completed_labels": [],
@@ -597,11 +714,11 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Run verified 2–8 step Windows UI workflows using exact control clicks, safe field entry, tree expansion and checked keyboard shortcuts.",
+    "brief": "Run verified 2–8 step Windows workflows with exact clicks, text entry, checkboxes, radio/dropdown choices, tree navigation and keyboard shortcuts.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
-        "ordered steps. A press_keys step must supply one key or modifier chord and an exact visible postcondition. A set_tree_item_expanded step must supply one exact visible "
+        "ordered steps. Checkbox steps set an exact visible checkbox to a requested boolean state; radio steps select one exact visible option; dropdown steps select one exact visible option from an already-open ComboBox. These use native UI Automation state patterns and verify the result. They never submit or save a form, and existing high-impact confirmation rules still apply. A press_keys step must supply one key or modifier chord and an exact visible postcondition. A set_tree_item_expanded step must supply one exact visible "
         "TreeItem label and a boolean expanded value; MARK verifies the ExpandCollapsePattern "
         "state in the original window before starting the next step. It expands or collapses "
         "only the node and never activates a child item. A press_keys step is refocused to the original "
@@ -639,14 +756,14 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered steps. Use click, fill_text, press_keys with one key/chord and expected_result, or set_tree_item_expanded with an exact TreeItem label and boolean expanded state.",
+                "description": "Two to eight ordered steps. Use click, fill_text, press_keys with one key/chord and expected_result, set_checkbox_state with an exact label and boolean, select_radio_option with an exact label, select_dropdown_option with exact ComboBox and visible option labels, or set_tree_item_expanded.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "enum": ["click", "fill_text", "press_keys", "set_tree_item_expanded"],
-                            "description": "Use click for a verified button press, fill_text for one safe text field, press_keys for one key/chord with an exact visible postcondition, or set_tree_item_expanded for one exact visible TreeItem.",
+                            "enum": ["click", "fill_text", "press_keys", "set_tree_item_expanded", "set_checkbox_state", "select_radio_option", "select_dropdown_option"],
+                            "description": "Use click, fill_text, press_keys, set_tree_item_expanded, set_checkbox_state, select_radio_option or select_dropdown_option with the exact fields required by that action.",
                         },
                         "button_label": {
                             "type": "STRING",
@@ -667,6 +784,26 @@ TOOL = {
                         "text": {
                             "type": "STRING",
                             "description": "For fill_text: literal non-secret text to enter; never use for credentials or payment details.",
+                        },
+                        "checkbox_label": {
+                            "type": "STRING",
+                            "description": "For set_checkbox_state: exact accessible label of one visible non-sensitive CheckBox.",
+                        },
+                        "checked": {
+                            "type": "BOOLEAN",
+                            "description": "For set_checkbox_state: true to check it, false to uncheck it.",
+                        },
+                        "radio_label": {
+                            "type": "STRING",
+                            "description": "For select_radio_option: exact accessible label of one visible non-sensitive RadioButton.",
+                        },
+                        "combo_label": {
+                            "type": "STRING",
+                            "description": "For select_dropdown_option: exact accessible ComboBox label.",
+                        },
+                        "option_label": {
+                            "type": "STRING",
+                            "description": "For select_dropdown_option: exact visible ListItem option in the already-open dropdown.",
                         },
                         "item_label": {
                             "type": "STRING",
