@@ -33,6 +33,7 @@ class Microsoft365Tests(unittest.TestCase):
         self.assertIn("Mail.Send", m365._SCOPES)
         self.assertIn("Calendars.ReadWrite", m365._SCOPES)
         self.assertIn("offline_access", m365._SCOPES)
+        self.assertNotIn("User.Read", m365._SCOPES)
         self.assertNotIn("Mail.ReadWrite", m365._SCOPES)
         self.assertNotIn("Files.ReadWrite.All", m365._SCOPES)
         self.assertNotIn("Directory.ReadWrite.All", m365._SCOPES)
