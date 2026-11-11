@@ -101,7 +101,7 @@ async def _locator_ready(locator) -> bool:
 
 
 async def _locator_is_high_impact(locator, target: object = "") -> bool:
-    """Classify the actual visible control, not only the selector supplied by the model."""
+    """Classify the actual visible control and form metadata, not just its selector."""
     descriptors = [str(target or "")]
     for attribute in ("aria-label", "title", "name", "type"):
         try:
@@ -110,6 +110,32 @@ async def _locator_is_high_impact(locator, target: object = "") -> bool:
             continue
     try:
         descriptors.append(await locator.inner_text() or "")
+    except Exception:
+        pass
+    try:
+        metadata = await locator.evaluate("""el => {
+            const form = el.form || (el.closest ? el.closest('form') : null);
+            const tag = String(el.tagName || '').toLowerCase();
+            const type = String(el.getAttribute('type') || '').toLowerCase();
+            const submit = tag === 'input'
+                ? ['submit', 'image'].includes(type)
+                : tag === 'button' && form && (!type || type === 'submit');
+            const submitters = form ? Array.from(form.querySelectorAll(
+                'button:not([type]), button[type="submit"], input[type="submit"], input[type="image"]'
+            )) : [];
+            const labels = submitters.map(node => [
+                node.innerText, node.getAttribute('aria-label'),
+                node.getAttribute('title'), node.getAttribute('name')
+            ].filter(Boolean).join(' ')).join(' ');
+            return [
+                tag, type, submit ? 'submit' : '',
+                form ? (form.getAttribute('action') || '') : '',
+                form ? (form.getAttribute('method') || '') : '',
+                labels
+            ].join(' ');
+        }""")
+        if metadata:
+            descriptors.append(str(metadata))
     except Exception:
         pass
     return requires_browser_confirmation("smart_click", *descriptors)
