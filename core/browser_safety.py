@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote_plus
 
 
 _SENSITIVE_FIELD = re.compile(
@@ -22,6 +23,15 @@ _HIGH_IMPACT_TARGET = re.compile(
 )
 
 
+def build_search_url(query: object, engine: object, engines: dict[str, str]) -> str:
+    """Encode a search query as one parameter, defaulting unknown engines to Google."""
+    name = str(engine or "google").strip().lower()
+    base = engines.get(name) or engines.get("google")
+    if not isinstance(base, str) or not base:
+        raise ValueError("A Google search URL must be configured as the fallback.")
+    return base + quote_plus(str(query or ""), safe="")
+
+
 def is_sensitive_field_descriptor(*values: object) -> bool:
     """True when field metadata suggests a password, code, or payment secret."""
     return bool(_SENSITIVE_FIELD.search(" ".join(str(v or "") for v in values)))
@@ -35,4 +45,4 @@ def requires_browser_confirmation(action: str, *target_parts: object) -> bool:
     return bool(_HIGH_IMPACT_TARGET.search(" ".join(str(v or "") for v in target_parts)))
 
 
-__all__ = ["is_sensitive_field_descriptor", "requires_browser_confirmation"]
+__all__ = ["build_search_url", "is_sensitive_field_descriptor", "requires_browser_confirmation"]
