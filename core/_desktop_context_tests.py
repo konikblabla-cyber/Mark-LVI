@@ -3,7 +3,9 @@
 Run with: python -m core._desktop_context_tests
 No Windows APIs, model calls, network access or credentials are required.
 """
+import ctypes
 import unittest
+from unittest.mock import Mock, patch
 
 from core.desktop_context import (
     _clean_process_name,
@@ -14,6 +16,7 @@ from core.desktop_context import (
     _is_fullscreen_rect,
     _is_fullscreen_monitor_rect,
     _rect_within_primary_display,
+    get_foreground_window_identity,
 )
 
 
@@ -120,6 +123,31 @@ class DesktopContextTests(unittest.TestCase):
             "available": True, "idle_seconds": None,
         }))
 
+
+
+    def test_foreground_identity_returns_exact_hwnd_and_process_id_without_window_text(self):
+        fake_user32 = Mock()
+        fake_user32.GetForegroundWindow.return_value = 1234
+
+        def set_pid(hwnd, output):
+            ctypes.cast(output, ctypes.POINTER(ctypes.c_ulong)).contents.value = 55
+            return 1
+
+        fake_user32.GetWindowThreadProcessId.side_effect = set_pid
+        with patch("core.desktop_context.os.name", "nt"), \
+             patch("ctypes.WinDLL", return_value=fake_user32, create=True):
+            identity = get_foreground_window_identity()
+        self.assertEqual(identity, (1234, 55))
+        fake_user32.GetForegroundWindow.assert_called_once_with()
+        fake_user32.GetWindowThreadProcessId.assert_called_once()
+
+    def test_foreground_identity_fails_closed_when_windows_returns_no_hwnd_or_pid(self):
+        fake_user32 = Mock()
+        fake_user32.GetForegroundWindow.return_value = None
+        with patch("core.desktop_context.os.name", "nt"), \
+             patch("ctypes.WinDLL", return_value=fake_user32, create=True):
+            self.assertIsNone(get_foreground_window_identity())
+        fake_user32.GetWindowThreadProcessId.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
