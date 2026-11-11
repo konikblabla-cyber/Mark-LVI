@@ -329,8 +329,30 @@ def _run_pattern_step(action: str, worker, args: tuple,
         return outcome.failed(action, f"the UI Automation operation failed ({type(exc).__name__})")
 
 
+def _ui_sequence_progress(state: dict, message: str) -> None:
+    """Show non-sensitive progress in the HUD activity log."""
+    player = state.get("player")
+    if player is None:
+        return
+    try:
+        player.write_log("SYS: " + str(message or "")[:220])
+    except Exception:
+        pass
+
+
+def _mark_ui_step_done(state: dict) -> None:
+    _mark_ui_step_done(state)
+    _ui_sequence_progress(
+        state,
+        f"Windows workflow verified step {state['completed']}/{len(state['steps'])}.",
+    )
+
+
 def _stop_with_step_result(state: dict, index: int, result: str) -> str:
     completed = state["completed"]
+    _ui_sequence_progress(
+        state, f"Windows workflow stopped at step {index + 1}/{len(state['steps'])}."
+    )
     facts = {
         "sequence_id": state["id"],
         "steps_completed": completed,
@@ -382,6 +404,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                     ),
                 )
             if time.monotonic() - state["started_at"] > _MAX_SEQUENCE_SECONDS:
+                _ui_sequence_progress(state, "Windows workflow reached its 10-minute limit; remaining steps were not started.")
                 _release_sequence(state["id"])
                 return outcome.unverified(
                     "run_ui_sequence",
@@ -392,6 +415,9 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            _ui_sequence_progress(
+                state, f"Windows workflow step {index + 1}/{len(state['steps'])}: {step['action']}."
+            )
             if step["action"] in {"set_checkbox_state", "select_radio_option", "select_dropdown_option"}:
                 action = step["action"]
                 if action == "set_checkbox_state":
@@ -428,7 +454,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                     result = _run_pattern_step(action, worker, args, success)
                     if not result.startswith("status=done "):
                         return _stop_with_step_result(state, index, result)
-                    state["completed"] += 1
+                    _mark_ui_step_done(state)
                     state["completed_labels"].append(progress_label)
                     return _continue_sequence(state, index + 1)
                 if needs_confirmation:
@@ -440,7 +466,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 result = _run_pattern_step(action, worker, args, success)
                 if not result.startswith("status=done "):
                     return _stop_with_step_result(state, index, result)
-                state["completed"] += 1
+                _mark_ui_step_done(state)
                 state["completed_labels"].append(progress_label)
                 continue
 
@@ -464,7 +490,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
                 if not result.startswith("status=done "):
                     return _stop_with_step_result(state, index, result)
-                state["completed"] += 1
+                _mark_ui_step_done(state)
                 state["completed_labels"].append(step["key_combo"])
                 continue
 
@@ -478,7 +504,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
                 if not result.startswith("status=done "):
                     return _stop_with_step_result(state, index, result)
-                state["completed"] += 1
+                _mark_ui_step_done(state)
                 state["completed_labels"].append(label)
                 if index == 0:
                     state.pop("initial_snapshot", None)
@@ -493,7 +519,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
                 if not result.startswith("status=done "):
                     return _stop_with_step_result(state, index, result)
-                state["completed"] += 1
+                _mark_ui_step_done(state)
                 state["completed_labels"].append(step["field_label"])
                 if index == 0:
                     state.pop("initial_snapshot", None)
@@ -561,12 +587,12 @@ def _continue_sequence(state: dict, start_index: int) -> str:
             if not result.startswith("status=done "):
                 return _stop_with_step_result(state, index, result)
 
-            state["completed"] += 1
+            _mark_ui_step_done(state)
             state["completed_labels"].append(prepared["label"])
 
+        _ui_sequence_progress(state, "Windows workflow completed; all steps verified.")
         _release_sequence(state["id"])
         return outcome.done(
-            "run_ui_sequence",
             sequence_id=state["id"],
             steps_completed=state["completed"],
             total_steps=len(state["steps"]),
@@ -593,7 +619,7 @@ def _resume_after_key_confirmation(state: dict, index: int,
         )
         if not result.startswith("status=done "):
             return _stop_with_step_result(state, index, result)
-        state["completed"] += 1
+        _mark_ui_step_done(state)
         state["completed_labels"].append(step["key_combo"])
         return _continue_sequence(state, index + 1)
     except Exception as exc:
@@ -615,7 +641,7 @@ def _resume_tree_after_confirmation(state: dict, index: int,
         )
         if not result.startswith("status=done "):
             return _stop_with_step_result(state, index, result)
-        state["completed"] += 1
+        _mark_ui_step_done(state)
         state["completed_labels"].append(step["item_label"])
         if index == 0:
             state.pop("initial_snapshot", None)
@@ -643,7 +669,7 @@ def _resume_after_confirmation(state: dict, index: int,
         )
         if not result.startswith("status=done "):
             return _stop_with_step_result(state, index, result)
-        state["completed"] += 1
+        _mark_ui_step_done(state)
         state["completed_labels"].append(prepared["label"])
         return _continue_sequence(state, index + 1)
     except Exception as exc:
@@ -663,7 +689,7 @@ def _capture_active_window() -> dict:
 
 
 def _start_sequence(steps: list[dict], initial_snapshot: dict,
-                   user_request: str = "", session_memory=None) -> str:
+                   user_request: str = "", session_memory=None, player=None) -> str:
     token = _claim_sequence()
     if token is None:
         return outcome.ask(
@@ -681,6 +707,7 @@ def _start_sequence(steps: list[dict], initial_snapshot: dict,
         "window_handle": initial_snapshot["handle"],
         "process_id": initial_snapshot["process_id"],
         "user_request": user_request[:4000],
+        "player": player,
     }
     return _continue_sequence(state, 0)
 
@@ -708,7 +735,9 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
             f"could not identify the active application window ({type(exc).__name__})",
         )
     from core.autonomy_policy import scope_request
-    return _start_sequence(steps, snapshot, scope_request(session_memory), session_memory)
+    return _start_sequence(
+        steps, snapshot, scope_request(session_memory), session_memory, player=player,
+    )
 
 
 TOOL = {
