@@ -25,6 +25,7 @@ class FakeLocator:
         self.typed = []
         self.cleared = 0
         self.on_click = None
+        self.value = ""
 
     async def count(self):
         return self._count
@@ -45,9 +46,14 @@ class FakeLocator:
 
     async def clear(self):
         self.cleared += 1
+        self.value = ""
 
     async def type(self, value, **kwargs):
         self.typed.append(value)
+        self.value += value
+
+    async def input_value(self):
+        return self.value
 
 
 class FakePage:
@@ -171,6 +177,21 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertIn("done", result)
         self.assertEqual(locator.cleared, 1)
         self.assertEqual(locator.typed, ["new"])
+
+    def test_type_text_appends_to_existing_value_and_keeps_receipt_private(self):
+        locator = FakeLocator()
+        locator.value = "Existing "
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.type_text(
+            session, selector="#name", text="new"
+        ))
+        self.assertIn("status=done", result)
+        self.assertIn("verified=true", result)
+        self.assertEqual(locator.value, "Existing new")
+        self.assertNotIn("Existing", result)
+        self.assertNotIn("new", result)
+
 
     def test_smart_type_preserves_existing_contents_by_default(self):
         locator = FakeLocator()
