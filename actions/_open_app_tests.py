@@ -67,7 +67,7 @@ class LinuxLauncherTests(unittest.TestCase):
 
 class WindowsLauncherTests(unittest.TestCase):
     def test_opera_known_install_path_is_resolved_for_per_user_install(self):
-        expected = r"C:\Users\example\AppData\Local\Programs\Opera\opera.exe"
+        expected = r"C:\Users\example\AppData\Local\Programs\Opera\launcher.exe"
         with patch.object(open_app, "_SYSTEM", "Windows"), \
              patch.object(open_app.appidentity, "launcher_name", return_value="opera"), \
              patch.object(open_app.shutil, "which", return_value=None), \
