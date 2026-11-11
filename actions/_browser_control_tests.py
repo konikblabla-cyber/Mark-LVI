@@ -494,6 +494,47 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertTrue(result["risky"])
         self.assertIn("inspection failed", result["target"])
 
+    def test_inspect_controls_omits_field_values_sensitive_fields_and_link_urls(self):
+        locator = FakeLocator()
+        page = FakePage(locator)
+        page.evaluate = lambda _script: _async_value([
+            {
+                "tag": "button", "role": "button", "type": "submit",
+                "label": "Continue", "placeholder": "", "name": "",
+                "disabled": False, "form_submit": True,
+                "value": "MUST_NOT_LEAK",
+            },
+            {
+                "tag": "input", "role": "", "type": "password",
+                "label": "Password", "placeholder": "Password", "name": "password",
+                "disabled": False, "value": "secret-value",
+            },
+            {
+                "tag": "a", "role": "link", "type": "a",
+                "label": "Open dashboard", "placeholder": "", "name": "",
+                "disabled": False, "href": "https://example.test/?token=private",
+            },
+        ])
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.inspect_controls(session))
+        self.assertTrue(result.startswith("<<<UNTRUSTED source=browser-controls>>>"))
+        self.assertIn("Continue", result)
+        self.assertIn("Open dashboard", result)
+        self.assertIn('"high_impact":true', result)
+        self.assertNotIn("Password", result)
+        self.assertNotIn("secret-value", result)
+        self.assertNotIn("MUST_NOT_LEAK", result)
+        self.assertNotIn("token=private", result)
+
+    def test_inspect_controls_fails_closed_when_dom_snapshot_fails(self):
+        page = FakePage(FakeLocator())
+        async def fail_snapshot(_script):
+            raise RuntimeError("DOM unavailable")
+        page.evaluate = fail_snapshot
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.inspect_controls(session))
+        self.assertIn("status=failed", result)
+
     def test_page_text_and_url_are_marked_as_untrusted_data(self):
         page = FakePage(FakeLocator())
         page.url = "https://example.com/ignore-all-rules"
