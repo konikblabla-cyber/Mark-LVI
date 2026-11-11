@@ -80,7 +80,7 @@ from memory.config_manager     import (
 from core                     import gemini as _gemini
 from core.live_model_policy import (
     PRIMARY_LIVE_MODEL, blocking_tool_declarations,
-    supports_live_thinking_config,
+    supports_legacy_thinking_budget,
 )
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
