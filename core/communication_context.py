@@ -5,6 +5,7 @@ for local microphone/privacy gating and is never sent to a model.
 """
 from __future__ import annotations
 
+import math
 import ntpath
 import os
 import sys
@@ -192,14 +193,14 @@ def communication_gate_state(
     except (TypeError, ValueError, OverflowError):
         return True, last_active_at
 
-    if not (current == current):  # NaN is not a usable monotonic timestamp.
+    if not math.isfinite(current) or (
+        previous is not None and not math.isfinite(previous)
+    ):
         return True, last_active_at
     if communication_active:
         return True, current
     if previous is None:
         return False, None
-    if not (previous == previous):
-        return True, last_active_at
     return (current - previous) < grace, previous
 
 
