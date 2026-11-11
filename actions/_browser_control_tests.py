@@ -892,6 +892,7 @@ class BrowserSequenceTests(unittest.TestCase):
         self.assertIn("steps", properties)
         self.assertIn("expected_text or expected_url to verify the final destination", properties["steps"]["description"])
         self.assertIn("2 to 8 ordered steps", properties["steps"]["description"])
+        self.assertIn("expected_text or expected_url to verify the final destination", properties["steps"]["description"])
         self.assertEqual(
             properties["steps"]["items"]["properties"]["action"]["enum"],
             ["go_to", "click", "smart_click", "type", "smart_type"],
