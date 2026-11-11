@@ -127,6 +127,21 @@ class GoogleWorkspaceTests(unittest.TestCase):
                 "timezone": "../../etc",
             })
 
+    def test_calendar_rejects_nonexistent_and_ambiguous_dst_times(self):
+        with mock.patch.object(workspace, "get_plugin_config", return_value={"timezone": "Europe/Warsaw"}):
+            with self.assertRaisesRegex(ValueError, "daylight-saving gap"):
+                workspace._calendar_event_body({
+                    "summary": "Nonexistent time",
+                    "start_datetime": "2026-03-29T02:30:00",
+                    "end_datetime": "2026-03-29T03:30:00",
+                })
+            with self.assertRaisesRegex(ValueError, "ambiguous"):
+                workspace._calendar_event_body({
+                    "summary": "Ambiguous time",
+                    "start_datetime": "2026-10-25T02:30:00",
+                    "end_datetime": "2026-10-25T03:30:00",
+                })
+
     def test_gmail_draft_is_parked_behind_hud_confirmation(self):
         with mock.patch.object(workspace.confirm, "request",
                                return_value="[CONFIRMATION_PENDING]") as gate, \
