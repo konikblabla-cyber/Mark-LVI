@@ -121,12 +121,29 @@ class WindowsLauncherTests(unittest.TestCase):
              patch.object(open_app.appidentity, "wait_for_launch", return_value=match), \
              patch.object(open_app.appidentity, "focus", return_value=False), \
              patch.object(open_app.appidentity, "is_running", return_value=True), \
+             patch.object(open_app.time, "sleep"), \
              patch.object(open_app, "_log"), \
              patch.object(open_app, "_say") as say:
             open_app._launch_and_verify(None, "Opera", "opera", {1})
         say.assert_called_once()
         self.assertIn("could not verify its window", say.call_args.args[1])
 
+
+
+    def test_foreground_focus_retries_briefly_without_relaunching(self):
+        match = type("Match", (), {"pid": 88})()
+        with patch.object(open_app.appidentity, "is_running", return_value=True), \
+             patch.object(open_app.appidentity, "focus", side_effect=[False, False, True]) as focus, \
+             patch.object(open_app.time, "sleep"):
+            self.assertTrue(open_app._focus_launched_application(match))
+        self.assertEqual(focus.call_count, 3)
+
+    def test_foreground_focus_stops_when_process_exits(self):
+        match = type("Match", (), {"pid": 88})()
+        with patch.object(open_app.appidentity, "is_running", return_value=False), \
+             patch.object(open_app.appidentity, "focus") as focus:
+            self.assertFalse(open_app._focus_launched_application(match))
+        focus.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
