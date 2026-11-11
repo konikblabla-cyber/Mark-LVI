@@ -492,7 +492,23 @@ def _calendar_event_body(parameters: dict) -> dict:
         except ValueError as exc:
             raise ValueError(f"{label} must be an ISO datetime.") from exc
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=zone)
+            # A local wall-clock time can be nonexistent in the spring DST gap
+            # or ambiguous in the autumn repeated hour. Never guess silently.
+            first = parsed.replace(tzinfo=zone, fold=0)
+            second = parsed.replace(tzinfo=zone, fold=1)
+            first_utc = first.astimezone(timezone.utc)
+            round_trip = first_utc.astimezone(zone).replace(tzinfo=None)
+            if round_trip != parsed:
+                raise ValueError(
+                    f"{label} falls in a daylight-saving gap and does not exist "
+                    "in the selected timezone. Choose another time."
+                )
+            if first_utc != second.astimezone(timezone.utc):
+                raise ValueError(
+                    f"{label} is ambiguous because clocks change. Provide an "
+                    "RFC3339 datetime with an explicit UTC offset."
+                )
+            parsed = first
         return parsed.astimezone(zone)
 
     start = event_time(parameters.get("start_datetime"), "start_datetime")
