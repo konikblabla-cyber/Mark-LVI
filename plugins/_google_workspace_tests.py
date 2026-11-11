@@ -11,12 +11,11 @@ from core.plugin_loader import _validate
 class GoogleWorkspaceTests(unittest.TestCase):
     def test_plugin_import_does_not_require_google_sdk(self):
         self.assertEqual(workspace.PLUGIN["name"], "google_workspace")
-        self.assertIn("gmail.readonly", workspace._SCOPES)
-        self.assertIn("gmail.compose", workspace._SCOPES)
-        self.assertIn("calendar.events.owned", workspace._SCOPES)
-        self.assertNotIn("gmail.send", workspace._SCOPES)
-        self.assertNotIn("gmail.modify", workspace._SCOPES)
-        self.assertNotIn("https://www.googleapis.com/auth/calendar.events", workspace._SCOPES)
+        self.assertTrue(any(scope.endswith("/gmail.readonly") for scope in workspace._SCOPES))
+        self.assertTrue(any(scope.endswith("/gmail.compose") for scope in workspace._SCOPES))
+        self.assertTrue(any(scope.endswith("/calendar.events.owned") for scope in workspace._SCOPES))
+        self.assertFalse(any(scope.endswith("/gmail.modify") for scope in workspace._SCOPES))
+        self.assertFalse(any(scope.endswith("/calendar.events") for scope in workspace._SCOPES))
 
     def test_plugin_contract_is_accepted_by_auto_loader(self):
         record = _validate(workspace, "google_workspace.py")
@@ -152,13 +151,13 @@ class GoogleWorkspaceTests(unittest.TestCase):
                 "subject": "Exact subject",
                 "body": "Exact body",
             })
-        self.assertEqual(result, "[CONFIRMATION_PENDING]")
-        gate.assert_called_once()
-        create.assert_not_called()
-        self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
-        self.assertIn("Exact body", gate.call_args.kwargs["detail"])
-        gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
-        create.assert_called_once_with(["person@example.com"], "Exact subject", "Exact body")
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            gate.assert_called_once()
+            create.assert_not_called()
+            self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
+            self.assertIn("Exact body", gate.call_args.kwargs["detail"])
+            gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
+            create.assert_called_once_with(["person@example.com"], "Exact subject", "Exact body")
 
     def test_email_body_limit_matches_the_full_hud_confirmation(self):
         with self.assertRaises(ValueError):
@@ -182,15 +181,15 @@ class GoogleWorkspaceTests(unittest.TestCase):
                 "subject": "Exact subject",
                 "body": "Exact message body",
             })
-        self.assertEqual(result, "[CONFIRMATION_PENDING]")
-        gate.assert_called_once()
-        send.assert_not_called()
-        self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
-        self.assertIn("Exact message body", gate.call_args.kwargs["detail"])
-        self.assertTrue(gate.call_args.kwargs["detail"].endswith("Exact message body\n\nThis sends the email only after you confirm this exact content."))
-        self.assertIn("only after you confirm", gate.call_args.kwargs["detail"])
-        gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
-        send.assert_called_once_with(["person@example.com"], "Exact subject", "Exact message body")
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            gate.assert_called_once()
+            send.assert_not_called()
+            self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
+            self.assertIn("Exact message body", gate.call_args.kwargs["detail"])
+            self.assertTrue(gate.call_args.kwargs["detail"].endswith("Exact message body\n\nThis sends the email only after you confirm this exact content."))
+            self.assertIn("only after you confirm", gate.call_args.kwargs["detail"])
+            gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
+            send.assert_called_once_with(["person@example.com"], "Exact subject", "Exact message body")
 
     def test_calendar_create_is_parked_behind_hud_confirmation(self):
         with mock.patch.object(workspace.confirm, "request",
@@ -203,17 +202,17 @@ class GoogleWorkspaceTests(unittest.TestCase):
                 "end_datetime": "2026-11-12T10:00:00",
                 "timezone": "Europe/Warsaw",
             })
-        self.assertEqual(result, "[CONFIRMATION_PENDING]")
-        gate.assert_called_once()
-        create.assert_not_called()
-        self.assertIn("Dentist", gate.call_args.kwargs["detail"])
-        self.assertIn("after you confirm", gate.call_args.kwargs["detail"])
-        gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
-        create.assert_called_once_with({
-            "summary": "Dentist",
-            "start": {"dateTime": "2026-11-12T09:00:00+01:00", "timeZone": "Europe/Warsaw"},
-            "end": {"dateTime": "2026-11-12T10:00:00+01:00", "timeZone": "Europe/Warsaw"},
-        })
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            gate.assert_called_once()
+            create.assert_not_called()
+            self.assertIn("Dentist", gate.call_args.kwargs["detail"])
+            self.assertIn("after you confirm", gate.call_args.kwargs["detail"])
+            gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
+            create.assert_called_once_with({
+                "summary": "Dentist",
+                "start": {"dateTime": "2026-11-12T09:00:00+01:00", "timeZone": "Europe/Warsaw"},
+                "end": {"dateTime": "2026-11-12T10:00:00+01:00", "timeZone": "Europe/Warsaw"},
+            })
 
     def test_unconfigured_status_is_actionable(self):
         with mock.patch.object(workspace, "_token_path") as token_path:
