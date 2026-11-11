@@ -368,9 +368,12 @@ def _gmail_read(parameters: dict) -> str:
 
 def _parse_recipients(value: object) -> list[str]:
     raw = str(value or "").strip()
+    if len(raw) > 2_600 or "\\n" in raw or "\\r" in raw:
+        raise ValueError("Recipient list is too long or contains line breaks.")
     recipients = [part.strip() for part in raw.split(",") if part.strip()]
-    if not recipients or len(recipients) > 10 or any(not _EMAIL_RE.fullmatch(x) for x in recipients):
-        raise ValueError("Provide 1–10 valid comma-separated email addresses.")
+    if (not recipients or len(recipients) > 10
+            or any(len(item) > 254 or not _EMAIL_RE.fullmatch(item) for item in recipients)):
+        raise ValueError("Provide 1–10 valid email addresses, each no longer than 254 characters.")
     return recipients
 
 
