@@ -281,10 +281,12 @@ class CommunicationContextTests(unittest.TestCase):
         )
 
     def test_invalid_monotonic_time_fails_closed(self):
-        self.assertEqual(
-            communication_gate_state(False, 10.0, float("nan")),
-            (True, 10.0),
-        )
+        for invalid_time in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(invalid_time=invalid_time):
+                self.assertEqual(
+                    communication_gate_state(False, 10.0, invalid_time),
+                    (True, 10.0),
+                )
 
     def test_fresh_desktop_input_auto_wakes_outside_calls(self):
         self.assertTrue(should_auto_wake(0.0, False))
