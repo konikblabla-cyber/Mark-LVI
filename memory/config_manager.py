@@ -642,6 +642,11 @@ _MODEL_ROUTER_DEFAULTS = {
     "retry_on_transient": False,
     "second_opinion": False,
     "review_min_chars": 2500,
+    # Groq is opt-in and reserved for explicit coding tasks only.
+    "groq_enabled": False,
+    "groq_daily_calls": 3,
+    "groq_daily_input_chars": 20000,
+    "groq_max_input_chars": 8000,
 }
 
 
@@ -656,12 +661,16 @@ def get_model_router_config() -> dict:
     out["gemma_vision"] = bool(out.get("gemma_vision", True))
     out["retry_on_transient"] = bool(out.get("retry_on_transient", False))
     out["second_opinion"] = bool(out.get("second_opinion", False))
+    out["groq_enabled"] = bool(out.get("groq_enabled", False))
     out["gemma_model"] = str(out.get("gemma_model") or _MODEL_ROUTER_DEFAULTS["gemma_model"]).strip()
     for key, default, maximum in (
         ("daily_calls", 40, 500),
         ("daily_input_chars", 200000, 5000000),
         ("max_input_chars", 50000, 200000),
         ("review_min_chars", 2500, 20000),
+        ("groq_daily_calls", 3, 10),
+        ("groq_daily_input_chars", 20000, 50000),
+        ("groq_max_input_chars", 8000, 12000),
     ):
         try:
             out[key] = max(0, min(int(out.get(key, default)), maximum))

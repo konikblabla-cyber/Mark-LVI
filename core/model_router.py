@@ -501,14 +501,23 @@ def _provider_messages(contents, config) -> tuple[list[dict], float | None]:
     return messages, float(temperature) if temperature is not None else None
 
 
-def _assert_zero_cost_provider(provider_id: str) -> None:
-    """Allow only documented $0 hosted model IDs or verified local endpoints.
-
-    Groq GPT-OSS, OpenAI, paid Z.AI models and arbitrary custom URLs are
-    deliberately rejected even after the UI acknowledgement. The model ID,
-    not the vendor's marketing label, determines the allowlist entry.
-    """
+def _is_groq_provider(provider_id: str) -> bool:
+    """Recognise only the registered Groq endpoint, not a user-defined URL."""
+    from providers import registry
     from memory.config_manager import get_provider_config
+
+    entry = registry.catalog_entry(provider_id) or {}
+    cfg = get_provider_config(provider_id)
+    base_url = str(cfg.get("base_url") or "").strip().rstrip("/").lower()
+    return entry.get("id") == "groq" and base_url == "https://api.groq.com/openai/v1"
+
+
+def _assert_zero_cost_provider(provider_id: str) -> None:
+    """Allow the verified $0 providers, plus explicitly capped Groq coding only."""
+    from memory.config_manager import (
+        get_coding_provider, get_pipeline, get_provider_config,
+        get_sidecar_provider,
+    )
     from providers import registry
     from providers.llm_openai import _is_own_hardware
 
@@ -517,6 +526,22 @@ def _assert_zero_cost_provider(provider_id: str) -> None:
     model = str(cfg.get("model") or "").strip()
     base_url = str(cfg.get("base_url") or "").strip().rstrip("/").lower()
 
+    if entry.get("id") == "groq":
+        settings = _settings()
+        if not settings.get("groq_enabled"):
+            raise RouterError("Groq is disabled in MARK settings")
+        if base_url != "https://api.groq.com/openai/v1" or not model or not str(cfg.get("api_key") or "").strip():
+            raise RouterError("Groq needs its exact API endpoint, model ID and API key")
+        # Groq is intentionally not a voice or general background provider.
+        # A dedicated coding selection is the only path allowed to reach it.
+        if (get_coding_provider() != provider_id
+                or get_sidecar_provider() == provider_id
+                or (get_pipeline() or {}).get("llm") == provider_id):
+            raise RouterError("Groq is reserved for the CODING slot, not voice or general background tasks")
+        return
+
+    if not _settings().get("zero_cost_confirmed"):
+        raise RouterError("the $0 provider route has not been explicitly verified")
     if entry.get("local") is True and _is_own_hardware(base_url):
         return
     if (entry.get("id") == "zai" and model == "glm-4.7-flash"
@@ -526,6 +551,85 @@ def _assert_zero_cost_provider(provider_id: str) -> None:
         f"{provider_id} / {model or 'no model'} is not on MARK's verified $0 allowlist; "
         "use Z.AI glm-4.7-flash or a private local endpoint"
     )
+
+
+def _groq_usage_path() -> Path:
+    from memory.config_manager import CONFIG_DIR
+    return CONFIG_DIR / "groq_usage.json"
+
+
+def _openai_message_text(messages) -> str:
+    """Extract text sent to a chat endpoint; MARK's Groq route is text-only."""
+    chunks = []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            raise RouterError("Groq request contains an invalid message")
+        content = message.get("content", "")
+        if isinstance(content, str):
+            chunks.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in ("image_url", "input_image") or "image_url" in part:
+                    raise RouterError("Groq in MARK is text-only; image requests are not sent")
+                if isinstance(part.get("text"), str):
+                    chunks.append(part["text"])
+        elif content is not None:
+            raise RouterError("Groq request contains unsupported content")
+    return "
+".join(chunks)
+
+
+def reserve_groq_request(messages) -> int:
+    """Enforce a small local daily budget before every actual Groq chat request.
+
+    This is a per-install guard for MARK. It cannot account for the same key
+    being used in other applications or by other users in the Groq organization.
+    """
+    provider_id = "openai_compat@groq"
+    _assert_zero_cost_provider(provider_id)
+    settings = _settings()
+    text = _openai_message_text(messages)
+    chars = len(text)
+    max_call = _limit_int(settings, "groq_max_input_chars", 8000, 12000)
+    max_calls = _limit_int(settings, "groq_daily_calls", 3, 10)
+    max_daily_chars = _limit_int(settings, "groq_daily_input_chars", 20000, 50000)
+    if chars > max_call:
+        raise RouterError(f"Groq request is {chars:,} characters; local per-call limit is {max_call:,}")
+
+    path = _groq_usage_path()
+    with _lock:
+        try:
+            state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            if not isinstance(state, dict):
+                raise ValueError("usage ledger is not an object")
+        except Exception as exc:
+            raise RouterError("Groq usage ledger is unreadable; request blocked") from exc
+        today = date.today().isoformat()
+        if state.get("date") != today:
+            state = {"date": today, "calls": 0, "input_chars": 0}
+        try:
+            calls = int(state.get("calls", 0))
+            used = int(state.get("input_chars", 0))
+            if calls < 0 or used < 0:
+                raise ValueError("negative counters")
+        except (TypeError, ValueError) as exc:
+            raise RouterError("Groq usage counters are invalid; request blocked") from exc
+        if calls >= max_calls:
+            raise RouterError(f"Groq local daily call cap reached ({max_calls})")
+        if used + chars > max_daily_chars:
+            raise RouterError(f"Groq local daily input cap reached ({max_daily_chars:,} characters)")
+        state["calls"] = calls + 1
+        state["input_chars"] = used + chars
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(path.suffix + ".tmp")
+            temp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            temp.replace(path)
+        except Exception as exc:
+            raise RouterError("could not save Groq usage budget; request blocked") from exc
+    return chars
 
 
 def _provider_call(provider_id: str, contents, config, timeout_ms: int,
@@ -568,14 +672,20 @@ def dispatch(contents, tier: str = "smart", config=None,
     settings = _settings()
     if not settings.get("enabled"):
         return NOT_ROUTED
-    if not settings.get("zero_cost_confirmed"):
-        raise RouterError("enable only after verifying every selected API is on a $0 plan with no payment method")
     if tier == "search":
         raise RouterError("grounded web-search requests are not enabled in the task router")
 
     task = classify_task(contents, tier, task_type)
     if not task:
         raise RouterError("this request has no safe route; specify a supported task type")
+
+    if not settings.get("zero_cost_confirmed"):
+        primary = _provider_for(task, provider_override) if task not in ("vision", "review") else ""
+        # The one metered exception is explicit Groq coding. Every other route
+        # still needs the separate $0-plan acknowledgement.
+        if task != "coding" or not primary or not _is_groq_provider(primary):
+            raise RouterError("enable only after verifying the $0 providers; Groq is allowed only for opted-in coding")
+        _assert_zero_cost_provider(primary)
 
     chars = _reserve(contents, settings)
     started = time.monotonic()

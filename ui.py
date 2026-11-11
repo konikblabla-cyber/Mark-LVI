@@ -3487,11 +3487,20 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._router_enabled_combo)
 
         lay.addWidget(self._label(
-            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash, and verified private local endpoints. "
-            "Groq GPT-OSS-120B is metered and blocked; other paid/custom cloud models are blocked too. "
-            "Gemma screenshots and prompts are sent to Google; its free-tier content may be used to improve products. "
-            "Remove payment methods and auto-top-ups at providers.",
+            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash and verified private local endpoints. "
+            "Gemma image requests go to Google; its free-tier data policy applies. "
+            "Groq is separate: metered, disabled by default and never used for the voice conversation.",
             7, C.ACC))
+        self._groq_enabled_combo = self._combo()
+        self._groq_enabled_combo.addItem("Groq OFF — do not send MARK requests there", False)
+        self._groq_enabled_combo.addItem("Groq ON — coding tasks only, with local daily caps", True)
+        self._groq_enabled_combo.setCurrentIndex(1 if cfg.get("groq_enabled") else 0)
+        lay.addWidget(self._groq_enabled_combo)
+        lay.addWidget(self._label(
+            "Groq is allowed only when selected under CODING (not BACKGROUND REQUESTS or ② THINKING). "
+            "MARK hard stop: 3 calls/day, 8,000 input characters per request, 20,000 input characters/day, "
+            "512 output tokens/request. A 429 is not retried against Groq. These local limits do not cover other apps using the same Groq key.",
+            7, C.TEXT_DIM))
         self._router_free_combo = self._combo()
         self._router_free_combo.addItem("Not verified — router stays blocked", False)
         self._router_free_combo.addItem("Verified: $0 plan, no payment method, no auto top-up", True)
@@ -3836,6 +3845,7 @@ class ProvidersOverlay(_HudOverlay):
             router_values = {
                 "enabled": router_enabled,
                 "zero_cost_confirmed": zero_cost_confirmed,
+                "groq_enabled": bool(self._groq_enabled_combo.currentData()),
                 "gemma_model": self._gemma_model_edit.text().strip() or "gemma-4-26b-a4b-it",
                 "daily_calls": int(self._router_calls_edit.text().strip()),
                 "daily_input_chars": int(self._router_chars_edit.text().strip()),

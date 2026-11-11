@@ -640,11 +640,9 @@ def _guard_provider_fallback(provider_id: str, contents) -> int:
     from core import model_router
 
     settings = model_router._settings()
-    if not settings.get("zero_cost_confirmed"):
-        raise model_router.RouterError(
-            "provider fallback blocked: first confirm that every selected "
-            "provider is on a $0 plan with no payment method"
-        )
+    # _assert_zero_cost_provider knows about the separately opted-in,
+    # coding-only Groq exception. All other cloud providers still require the
+    # explicit $0 acknowledgement.
     model_router._assert_zero_cost_provider(provider_id)
     return model_router._reserve(contents, settings)
 

@@ -22,6 +22,16 @@ The local model can be on your machine (Ollama, LM Studio, llama.cpp, vLLM) or
 somebody else's API (OpenAI, Groq, DeepSeek, Mistral, xAI, OpenRouter, Together).
 Both are the same setting, because all of them speak the same protocol.
 
+**Groq is optional and deliberately rare.** It is disabled by default and is
+never the live voice engine. To use it, select Groq in **CODING** (not
+**BACKGROUND REQUESTS** or the main conversation) and explicitly enable it in
+the task-router settings. MARK enforces a local hard stop of 3 chat calls/day,
+8,000 input characters per call, 20,000 input characters/day and 512 output
+tokens per call. Image requests are not sent to Groq. The local ledger is saved
+under the per-user config directory; it does not include other applications or
+people using the same Groq organization/key, so your real provider quota may be
+reached sooner. A rate-limit response is not retried against Groq.
+
 **None of it costs anything if you do not use it.** On a default install the
 `providers/` folder is never imported — not at startup, not on a tool call, not
 when the settings drawer opens. Measured: the decision takes **0.16 ms** and
