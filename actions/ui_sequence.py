@@ -91,6 +91,24 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
+        if action == "press_keys":
+            allowed = {"action", "keys", "expected_result"}
+            if set(raw) != allowed:
+                return None, f"press_keys step {index} must contain only action, keys and expected_result"
+            rendered, problem = _normalise_key_combo(raw.get("keys"))
+            expected = raw.get("expected_result")
+            if rendered is None:
+                return None, f"step {index}: {problem}"
+            if not isinstance(expected, str) or not expected.strip() or len(expected.strip()) > 160:
+                return None, f"step {index} expected_result must contain 1 to 160 characters"
+            validated.append({
+                "action": "press_keys",
+                "keys": rendered,
+                "key_combo": str(raw.get("keys")).strip().lower(),
+                "expected_result": " ".join(expected.split()),
+            })
+            continue
+
         if action == "fill_text":
             allowed = {"action", "field_label", "text"}
             if set(raw) != allowed:
@@ -110,9 +128,94 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
-        return None, f"step {index} action must be click, fill_text or set_tree_item_expanded"
+        return None, f"step {index} action must be click, fill_text, press_keys or set_tree_item_expanded"
 
     return validated, ""
+
+
+_KEY_NAMES = {
+    "tab": "{TAB}", "enter": "{ENTER}", "return": "{ENTER}",
+    "escape": "{ESC}", "esc": "{ESC}", "space": " ",
+    "backspace": "{BACKSPACE}", "delete": "{DELETE}",
+    "up": "{UP}", "down": "{DOWN}", "left": "{LEFT}", "right": "{RIGHT}",
+    "home": "{HOME}", "end": "{END}", "pageup": "{PGUP}", "pagedown": "{PGDN}",
+}
+_DANGEROUS_KEY_COMBOS = {
+    frozenset(("alt", "f4")), frozenset(("ctrl", "w")),
+    frozenset(("ctrl", "q")), frozenset(("ctrl", "shift", "delete")),
+    frozenset(("shift", "delete")), frozenset(("win", "l")),
+}
+
+
+def _normalise_key_combo(value: object) -> tuple[str | None, str]:
+    """Accept one explicit key or modifier chord; never accept arbitrary text."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 40:
+        return None, "keys must be one key or a short modifier combination"
+    parts = [part.strip().lower() for part in value.split("+")]
+    if not parts or any(not part for part in parts):
+        return None, "key combination is malformed"
+    modifiers = {"ctrl": "^", "control": "^", "alt": "%", "shift": "+"}
+    if len(parts) > 1:
+        if any(part not in modifiers for part in parts[:-1]):
+            return None, "only Ctrl, Alt and Shift modifiers are supported"
+        if len(set(parts[:-1])) != len(parts[:-1]):
+            return None, "a modifier cannot be repeated"
+    key = parts[-1]
+    if key in modifiers or not (
+        key in _KEY_NAMES or len(key) == 1 and key.isalnum()
+        or key.startswith("f") and key[1:].isdigit() and 1 <= int(key[1:]) <= 12
+    ):
+        return None, "unsupported key; use a named key, letter, digit or F1–F12"
+    rendered_key = _KEY_NAMES.get(key, "{" + key.upper() + "}" if key.startswith("f") else key)
+    prefix = "".join(modifiers[item] for item in parts[:-1])
+    return prefix + rendered_key, ""
+
+
+def _press_keys_and_verify(keys: str, expected: str,
+                           window_handle: int, process_id: int) -> str:
+    """Send one key chord only to the original foreground process, then verify."""
+    try:
+        from pywinauto import Desktop, keyboard
+        import ctypes
+        window = Desktop(backend="uia").window(handle=int(window_handle)).wrapper_object()
+        if not window.is_visible():
+            return outcome.failed("run_ui_sequence", "the original application window is no longer visible")
+        if int(getattr(window.element_info, "process_id", 0)) != int(process_id):
+            return outcome.failed("run_ui_sequence", "the original window now belongs to another process")
+        before = ui._snapshot(window_handle, process_id)
+        if ui._has_exact_expected_text(before["records"], expected):
+            return outcome.failed(
+                "run_ui_sequence", "the exact expected result is already visible; no key was sent",
+                expected=expected,
+            )
+        window.set_focus()
+        time.sleep(0.12)
+        foreground = int(ctypes.windll.user32.GetForegroundWindow())
+        foreground_pid = ctypes.c_ulong()
+        ctypes.windll.user32.GetWindowThreadProcessId(foreground, ctypes.byref(foreground_pid))
+        if int(foreground_pid.value) != int(process_id):
+            return outcome.failed(
+                "run_ui_sequence", "Windows did not focus the original application; no key was sent",
+            )
+        keyboard.send_keys(keys, with_spaces=True, pause=0.02)
+        deadline = time.monotonic() + 4.0
+        while time.monotonic() < deadline:
+            snapshot = ui._snapshot(window_handle, process_id)
+            if ui._has_exact_expected_text(snapshot["records"], expected):
+                return outcome.done(
+                    "run_ui_sequence", keys=keys, expected=expected, verified=True,
+                )
+            time.sleep(0.2)
+        return outcome.unverified(
+            "run_ui_sequence",
+            "the key was sent to the original application but its expected result was not observed",
+            keys=keys, expected=expected,
+        )
+    except Exception as exc:
+        return outcome.failed(
+            "run_ui_sequence",
+            f"keyboard action failed ({type(exc).__name__}); verify the application before retrying",
+        )
 
 
 def _prepare_step(step: dict, snapshot: dict,
@@ -222,6 +325,30 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            if step["action"] == "press_keys":
+                dangerous = frozenset(step["key_combo"].split("+")) in _DANGEROUS_KEY_COMBOS
+                if dangerous:
+                    return confirm.request(
+                        key="run_ui_sequence.press_keys",
+                        title=f"Confirm keyboard shortcut: {step['key_combo']}",
+                        detail=(
+                            f"MARK will send {step['key_combo']} to the original application window. "
+                            f"It may close a tab or app, delete data, or lock Windows. "
+                            f"Expected visible result: {step['expected_result']}. Confirm only if intended."
+                        ),
+                        run=lambda: _resume_after_key_confirmation(state, index, step),
+                        on_cancel=lambda: _release_sequence(state["id"]),
+                    )
+                result = _press_keys_and_verify(
+                    step["keys"], step["expected_result"],
+                    state["window_handle"], state["process_id"],
+                )
+                if not result.startswith("status=done "):
+                    return _stop_with_step_result(state, index, result)
+                state["completed"] += 1
+                state["completed_labels"].append(step["key_combo"])
+                continue
+
             if step["action"] == "set_tree_item_expanded":
                 label = step["item_label"]
                 # Expanding/collapsing a tree node is reversible view navigation.
@@ -337,6 +464,28 @@ def _continue_sequence(state: dict, start_index: int) -> str:
         )
 
 
+def _resume_after_key_confirmation(state: dict, index: int,
+                                    step: dict) -> str:
+    """Run an approved key chord against the pinned window, then continue."""
+    try:
+        result = _press_keys_and_verify(
+            step["keys"], step["expected_result"],
+            state["window_handle"], state["process_id"],
+        )
+        if not result.startswith("status=done "):
+            return _stop_with_step_result(state, index, result)
+        state["completed"] += 1
+        state["completed_labels"].append(step["key_combo"])
+        return _continue_sequence(state, index + 1)
+    except Exception as exc:
+        _release_sequence(state["id"])
+        return outcome.failed(
+            "run_ui_sequence",
+            f"confirmed keyboard action failed ({type(exc).__name__}); later steps were not started",
+            sequence_id=state["id"], failed_step=index + 1,
+        )
+
+
 def _resume_tree_after_confirmation(state: dict, index: int,
                                     step: dict) -> str:
     """Run an approved tree action against the original HWND/PID, then continue."""
@@ -449,7 +598,7 @@ TOOL = {
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
-        "ordered steps. A set_tree_item_expanded step must supply one exact visible "
+        "ordered steps. A press_keys step must supply one key or modifier chord and an exact visible postcondition. A set_tree_item_expanded step must supply one exact visible "
         "TreeItem label and a boolean expanded value; MARK verifies the ExpandCollapsePattern "
         "state in the original window before starting the next step. It expands or collapses "
         "only the node and never activates a child item. A click step must name one exact visible Button, "
@@ -484,14 +633,14 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered steps. Use click, fill_text, or set_tree_item_expanded with an exact TreeItem label and boolean expanded state.",
+                "description": "Two to eight ordered steps. Use click, fill_text, press_keys with one key/chord and expected_result, or set_tree_item_expanded with an exact TreeItem label and boolean expanded state.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "enum": ["click", "fill_text", "set_tree_item_expanded"],
-                            "description": "Use click for a verified button press, fill_text for one safe text field, or set_tree_item_expanded for one exact visible TreeItem.",
+                            "enum": ["click", "fill_text", "press_keys", "set_tree_item_expanded"],
+                            "description": "Use click for a verified button press, fill_text for one safe text field, press_keys for one key/chord with an exact visible postcondition, or set_tree_item_expanded for one exact visible TreeItem.",
                         },
                         "button_label": {
                             "type": "STRING",
@@ -500,6 +649,14 @@ TOOL = {
                         "expected_result": {
                             "type": "STRING",
                             "description": "For click: exact accessible name of a distinctive UI element that should newly appear after the click.",
+                        },
+                        "keys": {
+                            "type": "STRING",
+                            "description": "For press_keys: one key such as Tab/Enter or one Ctrl/Alt/Shift chord such as Ctrl+S; no arbitrary text.",
+                        },
+                        "expected_result": {
+                            "type": "STRING",
+                            "description": "For press_keys: exact distinctive accessible text that must appear after the key is sent.",
                         },
                         "field_label": {
                             "type": "STRING",
