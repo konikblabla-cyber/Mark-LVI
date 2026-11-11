@@ -228,3 +228,25 @@ def should_forward_microphone(
     if not communication_app_active:
         return True
     return bool(addressed_turn_open or push_to_talk_held)
+
+
+def should_stream_call_audio(
+    communication_active: bool,
+    setting_enabled: bool,
+    proactive_audio_enabled: bool,
+    gemini_live_available: bool,
+    phone_audio_active: bool = False,
+) -> bool:
+    """Allow call audio to Gemini only after explicit consent and with semantic routing.
+
+    The default remains local-only. This opt-in is valid only while Gemini Live
+    Proactive Audio is actually available, and never while the separate phone
+    audio input is active.
+    """
+    return bool(
+        communication_active
+        and setting_enabled
+        and proactive_audio_enabled
+        and gemini_live_available
+        and not phone_audio_active
+    )
