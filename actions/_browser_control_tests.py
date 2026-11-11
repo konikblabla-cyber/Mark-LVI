@@ -60,6 +60,9 @@ class FakeLocator:
     async def input_value(self):
         return self.value
 
+    async def evaluate(self, script):
+        return self.attrs.get("__evaluate_result", "")
+
 
 class FakePage:
     def __init__(self, locator, url="https://example.test/", postconditions=None, context=None):
@@ -93,6 +96,19 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
             session,
             selector="button#action",
             expected_text="Account deleted",
+            block_high_impact=True,
+        ))
+        self.assertIn("status=failed", result)
+        self.assertEqual(locator.clicked, 0)
+
+    def test_sequence_blocks_default_submit_button_using_form_metadata(self):
+        locator = FakeLocator(attrs={"__evaluate_result": "button submit /checkout"})
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session,
+            selector="button#confirm",
+            expected_text="Order confirmed",
             block_high_impact=True,
         ))
         self.assertIn("status=failed", result)
