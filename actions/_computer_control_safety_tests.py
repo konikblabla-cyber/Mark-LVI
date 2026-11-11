@@ -377,7 +377,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
         click.assert_called_once_with(x=20, y=30)
 
     def test_verified_visual_click_never_clicks_if_expected_result_is_already_visible(self):
-        before = {"handle": 7, "process_id": 55, "records": []}
+        before = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
         with patch.object(control.platform, "system", return_value="Windows"), \
              patch.object(control, "_input_window_guard", return_value=""), \
              patch("actions.ui_interaction._snapshot", return_value=before), \
@@ -392,7 +392,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
         click.assert_not_called()
 
     def test_verified_visual_click_rechecks_foreground_after_slow_image_analysis(self):
-        before = {"handle": 7, "process_id": 55, "records": []}
+        before = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
         blocked = "status=failed action=computer_control reason=foreground_changed"
         desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
         with patch.object(control.platform, "system", return_value="Windows"), \
@@ -410,8 +410,8 @@ class ComputerControlSafetyTests(unittest.TestCase):
         click.assert_not_called()
 
     def test_unverified_visual_click_is_not_retried(self):
-        before = {"handle": 7, "process_id": 55, "records": []}
-        after = {"handle": 7, "process_id": 55, "records": []}
+        before = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
+        after = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
         desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
         with patch.object(control.platform, "system", return_value="Windows"), \
              patch.object(control, "_input_window_guard", return_value=""), \
@@ -478,6 +478,22 @@ class ComputerControlSafetyTests(unittest.TestCase):
         self.assertIsNone(
             control._visible_window_region((20, 20, 20, 60), (100, 80)),
         )
+
+
+    def test_verified_visual_click_fails_closed_when_window_bounds_are_missing(self):
+        before = {"handle": 7, "process_id": 55, "records": []}
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("status=failed", result)
+        self.assertIn("no full-desktop screenshot was sent", result)
+        locate.assert_not_called()
+        click.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
