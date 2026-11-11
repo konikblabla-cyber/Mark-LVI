@@ -12,7 +12,7 @@ import subprocess
 import threading
 import webbrowser
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote_plus, urlsplit
 from typing import TYPE_CHECKING, Optional
 
 from core import appidentity, confirm, outcome
@@ -461,6 +461,12 @@ _SEARCH_ENGINES: dict[str, str] = {
     "yandex":     "https://yandex.com/search/?text=",
 }
 
+def _search_url(query: object, engine: object = "google") -> str:
+    """Build a search URL with the query encoded as one opaque parameter."""
+    name = str(engine or "google").strip().lower()
+    base = _SEARCH_ENGINES.get(name, _SEARCH_ENGINES["google"])
+    return base + quote_plus(str(query or ""), safe="")
+
 _MAC_APP_NAMES: dict[str, str] = {
     "chrome":  "Google Chrome",
     "edge":    "Microsoft Edge",
@@ -856,8 +862,7 @@ class _BrowserSession:
             "not have answered", url=url)
 
     async def search(self, query: str, engine: str = "google") -> str:
-        base = _SEARCH_ENGINES.get(engine.lower(), _SEARCH_ENGINES["google"])
-        return await self.go_to(base + query.replace(" ", "+"))
+        return await self.go_to(_search_url(query, engine))
 
     async def click(self, selector: str = None, text: str = None) -> str:
         page = await self._get_page()
@@ -1283,9 +1288,7 @@ def _browser_control_execute(
             return result
 
         if action == "search":
-            base    = _SEARCH_ENGINES.get(params.get("engine", "google").lower(),
-                                          _SEARCH_ENGINES["google"])
-            nav_url = base + params.get("query", "").replace(" ", "+")
+            nav_url = _search_url(params.get("query", ""), params.get("engine", "google"))
         else:
             nav_url = params.get("url", "").strip()
 
