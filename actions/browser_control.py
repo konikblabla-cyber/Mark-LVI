@@ -1293,16 +1293,24 @@ class _BrowserSession:
         )
         if validation_error:
             return outcome.failed("browser_control", validation_error)
+        ready_deadline = (
+            asyncio.get_running_loop().time() + _LOCATOR_READY_TIMEOUT_SECONDS
+            if wait_for_target else None
+        )
 
         for role in ("button", "link", "menuitem", "tab", "searchbox", "textbox"):
             try:
                 locator = page.get_by_role(role, name=description, exact=True)
             except Exception:
                 continue
-            ready = (
-                await _wait_for_locator_ready(locator)
-                if wait_for_target else await _locator_ready(locator)
-            )
+            if wait_for_target:
+                remaining = max(
+                    0.0,
+                    float(ready_deadline) - asyncio.get_running_loop().time(),
+                )
+                ready = await _wait_for_locator_ready(locator, timeout=remaining)
+            else:
+                ready = await _locator_ready(locator)
             if not ready:
                 continue
             if block_high_impact and await _locator_is_high_impact(locator, description):
@@ -1375,10 +1383,14 @@ class _BrowserSession:
             locator = None
         fallback_ready = False
         if locator is not None:
-            fallback_ready = (
-                await _wait_for_locator_ready(locator)
-                if wait_for_target else await _locator_ready(locator)
-            )
+            if wait_for_target:
+                remaining = max(
+                    0.0,
+                    float(ready_deadline) - asyncio.get_running_loop().time(),
+                )
+                fallback_ready = await _wait_for_locator_ready(locator, timeout=remaining)
+            else:
+                fallback_ready = await _locator_ready(locator)
         if locator is not None and fallback_ready:
             if block_high_impact and await _locator_is_high_impact(locator, description):
                 return outcome.failed(
