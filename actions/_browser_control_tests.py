@@ -533,6 +533,31 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertIn("Pay now", cleaned)
         self.assertEqual(browser._clean_control_label("x" * 40, 12), "x" * 12)
 
+    def test_inspect_controls_does_not_mark_search_submit_as_high_impact(self):
+        locator = FakeLocator()
+        page = FakePage(locator)
+        page.evaluate = lambda _script: _async_value([{
+            "tag": "button", "role": "button", "type": "submit",
+            "label": "Search", "placeholder": "", "name": "",
+            "disabled": False, "form_submit": False, "form_action": "/search",
+        }])
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.inspect_controls(session))
+        self.assertIn('"label":"Search"', result)
+        self.assertIn('"high_impact":false', result)
+
+    def test_inspect_controls_marks_non_search_post_forms_as_high_impact(self):
+        locator = FakeLocator()
+        page = FakePage(locator)
+        page.evaluate = lambda _script: _async_value([{
+            "tag": "button", "role": "button", "type": "submit",
+            "label": "Continue", "placeholder": "", "name": "",
+            "disabled": False, "form_submit": True, "form_action": "/checkout",
+        }])
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.inspect_controls(session))
+        self.assertIn('"high_impact":true', result)
+
     def test_inspect_controls_fails_closed_when_dom_snapshot_fails(self):
         page = FakePage(FakeLocator())
         async def fail_snapshot(_script):
