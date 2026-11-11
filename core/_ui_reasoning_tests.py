@@ -239,5 +239,76 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["reason"], "previous_action_unverified")
         self.assertEqual(result["steps"], [])
 
+
+    def test_visual_click_fallback_uses_only_pinned_app_metadata_and_exact_postcondition(self):
+        snapshot = {
+            "handle": 123,
+            "process_id": 456,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [control("Text", "General settings")],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Click the gear icon and verify "Privacy panel"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["execution"], "not_started")
+        step = result["steps"][0]
+        self.assertEqual(step["tool"], "computer_control")
+        self.assertEqual(step["parameters"], {
+            "action": "screen_click_verified",
+            "description": "gear icon",
+            "expected_result": "Privacy panel",
+            "target_app": "settings.exe",
+        })
+        self.assertEqual(step["risk"], "low")
+        self.assertFalse(step["requires_confirmation"])
+
+    def test_visual_click_fallback_supports_polish_goal_and_high_impact_confirmation(self):
+        snapshot = {
+            "process_name": "settings.exe",
+            "bounds": (0, 0, 800, 600),
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Kliknij przycisk Delete account i sprawdź "Account removed"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "planned")
+        step = result["steps"][0]
+        self.assertEqual(step["tool"], "computer_control")
+        self.assertIn("Delete account", step["parameters"]["description"])
+        self.assertEqual(step["parameters"]["expected_result"], "Account removed")
+        self.assertEqual(step["risk"], "high")
+        self.assertTrue(step["requires_confirmation"])
+
+    def test_visual_click_fallback_requires_an_exact_new_accessible_postcondition(self):
+        snapshot = {
+            "process_name": "settings.exe",
+            "bounds": (10, 10, 700, 500),
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task("Click the gear icon", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "click_postcondition_missing")
+        self.assertEqual(result["steps"], [])
+
+    def test_visual_click_fallback_requires_pinned_window_metadata(self):
+        snapshot = {
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Click the gear icon and verify "Privacy panel"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "visual_target_identity_unavailable")
+        self.assertEqual(result["steps"], [])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
