@@ -255,6 +255,25 @@ def _fresh_ui_plan(goal: str, previous_result: dict | None = None) -> dict:
         from core.ui_reasoning import plan_ui_task, replan_ui_task
 
         snapshot = ui_interaction._snapshot()
+        if previous_result is not None:
+            previous_step = previous_result.get("step")
+            previous_params = (
+                previous_step.get("parameters")
+                if isinstance(previous_step, dict) else None
+            )
+            previous_tool = (
+                previous_step.get("tool")
+                if isinstance(previous_step, dict) else ""
+            )
+            if previous_tool == "computer_control" and isinstance(previous_params, dict):
+                expected_app = str(previous_params.get("target_app") or "").strip().casefold()
+                active_app = str(snapshot.get("process_name") or "").strip().casefold()
+                if not expected_app or not active_app or active_app != expected_app:
+                    return {
+                        "status": "blocked",
+                        "reason": "the foreground application changed; visual replan refused",
+                        "steps": [],
+                    }
         proposed = (
             replan_ui_task(goal, snapshot, previous_result)
             if previous_result is not None
