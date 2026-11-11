@@ -518,8 +518,8 @@ def _screen_find(description: str, target_app: str = "") -> tuple[int, int] | No
             f"Locate the UI element described as: '{str(description)[:200]}'. "
             + (f"Only search inside the foreground application {str(target_app)[:100]}. "
                if target_app else "")
-            f"Reply with ONLY the center coordinates as: x,y "
-            f"If the element is not visible, reply: NOT_FOUND"
+            + "Reply with ONLY the center coordinates as: x,y "
+            + "If the element is not visible, reply: NOT_FOUND"
         )
 
         from core import gemini
