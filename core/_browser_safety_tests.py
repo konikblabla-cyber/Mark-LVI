@@ -42,7 +42,7 @@ class BrowserSafetyClassifierTests(unittest.TestCase):
 class BrowserSearchUrlTests(unittest.TestCase):
     def test_search_query_is_encoded_as_one_parameter(self):
         from actions.browser_control import _search_url
-        url = _search_url("cats & dogs #1 + coffee", "google")
+        url = _search_url("cats & dogs #1 + coffee", "google", {"google": "https://www.google.com/search?q="})
         self.assertEqual(
             url,
             "https://www.google.com/search?q=cats+%26+dogs+%231+%2B+coffee",
@@ -50,7 +50,7 @@ class BrowserSearchUrlTests(unittest.TestCase):
 
     def test_polish_text_and_unknown_engine_are_handled(self):
         from actions.browser_control import _search_url
-        url = _search_url("zażółć gęślą jaźń", "not-a-search-engine")
+        url = _search_url("zażółć gęślą jaźń", "not-a-search-engine", {"google": "https://www.google.com/search?q="})
         self.assertTrue(url.startswith("https://www.google.com/search?q="))
         self.assertIn("%C5%BC", url)
         self.assertNotIn(" ", url)
