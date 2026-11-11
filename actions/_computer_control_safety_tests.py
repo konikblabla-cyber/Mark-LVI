@@ -363,7 +363,8 @@ class ComputerControlSafetyTests(unittest.TestCase):
              patch("actions.ui_interaction.focus_window_identity", return_value=before) as focus, \
              patch("actions.ui_interaction._snapshot", return_value=after) as snapshot, \
              patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
-             patch("actions.ui_interaction._wait_for_expected_result", return_value=True):
+             patch("actions.ui_interaction._wait_for_expected_result", return_value=True), \
+             patch.object(control, "_pinned_window_is_foreground", return_value=True):
             result = control._screen_click_verified_execute(
                 "gear icon", "Settings", "settings.exe", 7, 55,
             )
@@ -585,6 +586,27 @@ class ComputerControlSafetyTests(unittest.TestCase):
         execute.assert_called_once_with(
             "gear icon", "Privacy panel", "settings.exe", 7, 55,
         )
+
+
+    def test_visual_click_refuses_another_window_of_the_same_process(self):
+        before = {
+            "handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_screen_find", return_value=(20, 30)) as locate, \
+             patch.object(control, "_click") as click, \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction.focus_window_identity", return_value=before), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch.object(control, "_pinned_window_is_foreground", return_value=False):
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe", 7, 55,
+            )
+        self.assertIn("exact planned window is no longer foreground", result)
+        locate.assert_called_once()
+        click.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
