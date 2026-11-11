@@ -5,6 +5,7 @@ from unittest import mock
 from datetime import datetime, timezone
 
 from plugins import google_workspace as workspace
+from core.plugin_loader import _validate
 
 
 class GoogleWorkspaceTests(unittest.TestCase):
@@ -13,6 +14,12 @@ class GoogleWorkspaceTests(unittest.TestCase):
         self.assertIn("gmail.readonly", workspace._SCOPES)
         self.assertIn("gmail.compose", workspace._SCOPES)
         self.assertIn("gmail.send", workspace._SCOPES)
+
+    def test_plugin_contract_is_accepted_by_auto_loader(self):
+        record = _validate(workspace, "google_workspace.py")
+        self.assertTrue(record.valid, record.error)
+        self.assertEqual(record.name, "google_workspace")
+        self.assertEqual(record.settings["namespace"], "google_workspace")
 
     def test_token_is_stored_outside_the_repository(self):
         token = workspace._token_path().resolve()
@@ -132,6 +139,8 @@ class GoogleWorkspaceTests(unittest.TestCase):
         create.assert_not_called()
         self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
         self.assertIn("Exact body", gate.call_args.kwargs["detail"])
+        gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
+        create.assert_called_once_with(["person@example.com"], "Exact subject", "Exact body")
 
     def test_email_body_limit_matches_the_full_hud_confirmation(self):
         with self.assertRaises(ValueError):
@@ -162,6 +171,8 @@ class GoogleWorkspaceTests(unittest.TestCase):
         self.assertIn("Exact message body", gate.call_args.kwargs["detail"])
         self.assertTrue(gate.call_args.kwargs["detail"].endswith("Exact message body\n\nThis sends the email only after you confirm this exact content."))
         self.assertIn("only after you confirm", gate.call_args.kwargs["detail"])
+        gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
+        send.assert_called_once_with(["person@example.com"], "Exact subject", "Exact message body")
 
     def test_calendar_create_is_parked_behind_hud_confirmation(self):
         with mock.patch.object(workspace.confirm, "request",
@@ -179,6 +190,12 @@ class GoogleWorkspaceTests(unittest.TestCase):
         create.assert_not_called()
         self.assertIn("Dentist", gate.call_args.kwargs["detail"])
         self.assertIn("after you confirm", gate.call_args.kwargs["detail"])
+        gate.call_args.kwargs["run"]()  # simulates the UI's human-confirmed callback
+        create.assert_called_once_with({
+            "summary": "Dentist",
+            "start": {"dateTime": "2026-11-12T09:00:00+01:00", "timeZone": "Europe/Warsaw"},
+            "end": {"dateTime": "2026-11-12T10:00:00+01:00", "timeZone": "Europe/Warsaw"},
+        })
 
     def test_unconfigured_status_is_actionable(self):
         with mock.patch.object(workspace, "_token_path") as token_path:
