@@ -375,6 +375,53 @@ def _snapshot(window_handle=None, expected_process_id=None) -> dict:
         raise RuntimeError("UI Automation returned an invalid window snapshot")
     return value
 
+def focus_window_identity(window_handle: int, expected_process_id: int) -> dict:
+    """Bring one previously identified window forward, then prove it is foreground.
+
+    Used only for an action already bound to a specific HWND/PID (for example
+    after the user confirms MARK's HUD dialog). A reused handle, hidden window,
+    failed focus, or foreground mismatch all fail closed.
+    """
+    try:
+        handle = int(window_handle)
+        process_id = int(expected_process_id)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("a positive window handle and process ID are required") from exc
+    if handle <= 0 or process_id <= 0:
+        raise ValueError("a positive window handle and process ID are required")
+
+    def _focus_exact_window():
+        from pywinauto import Desktop
+        window = Desktop(backend="uia").window(handle=handle).wrapper_object()
+        if not window.is_visible():
+            raise RuntimeError("the original target window is no longer visible")
+        actual_pid = getattr(window.element_info, "process_id", 0)
+        if not _valid_window_process_id(actual_pid, process_id):
+            raise RuntimeError("the original window handle now belongs to another process")
+        window.set_focus()
+        return True
+
+    completed, value, error = _run_uia(
+        _focus_exact_window,
+        _SNAPSHOT_TIMEOUT_SECONDS,
+        exclusive_lock=_SNAPSHOT_LOCK,
+    )
+    if not completed:
+        raise TimeoutError("UI Automation could not focus the original window within 4 seconds")
+    if error is not None:
+        raise RuntimeError(
+            f"UI Automation could not focus the original window ({type(error).__name__})"
+        ) from error
+    if value is not True:
+        raise RuntimeError("UI Automation did not confirm focus of the original window")
+
+    active = _snapshot()
+    if (active.get("handle") != handle
+            or active.get("process_id") != process_id):
+        raise RuntimeError("the original target window did not become the foreground window")
+    return active
+
+
 
 def _invoke_on_window(window_handle: int, expected_process_id: int,
                       label: str, expected_result: str,
