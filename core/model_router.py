@@ -585,6 +585,8 @@ def reserve_groq_request(messages) -> int:
 
     This is a per-install guard for MARK. It cannot account for the same key
     being used in other applications or by other users in the Groq organization.
+    Character limits are a conservative local budget signal, not an exact token
+    meter; Groq's own organization/model quotas remain authoritative.
     """
     provider_id = "openai_compat@groq"
     _assert_zero_cost_provider(provider_id)
