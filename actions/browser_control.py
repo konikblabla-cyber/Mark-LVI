@@ -178,6 +178,24 @@ async def _type_and_verify(locator, text: str, clear_first: bool) -> str:
     )
 
 
+_LOCATOR_READY_TIMEOUT_SECONDS = 8.0
+
+
+async def _wait_for_locator_ready(locator, timeout: float | None = None) -> bool:
+    """Wait for one exact visible enabled match; ambiguity remains a hard stop."""
+    try:
+        seconds = _LOCATOR_READY_TIMEOUT_SECONDS if timeout is None else max(0.0, float(timeout))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    deadline = asyncio.get_running_loop().time() + seconds
+    while True:
+        if await _locator_ready(locator):
+            return True
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(0.1)
+
+
 async def _locator_is_sensitive(locator) -> bool:
     """Inspect field metadata only; never read or return the field's value."""
     descriptors = []
@@ -1032,7 +1050,8 @@ class _BrowserSession:
 
     async def click(self, selector: str = None, text: str = None,
                     expected_text: str = "", expected_url: str = "",
-                    block_high_impact: bool = False) -> str:
+                    block_high_impact: bool = False,
+                    wait_for_target: bool = False) -> str:
         page = await self._get_page()
         expected_text, expected_url, validation_error = _validate_click_postcondition(
             expected_text, expected_url,
@@ -1045,7 +1064,11 @@ class _BrowserSession:
             )
             if locator is None:
                 return outcome.failed("browser_control", "no element was named to click")
-            if not await _locator_ready(locator):
+            ready = (
+                await _wait_for_locator_ready(locator)
+                if wait_for_target else await _locator_ready(locator)
+            )
+            if not ready:
                 return outcome.failed(
                     "browser_control",
                     "the target was missing, ambiguous, hidden or disabled; nothing was clicked",
@@ -1262,7 +1285,8 @@ class _BrowserSession:
 
     async def smart_click(self, description: str,
                           expected_text: str = "", expected_url: str = "",
-                          block_high_impact: bool = False) -> str:
+                          block_high_impact: bool = False,
+                          wait_for_target: bool = False) -> str:
         page = await self._get_page()
         expected_text, expected_url, validation_error = _validate_click_postcondition(
             expected_text, expected_url,
@@ -1275,7 +1299,11 @@ class _BrowserSession:
                 locator = page.get_by_role(role, name=description, exact=True)
             except Exception:
                 continue
-            if not await _locator_ready(locator):
+            ready = (
+                await _wait_for_locator_ready(locator)
+                if wait_for_target else await _locator_ready(locator)
+            )
+            if not ready:
                 continue
             if block_high_impact and await _locator_is_high_impact(locator, description):
                 return outcome.failed(
@@ -1345,7 +1373,13 @@ class _BrowserSession:
             locator = page.get_by_text(description, exact=True)
         except Exception:
             locator = None
-        if locator is not None and await _locator_ready(locator):
+        fallback_ready = False
+        if locator is not None:
+            fallback_ready = (
+                await _wait_for_locator_ready(locator)
+                if wait_for_target else await _locator_ready(locator)
+            )
+        if locator is not None and fallback_ready:
             if block_high_impact and await _locator_is_high_impact(locator, description):
                 return outcome.failed(
                     "browser_control",
@@ -1768,6 +1802,7 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
                         expected_text=step["expected_text"],
                         expected_url=step["expected_url"],
                         block_high_impact=True,
+                        wait_for_target=True,
                     ),
                     timeout=timeout,
                 )
@@ -1778,6 +1813,7 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
                         expected_text=step["expected_text"],
                         expected_url=step["expected_url"],
                         block_high_impact=True,
+                        wait_for_target=True,
                     ),
                     timeout=timeout,
                 )
