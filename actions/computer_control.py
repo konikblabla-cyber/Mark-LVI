@@ -1038,7 +1038,7 @@ TOOL = {
         "Direct computer control: type, click, hotkeys, scroll, move mouse. "
         "For visual controls in apps without usable accessibility labels, use screen_click_verified: "
         "name the visual target, exact new accessible label expected after it opens, and target_app. "
-        "It sends a screen capture to configured Gemini for visual grounding, clicks once, and reports "
+        "It sends only a crop of the pinned target window to configured Gemini for visual grounding, clicks once, and reports "
         "success only when that exact label appears in the same pinned window. Legacy screen_click only "
         "sends a click and is unverified; prefer screen_click_verified for actual interaction. "
         "On Windows, before typing or clicking, call action='foreground_app' and pass its exact "
