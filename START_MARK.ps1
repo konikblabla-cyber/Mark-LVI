@@ -26,11 +26,11 @@ function Find-Python {
     if ($launcher) {
         foreach ($version in @("3.12", "3.11", "3.13")) {
             # MARK's audio and Qt wheels are shipped for 64-bit Windows only.
-            & $launcher.Source "-$version" -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 else 2)" *> $null
+            & $launcher.Source "-${version}-64" -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 else 2)" *> $null
             if ($LASTEXITCODE -eq 0) {
                 return @{
                     Executable = $launcher.Source
-                    Prefix = @("-$version")
+                    Prefix = @("-${version}-64")
                     Version = $version
                 }
             }
