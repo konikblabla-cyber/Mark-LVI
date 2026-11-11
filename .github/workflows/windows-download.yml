@@ -40,6 +40,27 @@ jobs:
       - name: Check out MARK
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Exercise the first-run Windows installer
+        shell: pwsh
+        run: |
+          & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$PWD\START_MARK.ps1" -InstallOnly
+          if ($LASTEXITCODE -ne 0) {
+            throw "START_MARK.ps1 -InstallOnly failed with exit code $LASTEXITCODE."
+          }
+          $venvPython = "$PWD\.venv\Scripts\python.exe"
+          if (-not (Test-Path $venvPython)) {
+            throw "The first-run installer did not create its private Python environment."
+          }
+          & $venvPython -c "import main; print('JARVIS entry point imported after one-click setup.')"
+          if ($LASTEXITCODE -ne 0) {
+            throw "The installed JARVIS entry point failed to import."
+          }
+
       - name: Validate launcher syntax and required files
         shell: pwsh
         run: |
