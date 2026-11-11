@@ -619,8 +619,12 @@ _BROWSER_POSTCONDITION_TIMEOUT_MS = 6_000
 
 def _validate_click_postcondition(expected_text: object, expected_url: object):
     """Validate an exact, observable browser postcondition before a click."""
-    text = str(expected_text or "").strip()
-    url = str(expected_url or "").strip()
+    if expected_text is not None and not isinstance(expected_text, str):
+        return None, None, "expected_text must be a string"
+    if expected_url is not None and not isinstance(expected_url, str):
+        return None, None, "expected_url must be a string"
+    text = (expected_text or "").strip()
+    url = (expected_url or "").strip()
     if len(text) > 240:
         return None, None, "expected_text must be at most 240 characters"
     if len(url) > 2_048:
