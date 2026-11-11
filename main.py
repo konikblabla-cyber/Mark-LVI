@@ -111,7 +111,7 @@ from core.wake_word            import (
 )
 
 # How long the assistant stays awake with no user speech before it auto-sleeps
-# again (wake-word mode only).
+# again (LOCAL PRIVACY mode only).
 WAKE_SLEEP_TIMEOUT = 120.0   # seconds (2 minutes)
 
 def get_base_dir():
@@ -693,7 +693,7 @@ class JarvisLive:
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
-        # Wake-word mode grants one addressed request at a time.
+        # LOCAL PRIVACY mode grants one addressed request at a time.
         self._addressed_turn_pending = False
         self._addressed_response_complete = False
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
@@ -3028,7 +3028,8 @@ class JarvisLive:
                         self._awake = True
                         self.ui.set_state("LISTENING")
                         self.ui.write_log("SYS: JARVIS online — address-aware listening active; no wake phrase needed.")
-                        if self._enhanced_live and get_proactive_audio_enabled():
+                        if (self._engine_caps is None and self._enhanced_live
+                                and get_proactive_audio_enabled()):
                             self.ui.write_log(
                                 "SYS: Gemini Proactive Audio decides whether speech is directed to MARK. "
                                 "Microphone audio is streamed while this session is connected."

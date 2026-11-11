@@ -6802,9 +6802,9 @@ class MainWindow(QMainWindow):
             self._wake_btn.setText("◈  ADDRESS-AWARE: ON")
             self._wake_btn.setStyleSheet(_on)
             self._wake_btn.setToolTip(
-                "No wake phrase required. Gemini Live receives microphone audio while connected "
+                "No wake phrase required. With Gemini Live, microphone audio is streamed while connected "
                 "and Proactive Audio decides whether speech is directed to MARK. "
-                "Click to switch to local-only wake-phrase privacy mode."
+                "Other engines need LOCAL PRIVACY or Push-to-Talk. Click to switch to local-only wake mode."
             )
             self._wake_sleep_btn.hide()
 
