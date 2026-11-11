@@ -360,7 +360,8 @@ class ComputerControlSafetyTests(unittest.TestCase):
              patch.object(control, "_screen_find", return_value=(20, 30)) as locate, \
              patch.object(control, "_click", return_value="Clicked (20, 30)") as click, \
              patch.object(control, "pyautogui", desktop), \
-             patch("actions.ui_interaction._snapshot", side_effect=[before, after]) as snapshot, \
+             patch("actions.ui_interaction.focus_window_identity", return_value=before) as focus, \
+             patch("actions.ui_interaction._snapshot", return_value=after) as snapshot, \
              patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
              patch("actions.ui_interaction._wait_for_expected_result", return_value=True):
             result = control._screen_click_verified_execute(
@@ -372,8 +373,8 @@ class ComputerControlSafetyTests(unittest.TestCase):
         locate.assert_called_once_with(
             "gear icon", "settings.exe", (10, 20, 90, 70),
         )
-        snapshot.assert_any_call()
-        snapshot.assert_any_call(7, 55)
+        focus.assert_called_once_with(7, 55)
+        snapshot.assert_called_once_with(7, 55)
         click.assert_called_once_with(x=20, y=30)
 
     def test_verified_visual_click_never_clicks_if_expected_result_is_already_visible(self):
@@ -484,7 +485,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
         before = {"handle": 7, "process_id": 55, "records": []}
         with patch.object(control.platform, "system", return_value="Windows"), \
              patch.object(control, "_input_window_guard", return_value=""), \
-             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch("actions.ui_interaction.focus_window_identity", return_value=before), \
              patch.object(control, "_screen_find") as locate, \
              patch.object(control, "_click") as click:
             result = control._screen_click_verified_execute(
