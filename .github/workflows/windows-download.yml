@@ -56,9 +56,13 @@ jobs:
           if (-not (Test-Path $venvPython)) {
             throw "The first-run installer did not create its private Python environment."
           }
-          & $venvPython -c "import main; print('JARVIS entry point imported after one-click setup.')"
+          & $venvPython -c "import main; import plugins.google_workspace; print('JARVIS entry point and Google Workspace plugin imported after one-click setup.')"
           if ($LASTEXITCODE -ne 0) {
-            throw "The installed JARVIS entry point failed to import."
+            throw "The installed JARVIS entry point or Google Workspace plugin failed to import."
+          }
+          & $venvPython -m plugins._google_workspace_tests
+          if ($LASTEXITCODE -ne 0) {
+            throw "Google Workspace offline security/behavior tests failed in the installed venv."
           }
 
       - name: Validate launcher syntax and required files
