@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import threading
+import unicodedata
 import webbrowser
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -200,7 +201,10 @@ async def _wait_for_locator_ready(locator, timeout: float | None = None) -> bool
 def _clean_control_label(value, limit: int) -> str:
     """Bound control metadata and remove control characters before model exposure."""
     text = str(value or "")
-    text = "".join(ch for ch in text if ord(ch) >= 32)
+    text = "".join(
+        ch for ch in text
+        if ord(ch) >= 32 and not unicodedata.category(ch).startswith("C")
+    )
     return " ".join(text.split())[:max(0, int(limit))]
 
 
