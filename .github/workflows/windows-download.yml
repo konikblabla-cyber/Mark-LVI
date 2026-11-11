@@ -77,7 +77,7 @@ jobs:
             throw "Home Assistant offline safety/behavior tests failed in the installed venv."
           }
           $env:QT_QPA_PLATFORM = "offscreen"
-          & $venvPython -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QWidget, QTextEdit; from ui import ConfirmBanner; app=QApplication([]); banner=ConfirmBanner('Send email?', 'x'*8000, parent=QWidget()); fields=banner.findChildren(QTextEdit); assert len(fields)==1 and fields[0].isReadOnly() and fields[0].maximumHeight()<=220; print('Long HUD confirmation is read-only and scrollable.')"
+          & $venvPython -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QWidget, QTextEdit; from ui import ConfirmBanner; app=QApplication([]); parent=QWidget(); banner=ConfirmBanner('Send email?', 'x'*8000, parent=parent); fields=banner.findChildren(QTextEdit); assert len(fields)==1 and fields[0].isReadOnly() and fields[0].maximumHeight()<=220; print('Long HUD confirmation is read-only and scrollable.')"
           if ($LASTEXITCODE -ne 0) {
             throw "Long HUD confirmation panel failed its offscreen smoke test."
           }
