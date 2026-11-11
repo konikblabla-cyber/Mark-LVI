@@ -669,6 +669,44 @@ class BrowserSequenceTests(unittest.TestCase):
         self.assertIn("status=unverified", result)
         self.assertEqual(executed, [])
 
+    def test_sequence_dispatches_verified_smart_click(self):
+        executed = []
+
+        class FakeSession:
+            def run(self, coroutine, timeout=60):
+                return asyncio.run(coroutine)
+
+            async def go_to(self, url):
+                executed.append("go_to")
+                return browser.outcome.done("browser_control", opened=url, verified=True)
+
+            async def smart_click(self, description, expected_text="", expected_url="",
+                                  block_high_impact=False, wait_for_target=False):
+                executed.append((description, block_high_impact, wait_for_target))
+                return browser.outcome.done("browser_control", clicked=True, verified=True)
+
+        steps = [
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "smart_click", "description": "Open workspace", "expected_text": "Workspace"},
+        ]
+        with patch.object(browser._registry, "get", return_value=FakeSession()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""):
+            result = browser._run_browser_sequence({"steps": steps}, None)
+        self.assertIn("status=done", result)
+        self.assertEqual(executed, [
+            "go_to", ("Open workspace", True, True)
+        ])
+
+    def test_browser_tool_schema_advertises_verified_sequence_action(self):
+        properties = browser.TOOL["parameters"]["properties"]
+        self.assertIn("sequence", properties["action"]["description"])
+        self.assertIn("steps", properties)
+        self.assertIn("2 to 8 ordered steps", properties["steps"]["description"])
+        self.assertEqual(
+            properties["steps"]["items"]["properties"]["action"]["enum"],
+            ["go_to", "click", "smart_click", "type", "smart_type"],
+        )
+
     def test_sequence_reports_done_only_after_every_step_verified(self):
         executed = []
 
