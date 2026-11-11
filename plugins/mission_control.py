@@ -234,6 +234,10 @@ def _format(mission: dict) -> str:
 
 
 _UI_PLAN_PARAMETER_TYPES = {
+    "computer_control": {
+        "action": str, "description": str,
+        "expected_result": str, "target_app": str,
+    },
     "set_checkbox_state": {"checkbox_label": str, "checked": bool},
     "select_tab_item": {"tab_label": str},
     "select_radio_option": {"radio_label": str},
