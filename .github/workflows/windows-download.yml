@@ -1,0 +1,100 @@
+name: Windows downloadable package
+
+on:
+  push:
+    branches:
+      - feature/gemini-38-live-jarvis
+    paths:
+      - "START_MARK.bat"
+      - "START_MARK.ps1"
+      - "INSTALL_MARK.bat"
+      - "setup.py"
+      - "requirements.txt"
+      - "main.py"
+      - "ui.py"
+      - "core/**"
+      - "actions/**"
+      - "plugins/**"
+      - "memory/**"
+      - "config/**"
+      - ".github/workflows/windows-download.yml"
+  pull_request:
+    paths:
+      - "START_MARK.bat"
+      - "START_MARK.ps1"
+      - "INSTALL_MARK.bat"
+      - "setup.py"
+      - "requirements.txt"
+      - ".github/workflows/windows-download.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - name: Check out MARK
+        uses: actions/checkout@v4
+
+      - name: Validate launcher syntax and required files
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD\START_MARK.ps1", [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          $required = @(
+            "START_MARK.bat", "START_MARK.ps1", "INSTALL_MARK.bat",
+            "setup.py", "requirements.txt", "main.py", "ui.py",
+            "core\face_model.obj", "core\prompt.txt"
+          )
+          foreach ($item in $required) {
+            if (-not (Test-Path $item)) {
+              throw "Required release file is missing: $item"
+            }
+          }
+          if (Test-Path "config\api_keys.json") {
+            throw "Refusing to package config\api_keys.json (may contain API credentials)."
+          }
+          Write-Host "Launcher syntax and release contents OK."
+
+      - name: Build clean source ZIP
+        shell: pwsh
+        run: |
+          $archive = "$env:RUNNER_TEMP\MARK-LVI-Windows.zip"
+          git archive --format=zip --output="$archive" HEAD
+          if (-not (Test-Path $archive)) {
+            throw "The Windows ZIP was not created."
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName })
+            foreach ($required in @("START_MARK.bat", "START_MARK.ps1", "INSTALL_MARK.bat", "main.py", "setup.py")) {
+              if ($names -notcontains $required) {
+                throw "The ZIP is missing $required."
+              }
+            }
+            if ($names -contains "config/api_keys.json" -or $names -contains ".env") {
+              throw "The ZIP contains a forbidden credentials file."
+            }
+            Write-Host ("Validated ZIP entries: " + $names.Count)
+          }
+          finally {
+            $zip.Dispose()
+          }
+
+      - name: Upload downloadable Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MARK-LVI-Windows-Portable
+          path: ${{ runner.temp }}/MARK-LVI-Windows.zip
+          if-no-files-found: error
+          retention-days: 30
