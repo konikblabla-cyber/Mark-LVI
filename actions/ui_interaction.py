@@ -333,9 +333,19 @@ def _read_window_snapshot(window_handle=None, expected_process_id=None) -> dict:
             "the window handle no longer belongs to the original application process"
         )
     records, clickables = _collect_accessible_controls(window)
+    try:
+        rect = window.rectangle()
+        bounds = (
+            int(rect.left), int(rect.top), int(rect.right), int(rect.bottom),
+        )
+        if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+            bounds = None
+    except Exception:
+        bounds = None
     return {
         "handle": int(handle),
         "process_id": int(process_id),
+        "bounds": bounds,
         "records": records,
         "clickables": clickables,
     }
