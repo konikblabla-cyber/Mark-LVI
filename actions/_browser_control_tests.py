@@ -546,6 +546,27 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertIn("Pay now", cleaned)
         self.assertEqual(browser._clean_control_label("x" * 40, 12), "x" * 12)
 
+    def test_inspect_controls_keeps_large_snapshots_valid_json(self):
+        import json
+        locator = FakeLocator()
+        page = FakePage(locator)
+        page.evaluate = lambda _script: _async_value([
+            {
+                "tag": "button", "role": "button", "type": "button",
+                "label": f"Control {index:03d} " + ("x" * 150),
+                "placeholder": "", "name": "", "disabled": False,
+                "form_submit": False, "form_action": "",
+            }
+            for index in range(120)
+        ])
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.inspect_controls(session))
+        payload = result.split(">>>", 1)[1].split("<<<END UNTRUSTED>>>", 1)[0]
+        parsed = json.loads(payload)
+        self.assertLessEqual(len(payload), 6_000)
+        self.assertGreater(len(parsed["visible_controls"]), 0)
+        self.assertLess(len(parsed["visible_controls"]), 80)
+
     def test_inspect_controls_does_not_mark_search_submit_as_high_impact(self):
         locator = FakeLocator()
         page = FakePage(locator)
