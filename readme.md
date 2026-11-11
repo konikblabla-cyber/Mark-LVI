@@ -89,6 +89,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧪 On-demand PC Diagnostics | Ask JARVIS for a read-only Windows health report with resource pressure, disk space, battery, uptime and top memory users; no automatic cleanup or process killing |
 | 🏠 Home Assistant | Optional HTTPS integration for explicitly mapped lights, switches, fans and climate targets; verifies reported state. No locks, doors, alarms or arbitrary services |
 | 📧 Google Workspace | Optional Gmail search/read, confirmed drafts and HUD-confirmed sending, plus Google Calendar event lists and confirmed event creation through local OAuth |
+| 🎧 Spotify Connect | Optional PKCE integration: search/play, pause/resume, skip, volume, device selection, queue and confirmed private/public playlist creation or additions. Audio stays in Spotify's app; catalog metadata stays in MARK's HUD |
 | 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only; no window titles or screen capture |
 | 📁 Project Overview | On request, inspect the selected project folder's file types, entry points and Git branch; remember metadata without reading source code or storing its path |
 | ⏱️ Process Watch | Watch a named Windows process start or exit; keep the alert on disk until JARVIS can safely deliver it |
@@ -126,6 +127,8 @@ Home Assistant integration is optional. Configure its HTTPS address, long-lived 
 Routines store only application names and Home Assistant aliases/actions. Activation uses the existing app launcher and the enabled smart-home plugin; every device action is checked against the current allowlist and read back from Home Assistant.
 
 Google Workspace is optional. In Google Cloud, enable **Gmail API** and **Google Calendar API**, configure the OAuth consent screen (add your account as a test user if the app is in testing), create an OAuth Client ID of type **Desktop app**, and download its JSON file as `config/client_secret_google_workspace.json`. This filename is ignored by Git. In MARK, say **“connect Google Workspace”** and complete the Google sign-in in the browser. The refresh token is stored per-user outside the repository (`%LOCALAPPDATA%\MarkLVI\token_google_workspace.json` on Windows). The requested scopes allow Gmail reading and draft/sending, plus view/edit access to events on calendars owned by the signed-in user. Every email send requires an on-screen confirmation showing the exact recipients, subject and body; JARVIS never auto-sends. Creating a Gmail draft, sending an email or adding a Calendar event waits for the exact on-screen HUD confirmation. Use **“disconnect Google Workspace”** to remove the local token; revoke the app separately in your Google Account to remove cloud authorization.
+
+Spotify Connect is optional. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), add the exact redirect URI `http://127.0.0.1:8765/callback`, and copy its **Client ID** into **Settings → Plugin Settings → Spotify Connect**. No client secret is used: MARK uses Spotify's Authorization Code + PKCE flow. Then say **“connect Spotify”** and approve the permissions in your browser. The refresh token is stored per-user outside the repository (`%LOCALAPPDATA%\MarkLVI\token_spotify.json` on Windows). Spotify Development Mode currently requires the app owner to have an active **Premium** subscription and limits an app to **5 authorized users**; add the Spotify account you will connect in the app's allowed-users settings. Playback actions also require Premium and a Spotify Connect device to be active. MARK controls Spotify's own player; it does not stream or extract Spotify audio. Track/artist/playlist details are displayed in the local HUD rather than returned to the AI model. Playlist creation and additions are always shown in full and require HUD confirmation. Use **“disconnect Spotify”** to remove the local token; revoke the app separately in your Spotify account if needed.
 
 Process Watch records only executable basenames and start/exit events in a local JSON file. Pending notices remain saved until delivered. It never records command lines, file contents or window text. Reminder cancellation uses the ID returned when a reminder is created or listed.
 
@@ -576,7 +579,7 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 
 For installation without launching, double-click `INSTALL_MARK.bat`. Later launches through `START_MARK.bat` reuse the environment and only rerun setup when `requirements.txt` or `setup.py` changes.
 
-Google Workspace is optional and needs a one-time OAuth setup; see the **Google Workspace** section below. Do not put an OAuth client secret or token in the repository or share it in chat.
+Google Workspace is optional and needs a one-time OAuth setup; see the **Google Workspace** section below. Do not put an OAuth client secret or token in the repository or share it in chat. Spotify needs a one-time Client ID/redirect setup; see the **Spotify Connect** section below. Do not put OAuth tokens in the repository.
 
 ### macOS / Linux
 
