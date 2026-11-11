@@ -156,5 +156,19 @@ class MemoryStoreReliabilityTests(unittest.TestCase):
 
 
 
+    def test_experience_memory_rejects_done_steps_without_a_verified_tool_receipt(self):
+        from memory.memory_manager import record_verified_mission
+        experience_path = self.store.parent / "experiences.json"
+        with patch.object(memory_manager, "EXPERIENCE_PATH", experience_path):
+            mission = {
+                "id": "M-no-receipt", "title": "Configure microphone",
+                "goal": "Adjust privacy settings", "status": "completed",
+                "steps": [{"title": "Open settings", "status": "done"}],
+            }
+            self.assertFalse(record_verified_mission(mission))
+            self.assertFalse(experience_path.exists())
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
