@@ -663,7 +663,7 @@ def _capture_active_window() -> dict:
 
 
 def _start_sequence(steps: list[dict], initial_snapshot: dict,
-                   user_request: str = "") -> str:
+                   user_request: str = "", session_memory=None) -> str:
     token = _claim_sequence()
     if token is None:
         return outcome.ask(
@@ -708,7 +708,7 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
             f"could not identify the active application window ({type(exc).__name__})",
         )
     from core.autonomy_policy import scope_request
-    return _start_sequence(steps, snapshot, scope_request(session_memory))
+    return _start_sequence(steps, snapshot, scope_request(session_memory), session_memory)
 
 
 TOOL = {
