@@ -38,6 +38,9 @@ class Microsoft365Tests(unittest.TestCase):
         self.assertNotIn("Files.ReadWrite.All", m365._SCOPES)
         self.assertNotIn("Directory.ReadWrite.All", m365._SCOPES)
 
+    def test_oauth_uses_a_loopback_localhost_redirect(self):
+        self.assertEqual(m365._REDIRECT_URI, "http://localhost:8766/callback")
+
     def test_client_and_tenant_settings_are_validated(self):
         with mock.patch.object(
             m365, "get_plugin_config",
