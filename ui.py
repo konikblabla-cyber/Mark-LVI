@@ -50,7 +50,7 @@ except Exception as _e:            # noqa: BLE001 - reported, never fatal
     print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
 
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
     QMainWindow, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QGraphicsScene, QGraphicsView,
     QStackedWidget, QTextEdit, QVBoxLayout, QWidget, QProgressBar, QSlider,
@@ -4563,6 +4563,7 @@ class MainWindow(QMainWindow):
         self.get_plugins       = None   # callable: () -> list[dict], set by JarvisLive
         self.get_plugin_settings = None # callable: () -> list[dict] settings schemas, set by JarvisLive
         self.on_wake_toggle    = None   # callable: (enable: bool) -> str, set by JarvisLive
+        self.on_in_call_addressing_change = None  # callable: (enabled: bool) -> None
         self.on_wake_manual    = None   # callable: () -> None — manual sleep/wake
         self.on_push_to_talk   = None   # callable: (enable: bool) -> str scope
         self.ptt_hold          = None   # callable: (held: bool) -> None — windowed chord
@@ -5886,6 +5887,9 @@ class MainWindow(QMainWindow):
         self._wake_btn.clicked.connect(self._toggle_wake_word)
         self._wake_sleep_btn = _row(QPushButton())
         self._wake_sleep_btn.clicked.connect(self._tap_wake_manual)
+        self._in_call_addressing_btn = _row(QPushButton())
+        self._in_call_addressing_btn.clicked.connect(self._toggle_in_call_addressing)
+        self._refresh_in_call_addressing_btn()
         # Neutral until the real state lands from the background warm-up.
         self._wake_btn.setText("◈  ADDRESS-AWARE")
         self._wake_btn.setStyleSheet(self._BTN_DIM)
@@ -6807,6 +6811,89 @@ class MainWindow(QMainWindow):
                 "Other engines need LOCAL PRIVACY or Push-to-Talk. Click to switch to local-only wake mode."
             )
             self._wake_sleep_btn.hide()
+        if hasattr(self, "_in_call_addressing_btn"):
+            self._refresh_in_call_addressing_btn()
+
+    def _refresh_in_call_addressing_btn(self):
+        from memory.config_manager import (
+            get_in_call_addressing_enabled, get_proactive_audio_enabled,
+        )
+        enabled = get_in_call_addressing_enabled()
+        address_aware = get_proactive_audio_enabled()
+        paused = enabled and not address_aware
+        style_on = (
+            f"QPushButton {{ background: #001a08; color: {C.GREEN}; "
+            f"border: 1px solid {C.GREEN_D}; border-radius: 3px; text-align: left; padding: 0 8px; }}"
+        )
+        style_off = (
+            f"QPushButton {{ background: transparent; color: {C.TEXT_DIM}; "
+            f"border: 1px solid {C.BORDER}; border-radius: 3px; text-align: left; padding: 0 8px; }}"
+        )
+        if paused:
+            self._in_call_addressing_btn.setText("🔒  IN-CALL ADDRESSING: PAUSED")
+            self._in_call_addressing_btn.setStyleSheet(style_off)
+            self._in_call_addressing_btn.setToolTip(
+                "Saved as ON, but paused because LOCAL PRIVACY is active. "
+                "PC microphone audio remains local until ADDRESS-AWARE mode is restored."
+            )
+        elif enabled:
+            self._in_call_addressing_btn.setText("◈  IN-CALL ADDRESSING: ON")
+            self._in_call_addressing_btn.setStyleSheet(style_on)
+            self._in_call_addressing_btn.setToolTip(
+                "During detected calls, PC microphone audio is sent to Gemini. "
+                "This may include other participants' voices. Gemini Proactive Audio "
+                "decides whether speech is addressed to MARK."
+            )
+        else:
+            self._in_call_addressing_btn.setText("◈  IN-CALL ADDRESSING: OFF")
+            self._in_call_addressing_btn.setStyleSheet(style_off)
+            self._in_call_addressing_btn.setToolTip(
+                "OFF: call audio stays on this PC. Turn ON to let Gemini hear the PC "
+                "microphone during detected calls and decide whether you are addressing MARK. "
+                "Other participants' voices may also be heard."
+            )
+
+    def _toggle_in_call_addressing(self):
+        from memory.config_manager import (
+            get_in_call_addressing_enabled, get_proactive_audio_enabled,
+            save_in_call_addressing_enabled,
+        )
+        want = not get_in_call_addressing_enabled()
+        if want:
+            if not get_proactive_audio_enabled():
+                QMessageBox.information(
+                    self,
+                    "IN-CALL ADDRESSING UNAVAILABLE",
+                    "Switch from LOCAL PRIVACY to ADDRESS-AWARE mode first. "
+                    "In-call semantic routing requires Gemini Proactive Audio.",
+                )
+                return
+            answer = QMessageBox.question(
+                self,
+                "ENABLE IN-CALL ADDRESSING?",
+                "While Discord, Teams, Zoom or another call is active, audio from "
+                "this PC microphone will be sent to Google's Gemini service. "
+                "This can include other participants' voices and room audio. "
+                "Gemini Proactive Audio will decide whether speech is directed to MARK; "
+                "this is cloud processing, not local-only privacy. Enable it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            save_in_call_addressing_enabled(want)
+            if self.on_in_call_addressing_change:
+                self.on_in_call_addressing_change(want)
+        except Exception as exc:
+            if want:
+                save_in_call_addressing_enabled(False)
+            QMessageBox.warning(
+                self,
+                "IN-CALL ADDRESSING",
+                f"The setting could not be applied: {type(exc).__name__}.",
+            )
+        self._refresh_in_call_addressing_btn()
 
     def _refresh_talk_btns(self):
         """Repaint the push-to-talk row from the saved setting."""
@@ -7502,6 +7589,14 @@ class JarvisUI:
     @on_wake_toggle.setter
     def on_wake_toggle(self, cb):
         self._win.on_wake_toggle = cb
+
+    @property
+    def on_in_call_addressing_change(self):
+        return self._win.on_in_call_addressing_change
+
+    @on_in_call_addressing_change.setter
+    def on_in_call_addressing_change(self, cb):
+        self._win.on_in_call_addressing_change = cb
 
     @property
     def on_wake_manual(self):
