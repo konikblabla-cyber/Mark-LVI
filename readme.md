@@ -82,6 +82,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🎯 Foreground-Aware Input | On Windows, read the active executable locally before sending mouse/keyboard input and verify the same target again before delayed clicks. macOS/Linux use their OS accessibility path without this Windows-only guard |
 | 🛡️ Non-Destructive Text Entry | `smart_type` appends at the cursor by default; replacing existing text and clearing a field require explicit HUD confirmation |
 | 🌐 Browser Text Preservation | Browser `type` and `smart_type` insert at the current cursor by default; replacing existing field contents requires explicit HUD confirmation |
+| ✅ Verified Browser Postconditions | Browser clicks report success only after the exact expected page text or URL appears; otherwise MARK reports an uncertain result and never blindly repeats the click. Typed text is checked locally without returning field contents to the model |
 | 📝 Safe UI Text Entry | Fill one explicitly requested, labelled non-sensitive field locally; verify without returning the field value; never submits the form |
 | 🎚️ Verified UI Sliders | Set one exact visible Windows slider value, check its live range, and verify the result locally without returning the value |
 | 🌳 Verified Tree Navigation | Expand or collapse one exact visible Windows TreeItem and verify the resulting state |
