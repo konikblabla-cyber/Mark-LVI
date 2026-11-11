@@ -743,8 +743,8 @@ class JarvisLive:
         self.ui.request_say = self.plugin_say   # plugins: mid-task speech channel
 
         # ── Wake word ────────────────────────────────────────────────────────
-        # _awake gates the mic (see _listen_audio) and the background speakers.
-        # It is True whenever wake word is OFF, so default behaviour is unchanged.
+        # _awake gates the mic only in LOCAL PRIVACY mode. In the default
+        # ADDRESS-AWARE mode, Gemini Proactive Audio judges who the speech is for.
         # Context-aware listening is the default. The local privacy gate wins
         # only when explicitly selected instead of semantic cloud addressing.
         self._wake_enabled     = should_use_local_wake_mode(
@@ -822,7 +822,7 @@ class JarvisLive:
         self.ui.write_log(f"SYS: Sleeping — {reason}. Say a wake phrase to wake me.")
 
     async def _run_sleep_watch(self) -> None:
-        """Auto-sleep after the configured silence window (wake-word mode only)."""
+        """Auto-sleep after silence only in LOCAL PRIVACY mode."""
         while True:
             await asyncio.sleep(5)
             if not self._wake_enabled or not self._awake:
@@ -922,8 +922,7 @@ class JarvisLive:
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
     def _ui_wake_toggle(self, enable: bool) -> str:
-        """Enable/disable wake word from the settings UI. Returns a status token:
-        'enabled' | 'disabled' | 'need_download'."""
+        """Switch between ADDRESS-AWARE and LOCAL PRIVACY listening modes."""
         if enable:
             if not wake_is_ready():
                 return "need_download"
@@ -950,7 +949,7 @@ class JarvisLive:
             self.wake(reason="you tapped wake")
 
     def _ui_wake_install(self) -> tuple[bool, str]:
-        """Download openwakeword + the model (runs in a UI worker thread)."""
+        """Download local wake-phrase models for LOCAL PRIVACY mode."""
         # Triggered by the user pressing the button, so its progress is exactly
         # what they are waiting to see.
         return wake_install(logger=lambda m: print(f"[Wake] {m}"),
