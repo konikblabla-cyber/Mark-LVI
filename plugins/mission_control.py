@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 import threading
 import tempfile
 import os
@@ -243,14 +244,18 @@ _UI_PLAN_PARAMETER_TYPES = {
 }
 
 
-def _fresh_ui_plan(goal: str) -> dict:
-    """Take one fresh local UIA snapshot and validate a single read-only plan."""
+def _fresh_ui_plan(goal: str, previous_result: dict | None = None) -> dict:
+    """Take a fresh UIA snapshot and validate one new or safely replanned action."""
     try:
         from actions import ui_interaction
-        from core.ui_reasoning import plan_ui_task
+        from core.ui_reasoning import plan_ui_task, replan_ui_task
 
         snapshot = ui_interaction._snapshot()
-        proposed = plan_ui_task(goal, snapshot)
+        proposed = (
+            replan_ui_task(goal, snapshot, previous_result)
+            if previous_result is not None
+            else plan_ui_task(goal, snapshot)
+        )
     except Exception as exc:
         return {
             "status": "blocked",
@@ -312,10 +317,10 @@ def _fresh_ui_plan(goal: str) -> dict:
 
 
 def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
-    """Persist the actual dispatcher receipt for the currently running step.
+    """Persist real tool receipts and retry-safe failure status for mission UI steps.
 
     This is an internal application hook, not a model-callable plugin action.
-    Raw tool output is reduced to a status/action pair and a SHA-256 fingerprint.
+    Raw tool output is reduced to status/action, tool identity and a digest.
     """
     from core.mission_evidence import (
         record_tool_result as record_turn_result,
@@ -332,6 +337,11 @@ def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
     if not mission_id or not step_id:
         return False
 
+    result_text = str(result or "")
+    status_match = re.match(
+        r"^status=(done|failed|unverified|ask|started)\s+action=([A-Za-z_][A-Za-z0-9_]*)\b",
+        result_text,
+    )
     evidence = verified_evidence(session_memory, mission_id, step_id) if accepted else None
     try:
         with _LOCK:
@@ -348,16 +358,35 @@ def record_tool_result(session_memory, tool_name: str, result: str) -> bool:
                 evidence is None or evidence.get("tool_name") != expected_tool
             ):
                 evidence = None
-            if evidence is None:
-                step.pop("tool_evidence", None)
-            else:
+
+            if evidence is not None:
                 step["tool_evidence"] = evidence
+                step.pop("ui_last_attempt", None)
+            else:
+                step.pop("tool_evidence", None)
+                # Store only the actual structured outcome of the planned tool.
+                # This lets Mission Control distinguish a definite failure from
+                # an ambiguous click without saving sensitive/raw tool output.
+                if expected_tool and str(tool_name or "").strip() == expected_tool:
+                    status = (
+                        status_match.group(1)
+                        if status_match and status_match.group(2) == expected_tool
+                        else "unknown"
+                    )
+                    step["ui_last_attempt"] = {
+                        "status": status,
+                        "tool_name": expected_tool,
+                        "result_sha256": hashlib.sha256(
+                            result_text.encode("utf-8", errors="replace")
+                        ).hexdigest(),
+                        "updated_at": _now(),
+                    }
             step["updated_at"] = _now()
             mission["updated_at"] = _now()
             _write(data)
         return evidence is not None
     except Exception:
-        # Failure to persist evidence must never authorize a completion.
+        # Failure to persist evidence must never authorize completion or replanning.
         return False
 
 
@@ -469,17 +498,87 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if expected is None or expected.get("id") != sid or step.get("status") != "running":
                     return "Call begin_step for the current mission step before planning its UI action."
                 if step.get("ui_action"):
-                    result = (
-                        "[MISSION_UI_RECOVERY] A UI action plan was already issued for this step. "
-                        "Do NOT request or execute it again. Inspect the current application using "
-                        "read-only tools. If the action's success is verified, call complete_step "
-                        "with real evidence; if uncertain, call block_step and stop."
-                    )
+                    previous_action = step.get("ui_action")
+                    attempt = step.get("ui_last_attempt")
+                    if _has_valid_persisted_tool_evidence(step):
+                        result = (
+                            "[MISSION_UI_RESULT_VERIFIED] The planned UI tool returned a persisted "
+                            "verified-success receipt. Do NOT click again. Call complete_step now "
+                            "for this exact mission and step."
+                        )
+                    elif (
+                        isinstance(attempt, dict)
+                        and attempt.get("status") == "failed"
+                        and attempt.get("tool_name") == previous_action.get("tool")
+                        and int(step.get("ui_replan_count", 0) or 0) < 1
+                    ):
+                        previous_result = {
+                            "status": "failed",
+                            "step": {
+                                "tool": previous_action.get("tool"),
+                                "parameters": previous_action.get("parameters", {}),
+                            },
+                        }
+                        ui_plan = _fresh_ui_plan(step["title"], previous_result)
+                        if ui_plan.get("status") == "planned":
+                            replacement = ui_plan["steps"][0]
+                            if (
+                                replacement.get("tool") == previous_action.get("tool")
+                                and replacement.get("parameters") == previous_action.get("parameters")
+                            ):
+                                ui_plan = {
+                                    "status": "blocked",
+                                    "reason": "the only proposed action repeats the failed tool and parameters",
+                                    "steps": [],
+                                }
+                        if ui_plan.get("status") == "planned":
+                            step["ui_action_history"] = [{
+                                "tool": previous_action.get("tool", ""),
+                                "attempt_status": "failed",
+                                "replanned_at": _now(),
+                            }]
+                            step["ui_action"] = ui_plan["steps"][0]
+                            step["ui_replan_count"] = 1
+                            step.pop("ui_last_attempt", None)
+                            step.pop("tool_evidence", None)
+                            step["ui_action_planned_at"] = _now()
+                            step["updated_at"] = _now()
+                            mission["updated_at"] = _now()
+                            _write(data)
+                            result = "[MISSION_UI_REPLAN] " + json.dumps({
+                                "mission_id": mission_id,
+                                "step_id": sid,
+                                **ui_plan,
+                            }, ensure_ascii=False, separators=(",", ":"))
+                        else:
+                            result = "[MISSION_UI_REPLAN_BLOCKED] " + json.dumps({
+                                "mission_id": mission_id,
+                                "step_id": sid,
+                                **ui_plan,
+                            }, ensure_ascii=False, separators=(",", ":")) + (
+                                " Do not repeat the failed action. Ask the user or block the step."
+                            )
+                    elif isinstance(attempt, dict) and attempt.get("status") == "failed":
+                        result = (
+                            "[MISSION_UI_REPLAN_LIMIT] One alternative has already been tried or "
+                            "the failed action cannot be matched safely. Do not repeat it. Inspect "
+                            "the current application read-only, then block the step or ask the user."
+                        )
+                    else:
+                        result = (
+                            "[MISSION_UI_RECOVERY] A UI action plan was already issued for this step. "
+                            "Its outcome is not a definite, retry-safe failure. Do NOT request or execute "
+                            "it again. Inspect the current application using read-only tools. If the "
+                            "action's success is verified, call complete_step with real evidence; "
+                            "if uncertain, call block_step and stop."
+                        )
                 else:
                     ui_plan = _fresh_ui_plan(step["title"])
                     if ui_plan.get("status") == "planned":
                         step["ui_action"] = ui_plan["steps"][0]
                         step["ui_action_planned_at"] = _now()
+                        step["ui_replan_count"] = 0
+                        step.pop("ui_last_attempt", None)
                         step["updated_at"] = _now()
                         mission["updated_at"] = _now()
                         _write(data)
