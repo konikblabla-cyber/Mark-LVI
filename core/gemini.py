@@ -500,12 +500,24 @@ async def _live_turn(parts: list, system: str, key: str, timeout_s: float) -> st
         await asyncio.wait_for(drain(), timeout=remaining())
         return "".join(chunks).strip()
     finally:
-        if session is not None:
+        try:
+            if session is not None:
+                try:
+                    await asyncio.wait_for(
+                        cm.__aexit__(None, None, None),
+                        timeout=_LIVE_CLOSE_TIMEOUT,
+                    )
+                except Exception:
+                    pass
+        finally:
+            # Live uses the async transport; close it explicitly instead of
+            # leaving one httpx client behind for every one-shot request.
             try:
-                await asyncio.wait_for(
-                    cm.__aexit__(None, None, None),
-                    timeout=_LIVE_CLOSE_TIMEOUT,
-                )
+                await asyncio.wait_for(cl.aio.aclose(), timeout=_LIVE_CLOSE_TIMEOUT)
+            except Exception:
+                pass
+            try:
+                cl.close()
             except Exception:
                 pass
 
@@ -786,36 +798,44 @@ def call(contents, tier: str = FAST, config=None,
 
     cl = None
     tried = [m for m in ladder if not _cooling(m)] or list(ladder)
-    for model in tried:
-        try:
-            if model == LIVE:
-                reply = _live_call(contents, config, timeout_ms, resolved_key)
-                if reply is not None:
-                    return reply
-                raise RuntimeError("the Live turn came back empty")
-            if model.startswith(PROVIDER_PREFIX):
-                return _provider_call(model, contents, config, timeout_ms)
-            if cl is None:
-                cl = client(timeout_ms=timeout_ms, key=resolved_key)
-            kwargs = {"model": model, "contents": contents}
-            if config is not None:
-                kwargs["config"] = config
-            return cl.models.generate_content(**kwargs)
-        except Exception as e:
-            msg = str(e)
-            if is_quota_error(msg):
-                _cool(model)
-                print(f"[Gemini] {model}: out of quota — skipping it for "
-                      f"{_COOLDOWN_SECONDS // 60} minutes")
-            elif is_gone_error(msg):
-                _cool(model, _GONE_SECONDS)
-                print(f"[Gemini] {model}: unavailable to this key — set aside")
-            elif is_unavailable_error(msg):
-                _cool(model, _UNAVAILABLE_SECONDS)
-                print(f"[Gemini] {model}: not answering — resting it for "
-                      f"{_UNAVAILABLE_SECONDS // 60} minutes")
-            else:
-                print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
+    try:
+        for model in tried:
+            try:
+                if model == LIVE:
+                    reply = _live_call(contents, config, timeout_ms, resolved_key)
+                    if reply is not None:
+                        return reply
+                    raise RuntimeError("the Live turn came back empty")
+                if model.startswith(PROVIDER_PREFIX):
+                    return _provider_call(model, contents, config, timeout_ms)
+                if cl is None:
+                    cl = client(timeout_ms=timeout_ms, key=resolved_key)
+                kwargs = {"model": model, "contents": contents}
+                if config is not None:
+                    kwargs["config"] = config
+                return cl.models.generate_content(**kwargs)
+            except Exception as e:
+                msg = str(e)
+                if is_quota_error(msg):
+                    _cool(model)
+                    print(f"[Gemini] {model}: out of quota — skipping it for "
+                          f"{_COOLDOWN_SECONDS // 60} minutes")
+                elif is_gone_error(msg):
+                    _cool(model, _GONE_SECONDS)
+                    print(f"[Gemini] {model}: unavailable to this key — set aside")
+                elif is_unavailable_error(msg):
+                    _cool(model, _UNAVAILABLE_SECONDS)
+                    print(f"[Gemini] {model}: not answering — resting it for "
+                          f"{_UNAVAILABLE_SECONDS // 60} minutes")
+                else:
+                    print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
+
+    finally:
+        if cl is not None:
+            try:
+                cl.close()
+            except Exception:
+                pass
     return None
 
 

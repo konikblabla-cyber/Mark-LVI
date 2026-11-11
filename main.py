@@ -2889,9 +2889,22 @@ class JarvisLive:
                 http_options={"api_version":
                               "v1alpha" if self._enhanced_live else "v1beta"},
             )
-            async with client.aio.live.connect(model=live_model,
-                                               config=config) as session:
-                yield session
+            try:
+                async with client.aio.live.connect(
+                        model=live_model, config=config) as session:
+                    yield session
+            finally:
+                # Every reconnect gets a fresh SDK client. Close its async
+                # transport after the websocket context exits to avoid keeping
+                # old HTTP pools alive for the whole desktop session.
+                try:
+                    await asyncio.wait_for(client.aio.aclose(), timeout=3.0)
+                except Exception as exc:
+                    print(f"[JARVIS] Live async client cleanup: {type(exc).__name__}")
+                try:
+                    client.close()
+                except Exception:
+                    pass
             return
 
         from memory.config_manager import get_pipeline, get_provider_config
