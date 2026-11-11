@@ -10,6 +10,11 @@ import os
 import sys
 
 
+# Keep the microphone private briefly after a call audio session disappears.
+# WASAPI session lists can flicker during device handoffs and app restarts.
+COMMUNICATION_RELEASE_GRACE_SECONDS = 3.0
+
+
 # Windows executable basenames commonly used by desktop chat and calling apps.
 # Browsers are protected only when they have an ACTIVE microphone-capture
 # session. Browser render sessions (music, video, ordinary browsing) stay out.
@@ -165,6 +170,37 @@ def is_communication_context(
         or normalize_process_name(name) in BROWSER_CAPTURE_APP_NAMES
         for name in active_audio_apps
     )
+
+
+def communication_gate_state(
+    communication_active: bool,
+    last_active_at: float | None,
+    now: float,
+    release_grace_seconds: float = COMMUNICATION_RELEASE_GRACE_SECONDS,
+) -> tuple[bool, float | None]:
+    """Return the privacy-gate state with immediate entry and delayed release.
+
+    A positive call signal closes the gate immediately. Once observed, a brief
+    empty WASAPI poll cannot reopen the microphone; the gate opens only after
+    the signal has been absent for the complete grace interval. Invalid clock
+    input fails closed rather than treating uncertainty as permission to stream.
+    """
+    try:
+        current = float(now)
+        grace = max(0.0, float(release_grace_seconds))
+        previous = None if last_active_at is None else float(last_active_at)
+    except (TypeError, ValueError, OverflowError):
+        return True, last_active_at
+
+    if not (current == current):  # NaN is not a usable monotonic timestamp.
+        return True, last_active_at
+    if communication_active:
+        return True, current
+    if previous is None:
+        return False, None
+    if not (previous == previous):
+        return True, last_active_at
+    return (current - previous) < grace, previous
 
 
 def should_auto_wake(
