@@ -262,12 +262,16 @@ class UIReasoningTests(unittest.TestCase):
             "description": "gear icon",
             "expected_result": "Privacy panel",
             "target_app": "settings.exe",
+            "target_window_handle": 123,
+            "target_process_id": 456,
         })
         self.assertEqual(step["risk"], "low")
         self.assertFalse(step["requires_confirmation"])
 
     def test_visual_click_fallback_supports_polish_goal_and_high_impact_confirmation(self):
         snapshot = {
+            "handle": 77,
+            "process_id": 88,
             "process_name": "settings.exe",
             "bounds": (0, 0, 800, 600),
             "records": [],
@@ -287,6 +291,8 @@ class UIReasoningTests(unittest.TestCase):
 
     def test_visual_click_fallback_requires_an_exact_new_accessible_postcondition(self):
         snapshot = {
+            "handle": 77,
+            "process_id": 88,
             "process_name": "settings.exe",
             "bounds": (10, 10, 700, 500),
             "records": [],
