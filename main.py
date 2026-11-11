@@ -929,11 +929,30 @@ class JarvisLive:
         if enable:
             if not wake_is_ready():
                 return "need_download"
+            # Fail open to address-aware mode if the local detector cannot
+            # actually start. A present model file does not guarantee that its
+            # ONNX runtime or model can be loaded on this machine.
+            if not self._ensure_wake_detector():
+                save_proactive_audio_enabled(True)
+                self._wake_enabled = False
+                save_wake_word_enabled(False)
+                dispatch_to_loop(
+                    self._loop,
+                    lambda: self.ui.write_log(
+                        "SYS: LOCAL PRIVACY could not start its wake detector; "
+                        "ADDRESS-AWARE mode remains active."
+                    ),
+                )
+                return "unavailable"
             save_proactive_audio_enabled(False)
             self._wake_enabled = True
             save_wake_word_enabled(True)
-            self._ensure_wake_detector()
-            self.sleep(reason="local privacy mode enabled")
+            # This callback can run on the installer worker thread. Marshal
+            # Qt state changes onto the asyncio/Qt owner loop.
+            if not dispatch_to_loop(
+                self._loop, lambda: self.sleep(reason="local privacy mode enabled")
+            ):
+                self.sleep(reason="local privacy mode enabled")
             # Proactive Audio is a connection-time config field. Rebuild the
             # Live session now so the old semantic-addressing setting cannot
             # remain active behind the LOCAL PRIVACY label.
@@ -943,7 +962,10 @@ class JarvisLive:
             save_proactive_audio_enabled(True)
             self._wake_enabled = False
             save_wake_word_enabled(False)
-            self.wake(reason="address-aware listening enabled")
+            if not dispatch_to_loop(
+                self._loop, lambda: self.wake(reason="address-aware listening enabled")
+            ):
+                self.wake(reason="address-aware listening enabled")
             # Reconnect to apply Proactive Audio immediately rather than waiting
             # for an unrelated disconnect or model change.
             self.request_reconnect(keep_context=True, reason="ADDRESS-AWARE mode")
