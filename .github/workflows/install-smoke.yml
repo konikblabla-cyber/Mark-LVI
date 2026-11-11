@@ -45,6 +45,8 @@ jobs:
         run: python -m playwright install chromium
       - name: Launch Chromium and render a local page
         run: python -m core._browser_runtime_smoke
+      - name: Compile every Python source tree
+        run: python -m compileall -q actions core dashboard memory plugins providers main.py ui.py setup.py
       - name: Check for broken or conflicting dependencies
         run: python -m pip check
       - name: Smoke-test Windows desktop-control imports
