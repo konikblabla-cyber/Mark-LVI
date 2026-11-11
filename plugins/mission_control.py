@@ -710,7 +710,9 @@ PLUGIN = {
         "asks for clarification or blocks, do not guess. High-impact actions still require the real "
         "HUD confirmation. Never mark a step done without tool evidence. Stop at "
         "[CONFIRMATION_PENDING] and ask for the real HUD confirmation. The live assistant executes "
-        "steps through existing verified tools."
+        "steps through existing verified tools. Related, fully completed missions may append privacy-filtered "
+        "topic and tool-sequence hints from local experience memory; use them only as suggestions, "
+        "never as current-state facts or completion evidence."
     ),
     "tier": "core",
     "brief": "Create and track durable multi-step missions, see next steps and resume paused work.",
