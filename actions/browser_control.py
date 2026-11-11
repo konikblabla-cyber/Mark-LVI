@@ -1295,9 +1295,18 @@ class _BrowserSession:
             const type = clean(el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
             const tag = String(el.tagName || '').toLowerCase();
             const form = el.form || (el.closest ? el.closest('form') : null);
-            const formSubmit = !!form && (
+            const submitControl = !!form && (
                 (tag === 'button' && (!el.getAttribute('type') || type === 'submit'))
                 || (tag === 'input' && ['submit', 'image'].includes(type))
+            );
+            const formAction = form ? (form.getAttribute('action') || '') : '';
+            const formMethod = form ? (form.getAttribute('method') || 'get').toLowerCase() : '';
+            const searchLike = !!form && (
+                !!form.querySelector('input[type="search"]')
+                || /search|query|find|szukaj|wyszukaj/i.test(text)
+            );
+            const formSubmit = submitControl && !searchLike && (
+                formMethod !== 'get' || /checkout|order|purchase|payment|subscribe|delete/i.test(formAction)
             );
             return {
                 tag,
@@ -1308,7 +1317,8 @@ class _BrowserSession:
                 name: clean(el.getAttribute('name')),
                 disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
                 href: tag === 'a' ? clean(el.getAttribute('href')) : '',
-                form_submit: formSubmit
+                form_submit: formSubmit,
+                form_action: formAction
             };
         });
 }
@@ -1340,7 +1350,9 @@ class _BrowserSession:
             target = label or placeholder
             high_impact = bool(
                 item.get("form_submit")
-                or requires_browser_confirmation("smart_click", target)
+                or requires_browser_confirmation(
+                    "smart_click", target, item.get("form_action", "")
+                )
             )
             entry = {
                 "tag": tag,
