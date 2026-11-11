@@ -26,6 +26,8 @@ class FakeLocator:
         self.cleared = 0
         self.on_click = None
         self.value = ""
+        self.type_enabled = True
+        self.click_error = None
 
     async def count(self):
         return self._count
@@ -43,6 +45,8 @@ class FakeLocator:
         self.clicked += 1
         if self.on_click:
             self.on_click()
+        if self.click_error:
+            raise self.click_error
 
     async def clear(self):
         self.cleared += 1
@@ -50,7 +54,8 @@ class FakeLocator:
 
     async def type(self, value, **kwargs):
         self.typed.append(value)
-        self.value += value
+        if self.type_enabled:
+            self.value += value
 
     async def input_value(self):
         return self.value
@@ -140,6 +145,33 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         ))
         self.assertIn("status=failed", result)
         self.assertEqual(target.clicked, 0)
+
+    def test_smart_click_does_not_try_another_target_after_uncertain_first_click(self):
+        target = FakeLocator()
+        target.click_error = RuntimeError("timed out after activation")
+        page = FakePage(target)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.smart_click(
+            session, "Save", expected_text="Saved"
+        ))
+        self.assertIn("status=unverified", result)
+        self.assertEqual(target.clicked, 1)
+
+    def test_type_text_is_unverified_when_field_does_not_retain_entered_text(self):
+        locator = FakeLocator()
+        locator.type_enabled = False
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        result = asyncio.run(browser._BrowserSession.type_text(
+            session, selector="#search", text="JARVIS"
+        ))
+        self.assertIn("status=unverified", result)
+        self.assertNotIn("status=done", result)
+
+    def test_browser_click_schema_exposes_exact_postcondition_fields(self):
+        properties = browser.TOOL["parameters"]["properties"]
+        self.assertIn("expected_text", properties)
+        self.assertIn("expected_url", properties)
 
     def test_smart_click_requires_and_verifies_exact_postcondition(self):
         target = FakeLocator()
