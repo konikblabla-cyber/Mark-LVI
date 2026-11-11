@@ -1527,9 +1527,6 @@ def _validate_browser_sequence_steps(raw_steps, session_memory=None):
     if not isinstance(raw_steps, list) or not 2 <= len(raw_steps) <= _MAX_BROWSER_SEQUENCE_STEPS:
         return None, f"sequence must contain 2 to {_MAX_BROWSER_SEQUENCE_STEPS} steps"
 
-    from core.autonomy_policy import requires_ui_confirmation, scope_request
-
-    request = scope_request(session_memory)
     validated = []
     for index, raw in enumerate(raw_steps, start=1):
         if not isinstance(raw, dict):
@@ -1583,11 +1580,10 @@ def _validate_browser_sequence_steps(raw_steps, session_memory=None):
             )
             if error or (not expected_text and not expected_url):
                 return None, f"step {index}: an exact expected_text or expected_url is required"
-            if (requires_browser_confirmation(action, target)
-                    and requires_ui_confirmation(target, user_request=request)):
+            if requires_browser_confirmation(action, target):
                 return None, (
                     f"step {index} targets a potentially external/high-impact action. "
-                    "Run it as a separate browser action so its HUD confirmation can be shown."
+                    "Run this action separately so MARK can apply its individual confirmation policy."
                 )
             safe["expected_text"] = expected_text
             safe["expected_url"] = expected_url
@@ -2008,6 +2004,7 @@ TOOL = {
         "scroll, read the page, manage tabs, go back and forward. It can also "
         "run a 2–8 step verified browser sequence in one session. Each step must "
         "be verified before the next starts; uncertain outcomes stop the sequence. "
+        "High-impact send, submit, delete, publish and purchase actions are not permitted inside a batch; run such actions separately for their own confirmation. "
         "THIS TOOL OPENS THE BROWSER ITSELF. Never call open_app for the "
         "browser first - doing both launches it twice, the second copy on a "
         "different profile with none of the user's sign-ins. 'Open Chrome and "
