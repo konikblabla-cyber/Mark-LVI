@@ -129,6 +129,18 @@ class GoogleWorkspaceTests(unittest.TestCase):
         self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
         self.assertIn("Exact body", gate.call_args.kwargs["detail"])
 
+    def test_email_body_limit_matches_the_full_hud_confirmation(self):
+        with self.assertRaises(ValueError):
+            workspace._compose_email(
+                "person@example.com", "Subject", "x" * 8_001
+            )
+        recipients, subject, body, _encoded = workspace._compose_email(
+            "person@example.com", "Subject", "x" * 8_000
+        )
+        self.assertEqual(len(body), 8_000)
+        self.assertEqual(recipients, ["person@example.com"])
+        self.assertEqual(subject, "Subject")
+
     def test_gmail_send_is_parked_behind_hud_confirmation(self):
         with mock.patch.object(workspace.confirm, "request",
                                return_value="[CONFIRMATION_PENDING]") as gate, \
@@ -144,6 +156,7 @@ class GoogleWorkspaceTests(unittest.TestCase):
         send.assert_not_called()
         self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
         self.assertIn("Exact message body", gate.call_args.kwargs["detail"])
+        self.assertTrue(gate.call_args.kwargs["detail"].endswith("Exact message body\n\nThis sends the email only after you confirm this exact content."))
         self.assertIn("only after you confirm", gate.call_args.kwargs["detail"])
 
     def test_calendar_create_is_parked_behind_hud_confirmation(self):
