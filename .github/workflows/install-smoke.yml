@@ -57,6 +57,8 @@ jobs:
         run: python -c "from core.audio_devices import list_devices; print('Microphones:', list_devices('input', refresh=True)); print('Speakers:', list_devices('output', refresh=True))"
       - name: Test bounded low-latency audio queues
         run: python -m core._audio_recovery_tests
+      - name: Test safe Windows application launching
+        run: python -m actions._open_app_tests
       - name: Test remote dashboard authentication and upload limits
         run: |
           python -m core._dashboard_policy_tests
@@ -91,7 +93,7 @@ jobs:
           from core.plugin_loader import discover_plugins;
           reserved = {item['name'] for item in main.TOOL_DECLARATIONS};
           actions = discover_actions(Path('actions'), reserved_names=reserved, logger=lambda _: None);
-          required_actions = {'desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
+          required_actions = {'open_app','desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
           missing_actions = sorted(required_actions - actions.names());
           assert not missing_actions, f'Missing actions: {missing_actions}';
           plugins = discover_plugins(Path('plugins'), reserved | actions.names(), logger=lambda _: None);
