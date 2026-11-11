@@ -556,6 +556,25 @@ def _say(player, instruction: str) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 #  Launch + verify, off the conversation's thread
 # ─────────────────────────────────────────────────────────────────────────────
+def _focus_launched_application(match, attempts: int = 8) -> bool:
+    """Wait briefly for a newly created process to expose its real window."""
+    try:
+        pid = int(match.pid)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return False
+    for attempt in range(max(1, min(int(attempts), 12))):
+        try:
+            if not appidentity.is_running(pid):
+                return False
+            if appidentity.focus(match):
+                return bool(appidentity.is_running(pid))
+        except Exception:
+            return False
+        if attempt + 1 < attempts:
+            time.sleep(0.25)
+    return False
+
+
 def _launch_and_verify(player, spoken: str, launcher_name: str,
                        before: set[int], verification_name: str | None = None) -> None:
     """The part that takes seconds. Speaks ONLY when something needs saying.
@@ -584,7 +603,7 @@ def _launch_and_verify(player, spoken: str, launcher_name: str,
                 alive = bool(appidentity.is_running(appeared.pid))
             except Exception as verify_error:
                 print(f"[open_app] foreground verification failed: {type(verify_error).__name__}")
-            if focused and alive:
+            if focused:
                 _log(player, f"JARVIS: {appeared.label} is open and in the foreground.")
                 return
             trouble = (
