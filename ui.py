@@ -2056,10 +2056,21 @@ class ConfirmBanner(_HudOverlay):
         lay.addWidget(ttl)
 
         if detail:
-            dtl = QLabel(detail)
-            dtl.setWordWrap(True)
+            # Confirmation details can include a complete email body or a
+            # multi-field calendar event. A wrapped QLabel grew without bound
+            # and could push the CONFIRM/CANCEL buttons below the visible HUD.
+            # Keep the whole text inspectable in a bounded, read-only viewport.
+            dtl = QTextEdit()
+            dtl.setReadOnly(True)
+            dtl.setAcceptRichText(False)
+            dtl.setPlainText(detail)
             dtl.setFont(QFont("Courier New", 8))
-            dtl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+            dtl.setMinimumHeight(112)
+            dtl.setMaximumHeight(220)
+            dtl.setStyleSheet(
+                f"QTextEdit {{ color: {C.TEXT_MED}; background: transparent; "
+                "border: none; padding: 0; }}"
+            )
             lay.addWidget(dtl)
 
         row = QHBoxLayout(); row.setSpacing(8)
