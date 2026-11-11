@@ -52,6 +52,7 @@ _SCOPES = (
     # to every calendar that may be shared with the user.
     "https://www.googleapis.com/auth/calendar.events.owned",
 )
+_GOOGLE_HTTP_TIMEOUT = 15.0
 _MAX_RESULTS = 10
 _MAX_BODY_CHARS = 12_000
 _MAX_QUERY_CHARS = 400
@@ -172,7 +173,7 @@ def _get_credentials(interactive: bool = False):
 
     if credentials and credentials.expired and credentials.refresh_token:
         try:
-            credentials.refresh(Request())
+            credentials.refresh(Request(timeout=_GOOGLE_HTTP_TIMEOUT))
             _save_credentials(credentials)
         except Exception as exc:
             raise RuntimeError(
@@ -209,10 +210,32 @@ def _get_credentials(interactive: bool = False):
         ) from exc
 
 
+def _authorized_http(credentials):
+    """Build one bounded, authenticated HTTP transport for this plugin call.
+
+    A fresh httplib2 client is created per service object: httplib2 connections
+    are not thread-safe, and MARK may run different plugin calls on worker
+    threads. The timeout prevents a slow Google endpoint from parking a worker
+    indefinitely.
+    """
+    try:
+        import httplib2
+        from google_auth_httplib2 import AuthorizedHttp
+    except ImportError as exc:
+        raise RuntimeError(
+            "Google Workspace HTTP transport is missing. Reinstall MARK dependencies."
+        ) from exc
+    return AuthorizedHttp(
+        credentials,
+        http=httplib2.Http(timeout=_GOOGLE_HTTP_TIMEOUT),
+    )
+
+
 def _service(api: str, version: str):
     _Request, _Credentials, _Flow, build = _load_google_modules()
     credentials = _get_credentials(interactive=False)
-    return build(api, version, credentials=credentials, cache_discovery=False)
+    http = _authorized_http(credentials)
+    return build(api, version, http=http, cache_discovery=False)
 
 
 def _untrusted(source: str, title: str, content: str) -> str:

@@ -17,6 +17,34 @@ class GoogleWorkspaceTests(unittest.TestCase):
         self.assertFalse(any(scope.endswith("/gmail.modify") for scope in workspace._SCOPES))
         self.assertFalse(any(scope.endswith("/calendar.events") for scope in workspace._SCOPES))
 
+    def test_google_transport_is_authenticated_and_has_a_finite_timeout(self):
+        import httplib2
+        from google_auth_httplib2 import AuthorizedHttp
+
+        credentials = mock.Mock()
+        transport = workspace._authorized_http(credentials)
+        self.assertIsInstance(transport, AuthorizedHttp)
+        self.assertIsInstance(transport.http, httplib2.Http)
+        self.assertEqual(transport.http.timeout, workspace._GOOGLE_HTTP_TIMEOUT)
+
+    def test_service_builder_uses_the_bounded_authorized_transport(self):
+        credentials = object()
+        transport = object()
+        build = mock.Mock(return_value="service")
+        with mock.patch.object(
+            workspace, "_load_google_modules",
+            return_value=(None, None, None, build),
+        ), mock.patch.object(
+            workspace, "_get_credentials", return_value=credentials
+        ), mock.patch.object(
+            workspace, "_authorized_http", return_value=transport
+        ):
+            result = workspace._service("gmail", "v1")
+        self.assertEqual(result, "service")
+        build.assert_called_once_with(
+            "gmail", "v1", http=transport, cache_discovery=False
+        )
+
     def test_plugin_contract_is_accepted_by_auto_loader(self):
         record = _validate(workspace, "google_workspace.py")
         self.assertTrue(record.valid, record.error)
