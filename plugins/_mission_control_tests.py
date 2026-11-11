@@ -438,5 +438,39 @@ class MissionControlReliabilityTests(unittest.TestCase):
 
 
 
+    def test_experience_journal_is_saved_only_after_every_step_is_verified(self):
+        mission_id = self.plan("Open audio settings\nVerify microphone privacy")
+        self.start(mission_id)
+        with patch("memory.memory_manager.record_verified_mission") as remember:
+            self.record_verified_tool("open_app")
+            first = self.complete(mission_id, "S01")
+            self.assertIn("[MISSION_CONTINUE]", first)
+            self.assertFalse(remember.called)
+
+            self.record_verified_tool("click_and_verify")
+            final = self.complete(mission_id, "S02")
+            self.assertIn("[MISSION_COMPLETE]", final)
+            remember.assert_called_once()
+            completed = remember.call_args.args[0]
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(
+                [step["verified_tool"] for step in completed["steps"]],
+                ["open_app", "click_and_verify"],
+            )
+
+    def test_related_experience_is_added_as_non_authoritative_step_context(self):
+        mission_id = self.plan("Configure microphone privacy settings")
+        with patch(
+            "memory.memory_manager.format_experience_hints",
+            return_value="\n[PAST_EXPERIENCE_HINTS] prior verified workflow [/PAST_EXPERIENCE_HINTS]",
+        ) as lookup:
+            result = self.start(mission_id)
+        self.assertIn("[PAST_EXPERIENCE_HINTS]", result)
+        self.assertIn("Do NOT repeat side effects", result)
+        lookup.assert_called_once()
+        self.assertIn("Configure microphone privacy settings", lookup.call_args.args[0])
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
