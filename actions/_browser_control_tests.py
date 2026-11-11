@@ -302,6 +302,27 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertIn("status=done", result)
         self.assertEqual(target.clicked, 1)
 
+    def test_smart_type_waits_for_a_dynamic_field_then_verifies_locally(self):
+        class DelayedLocator(FakeLocator):
+            def __init__(self):
+                super().__init__()
+                self.calls = 0
+
+            async def count(self):
+                self.calls += 1
+                return 0 if self.calls < 3 else 1
+
+        locator = DelayedLocator()
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page))
+        with patch.object(browser, "_LOCATOR_READY_TIMEOUT_SECONDS", 0.5):
+            result = asyncio.run(browser._BrowserSession.smart_type(
+                session, "Search", "JARVIS", wait_for_target=True
+            ))
+        self.assertIn("status=done", result)
+        self.assertGreaterEqual(locator.calls, 3)
+        self.assertEqual(locator.value, "JARVIS")
+
     def test_type_text_blocks_password_without_reading_its_value(self):
         locator = FakeLocator(attrs={"type": "password", "name": "current-password"})
         session = SimpleNamespace(_get_page=lambda: _async_value(FakePage(locator)))
