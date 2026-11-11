@@ -16,9 +16,9 @@ _SENSITIVE_FIELD = re.compile(
 
 _HIGH_IMPACT_TARGET = re.compile(
     r"(?:\bsend\b|\bsubmit\b|\bpay\b|\bpurchase\b|\bbuy\b|"
-    r"\bcheckout\b|\bdelete\b|\bremove\b|\bpublish\b|\bpost\b|"
+    r"\bcheckout\b|\bplace[\s_-]+order\b|\border[\s_-]+now\b|\bcomplete[\s_-]+order\b|\bdelete\b|\bremove\b|\bpublish\b|\bpost\b|"
     r"\btransfer\b|\bauthori[sz]e\b|\bsign\b|"
-    r"cancel[\s_-]+subscription|close[\s_-]+account|wyślij|wyslij|prześlij|przeslij|zatwierdź|zatwierdz|zapłać|zaplac|kup(?:\s+teraz)?|zamów|zamow|usuń|usun|skasuj|opublikuj|przenieś|przenies|autoryzuj|podpisz|zakończ\s+zakup|anuluj\s+subskrypcj[ęe]|zamknij\s+konto)",
+    r"cancel[\s_-]+subscription|close[\s_-]+account|złóż\s+zamówienie|zloz\s+zamowienie|wyślij|wyslij|prześlij|przeslij|zatwierdź|zatwierdz|zapłać|zaplac|kup(?:\s+teraz)?|zamów|zamow|usuń|usun|skasuj|opublikuj|przenieś|przenies|autoryzuj|podpisz|zakończ\s+zakup|anuluj\s+subskrypcj[ęe]|zamknij\s+konto)",
     re.IGNORECASE,
 )
 
