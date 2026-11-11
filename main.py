@@ -933,13 +933,20 @@ class JarvisLive:
             self._wake_enabled = True
             save_wake_word_enabled(True)
             self._ensure_wake_detector()
-            self.sleep(reason="wake word enabled")
+            self.sleep(reason="local privacy mode enabled")
+            # Proactive Audio is a connection-time config field. Rebuild the
+            # Live session now so the old semantic-addressing setting cannot
+            # remain active behind the LOCAL PRIVACY label.
+            self.request_reconnect(keep_context=True, reason="LOCAL PRIVACY mode")
             return "enabled"
         else:
             save_proactive_audio_enabled(True)
             self._wake_enabled = False
             save_wake_word_enabled(False)
-            self.wake(reason="wake word disabled")
+            self.wake(reason="address-aware listening enabled")
+            # Reconnect to apply Proactive Audio immediately rather than waiting
+            # for an unrelated disconnect or model change.
+            self.request_reconnect(keep_context=True, reason="ADDRESS-AWARE mode")
             return "disabled"
 
     def _ui_wake_manual(self) -> None:
