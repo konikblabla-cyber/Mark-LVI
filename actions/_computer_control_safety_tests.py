@@ -440,5 +440,21 @@ class ComputerControlSafetyTests(unittest.TestCase):
         execute.assert_not_called()
 
 
+
+    def test_verified_visual_click_refuses_sensitive_targets_before_capture(self):
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction._snapshot") as snapshot, \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "Password field", "Password settings", "settings.exe",
+            )
+        self.assertIn("status=failed", result)
+        self.assertIn("credentials", result)
+        snapshot.assert_not_called()
+        locate.assert_not_called()
+        click.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
