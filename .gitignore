@@ -71,6 +71,7 @@ memory/missions.json
 memory/missions.json.tmp
 memory/experiences.json
 memory/experiences.json.tmp
+.experiences-*.tmp
 .history-*.tmp
 .missions-*.tmp
 **/.jarvis-*.tmp
