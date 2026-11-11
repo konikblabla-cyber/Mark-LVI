@@ -19,10 +19,10 @@ WHAT WAS WRONG WITH THIS FILE
 WHAT IT DOES NOW
     * No shell, anywhere. Executables are resolved to a path and started as an
       argument vector; URI schemes go through the OS handler.
-    * It watches the process table for a NEW process answering to the name, and
-      only says `done` when one appears. When none does, it says `unverified`
-      and the assistant tells the user it could not confirm — which is true,
-      and is something they can act on.
+    * It watches the process table for a NEW matching process, then tries
+      to bring that exact process' window to the foreground. It says `done`
+      only after the process remains alive and the window is focused. A process
+      without a verifiable foreground window is reported as `unverified`.
     * It answers in milliseconds and verifies behind that, so asking to open
       something no longer costs the conversation one to four seconds.
 
