@@ -12,11 +12,11 @@ import subprocess
 import threading
 import webbrowser
 from pathlib import Path
-from urllib.parse import quote_plus, urlsplit
+from urllib.parse import urlsplit
 from typing import TYPE_CHECKING, Optional
 
 from core import appidentity, confirm, outcome
-from core.browser_safety import is_sensitive_field_descriptor, requires_browser_confirmation
+from core.browser_safety import (\n    build_search_url, is_sensitive_field_descriptor, requires_browser_confirmation,\n)
 
 # Importing playwright cost 198 ms at every launch, paid by action discovery
 # whether or not a browser was ever opened. It is the second-largest import in
@@ -463,9 +463,7 @@ _SEARCH_ENGINES: dict[str, str] = {
 
 def _search_url(query: object, engine: object = "google") -> str:
     """Build a search URL with the query encoded as one opaque parameter."""
-    name = str(engine or "google").strip().lower()
-    base = _SEARCH_ENGINES.get(name, _SEARCH_ENGINES["google"])
-    return base + quote_plus(str(query or ""), safe="")
+    return build_search_url(query, engine, _SEARCH_ENGINES)
 
 _MAC_APP_NAMES: dict[str, str] = {
     "chrome":  "Google Chrome",
