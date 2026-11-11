@@ -73,6 +73,7 @@ from actions.background_monitor import (
 from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
+    get_in_call_addressing_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled, save_proactive_audio_enabled,
     get_input_device, get_output_device,
@@ -104,6 +105,7 @@ from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     communication_context_unchanged, initial_communication_gate,
     should_auto_wake, should_forward_microphone, communication_gate_state,
+    should_stream_call_audio,
 )
 from core.desktop_context import get_desktop_context, should_run_proactive_checkin
 from core.viseme               import VisemeStream
@@ -639,6 +641,9 @@ class JarvisLive:
         self._focus_context = None
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
+        self._communication_audio_session_active = False  # actual WASAPI signal, not release grace
+        self._in_call_addressing_enabled = get_in_call_addressing_enabled()
+        self._proactive_audio_enabled = get_proactive_audio_enabled()
         self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
         self._vision_cam_active    = False   # True if camera was opened for vision → auto-close after response
         self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
@@ -690,6 +695,7 @@ class JarvisLive:
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
         self.ui.on_voice_interrupt_change = self.set_voice_interrupt_enabled
+        self.ui.on_in_call_addressing_change = self.set_in_call_addressing_enabled
         self.ui.on_voice_change   = self._on_voice_change     # voice picker → rebuild session
         self.ui.on_audio_device_change = self._on_audio_device_change
         self._reconnect_event: asyncio.Event | None = None
@@ -871,6 +877,7 @@ class JarvisLive:
                 # sessions to keep privacy while a real call runs in background.
                 active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
                 active = is_communication_context(foreground_app, active_audio_apps)
+                self._communication_audio_session_active = bool(active)
                 gate_active, self._communication_last_active_at = communication_gate_state(
                     active, self._communication_last_active_at, time.monotonic()
                 )
@@ -883,6 +890,7 @@ class JarvisLive:
                 # A failed privacy probe is not evidence that no call is active.
                 # Close the mic gate immediately; the next successful poll may
                 # reopen it after the local Windows audio state is known again.
+                self._communication_audio_session_active = False
                 self._communication_turn_open = False
                 self._communication_turn_deadline = 0.0
                 self._communication_app_active = True
@@ -917,7 +925,19 @@ class JarvisLive:
                         gate_active):
                     self.wake(reason="desktop activity")
             if gate_active:
-                if active_audio_apps is None and sys.platform == "win32":
+                if should_stream_call_audio(
+                        self._communication_audio_session_active,
+                        self._in_call_addressing_enabled,
+                        self._proactive_audio_enabled,
+                        bool(self._enhanced_live and self._engine is None),
+                        self._phone_active,
+                        self._communication_context_known,
+                ):
+                    self.ui.write_log(
+                        "SYS: In-call ADDRESS-AWARE is active. PC microphone audio is being "
+                        "sent to Gemini; Proactive Audio decides whether speech is directed to MARK."
+                    )
+                elif active_audio_apps is None and sys.platform == "win32":
                     self.ui.write_log(
                         "SYS: Windows audio-session detection is unavailable. "
                         "Microphone stays local; repair pycaw/comtypes or use "
@@ -947,6 +967,20 @@ class JarvisLive:
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
+    def set_in_call_addressing_enabled(self, enabled: bool) -> None:
+        """Apply the UI's explicit consent choice without changing call detection."""
+        self._in_call_addressing_enabled = bool(enabled)
+        if self._in_call_addressing_enabled:
+            self.ui.write_log(
+                "SYS: In-call ADDRESS-AWARE is ON. During a detected call, PC microphone audio "
+                "may be sent to Gemini so Proactive Audio can decide whether speech is for MARK."
+            )
+        else:
+            self.ui.write_log(
+                "SYS: In-call microphone privacy restored. Call audio stays on this PC unless "
+                "you explicitly use local wake or Push-to-Talk."
+            )
+
     def _ui_wake_toggle(self, enable: bool) -> str:
         """Switch between ADDRESS-AWARE and LOCAL PRIVACY listening modes."""
         if enable:
@@ -968,6 +1002,7 @@ class JarvisLive:
                 )
                 return "unavailable"
             save_proactive_audio_enabled(False)
+            self._proactive_audio_enabled = False
             self._wake_enabled = True
             save_wake_word_enabled(True)
             # This callback can run on the installer worker thread. Marshal
@@ -983,6 +1018,7 @@ class JarvisLive:
             return "enabled"
         else:
             save_proactive_audio_enabled(True)
+            self._proactive_audio_enabled = True
             self._wake_enabled = False
             save_wake_word_enabled(False)
             if not dispatch_to_loop(
@@ -1869,7 +1905,15 @@ class JarvisLive:
             # A foreground Discord/Teams/Zoom/phone app is treated as a private
             # conversation zone. Audio is never forwarded there until a local
             # wake phrase or explicit PTT hold opens a single request.
-            if self._communication_app_active:
+            if (self._communication_app_active
+                    and not should_stream_call_audio(
+                        self._communication_audio_session_active,
+                        self._in_call_addressing_enabled,
+                        self._proactive_audio_enabled,
+                        bool(self._enhanced_live and self._engine is None),
+                        self._phone_active,
+                        self._communication_context_known,
+                    )):
                 if (self._communication_turn_open
                         and self._communication_turn_deadline
                         and time.monotonic() >= self._communication_turn_deadline
