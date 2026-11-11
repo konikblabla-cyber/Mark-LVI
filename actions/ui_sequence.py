@@ -341,7 +341,7 @@ def _ui_sequence_progress(state: dict, message: str) -> None:
 
 
 def _mark_ui_step_done(state: dict) -> None:
-    _mark_ui_step_done(state)
+    state["completed"] += 1
     _ui_sequence_progress(
         state,
         f"Windows workflow verified step {state['completed']}/{len(state['steps'])}.",
