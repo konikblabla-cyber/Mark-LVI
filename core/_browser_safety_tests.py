@@ -25,7 +25,7 @@ class BrowserSafetyClassifierTests(unittest.TestCase):
 
     def test_irreversible_browser_targets_require_confirmation(self):
         for target in ("Send", "Submit order", "Pay now", "Delete account",
-                       "Publish post", "Cancel subscription", "Transfer funds", "Place order", "Order now", "Complete order", "Create account", "Start trial", "Subscribe", "Share", "Add to cart", "Add to basket", "utwórz konto", "dodaj do koszyka", "złóż zamówienie", "zloz zamowienie", "Wyślij", "Wyslij", "Kup teraz", "Zapłać", "Usuń konto", "Opublikuj", "Przenieś środki", "Zamknij konto"):
+                       "Publish post", "Cancel subscription", "Transfer funds", "Place order", "Order now", "Complete order", "Create account", "Start trial", "Subscribe", "Share", "Logout", "Log out", "Unsubscribe", "Revoke access", "Refund", "Terminate account", "Cancel booking", "Add to cart", "Add to basket", "wyloguj", "anuluj rezerwację", "utwórz konto", "dodaj do koszyka", "złóż zamówienie", "zloz zamowienie", "Wyślij", "Wyslij", "Kup teraz", "Zapłać", "Usuń konto", "Opublikuj", "Przenieś środki", "Zamknij konto"):
             with self.subTest(target=target):
                 self.assertTrue(requires_browser_confirmation("smart_click", target))
 
