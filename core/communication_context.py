@@ -236,6 +236,7 @@ def should_stream_call_audio(
     proactive_audio_enabled: bool,
     gemini_live_available: bool,
     phone_audio_active: bool = False,
+    context_known: bool = True,
 ) -> bool:
     """Allow call audio to Gemini only after explicit consent and with semantic routing.
 
@@ -249,4 +250,5 @@ def should_stream_call_audio(
         and proactive_audio_enabled
         and gemini_live_available
         and not phone_audio_active
+        and context_known
     )
