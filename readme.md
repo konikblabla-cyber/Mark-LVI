@@ -73,7 +73,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧠 Recallable Memory | No size limit and nothing silently forgotten — the prompt carries what fits, the rest is looked up on demand from a local search |
 | 🗣️ Voice Interruption | Optional local barge-in — EchoGuard learns the room's speaker echo and stops JARVIS only after sustained human speech is detected; off by default |
 | 🧾 Conversation History | Optional local text transcript archive with retention controls, secret-pattern redaction, search and HUD-confirmed deletion; audio and screenshots are never saved |
-| 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
+| 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps complete only on verified tool outcomes. A definite tool failure allows one fresh-snapshot alternative; an uncertain result never triggers a blind retry |
 | 🔁 Mission Recovery | After a restart, JARVIS finds the oldest interrupted authorised mission and resumes through read-only recovery; it never blindly repeats the in-flight action |
 | 🧠 Verified Experience Memory | After an entire mission succeeds, JARVIS stores only privacy-filtered topic keywords and the verified tool sequence; similar future missions receive historical hints, never automatic proof or blind replay |
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
