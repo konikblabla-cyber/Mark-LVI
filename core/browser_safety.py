@@ -17,8 +17,8 @@ _SENSITIVE_FIELD = re.compile(
 _HIGH_IMPACT_TARGET = re.compile(
     r"(?:\bsend\b|\bsubmit\b|\bpay\b|\bpurchase\b|\bbuy\b|"
     r"\bcheckout\b|\bplace[\s_-]+order\b|\border[\s_-]+now\b|\bcomplete[\s_-]+order\b|\bdelete\b|\bremove\b|\bpublish\b|\bpost\b|"
-    r"\btransfer\b|\bshare\b|\bsubscribe\b|\bstart[\s_-]+trial\b|\bcreate[\s_-]+account\b|\badd[\s_-]+to[\s_-]+(?:cart|basket)\b|\bauthori[sz]e\b|\bsign\b|"
-    r"cancel[\s_-]+subscription|close[\s_-]+account|utwórz\s+konto|utworz\s+konto|załóż\s+konto|zaloz\s+konto|dodaj\s+do\s+koszyka|subskrybuj|rozpocznij\s+okres\s+próbny|złóż\s+zamówienie|zloz\s+zamowienie|wyślij|wyslij|prześlij|przeslij|zatwierdź|zatwierdz|zapłać|zaplac|kup(?:\s+teraz)?|zamów|zamow|usuń|usun|skasuj|opublikuj|przenieś|przenies|autoryzuj|podpisz|zakończ\s+zakup|anuluj\s+subskrypcj[ęe]|zamknij\s+konto)",
+    r"\btransfer\b|\bshare\b|\bsubscribe\b|\bunsubscribe\b|\blog[ \t_-]*out\b|\brevoke\b|\bwithdraw\b|\brefund\b|\bterminate\b|\bstart[\s_-]+trial\b|\bcreate[\s_-]+account\b|\badd[\s_-]+to[\s_-]+(?:cart|basket)\b|\bauthori[sz]e\b|\bsign\b|"
+    r"cancel[\s_-]+subscription|cancel[\s_-]+(?:booking|reservation)|close[\s_-]+account|anuluj\s+rezerwacj[ęe]|odwołaj\s+rezerwacj[ęe]|wyloguj|wycofaj|cofnij\s+zgodę|cofnij\s+zgode|utwórz\s+konto|utworz\s+konto|załóż\s+konto|zaloz\s+konto|dodaj\s+do\s+koszyka|subskrybuj|rozpocznij\s+okres\s+próbny|złóż\s+zamówienie|zloz\s+zamowienie|wyślij|wyslij|prześlij|przeslij|zatwierdź|zatwierdz|zapłać|zaplac|kup(?:\s+teraz)?|zamów|zamow|usuń|usun|skasuj|opublikuj|przenieś|przenies|autoryzuj|podpisz|zakończ\s+zakup|anuluj\s+subskrypcj[ęe]|zamknij\s+konto)",
     re.IGNORECASE,
 )
 
