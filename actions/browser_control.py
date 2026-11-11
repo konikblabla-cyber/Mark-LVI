@@ -1622,6 +1622,16 @@ def _validate_browser_sequence_steps(raw_steps, session_memory=None):
     return validated, ""
 
 
+def _browser_sequence_progress(player, message: str) -> None:
+    """Send bounded, non-sensitive progress to the HUD without speaking field data."""
+    if player is None:
+        return
+    try:
+        player.write_log("SYS: " + str(message or "")[:240])
+    except Exception:
+        pass
+
+
 def _run_browser_sequence(parameters: dict, browser_name: str | None,
                           player=None, session_memory=None) -> str:
     """Run one bounded browser workflow; stop immediately on any uncertain step."""
@@ -1629,6 +1639,10 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
     steps, error = _validate_browser_sequence_steps(params.get("steps"), session_memory)
     if steps is None:
         return outcome.failed("browser_control", error)
+
+    _browser_sequence_progress(
+        player, f"Browser workflow started: {len(steps)} verified step(s)."
+    )
 
     pending = confirm.pending_title()
     if pending:
@@ -1676,6 +1690,9 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
             )
         timeout = max(1, min(60, int(remaining)))
         action = step["action"]
+        _browser_sequence_progress(
+            player, f"Browser workflow step {index}/{len(steps)}: {action}."
+        )
         try:
             if action == "go_to":
                 result = session.run(session.go_to(step["url"]), timeout=timeout)
@@ -1735,6 +1752,9 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
                 if status == "failed"
                 else "the step did not produce a verified outcome"
             )
+            _browser_sequence_progress(
+                player, f"Browser workflow stopped at step {index}/{len(steps)}: {status}."
+            )
             return (
                 outcome.failed(
                     "browser_control", reason,
@@ -1753,7 +1773,11 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
                 )
             )
         completed += 1
+        _browser_sequence_progress(
+            player, f"Browser workflow verified step {completed}/{len(steps)}."
+        )
 
+    _browser_sequence_progress(player, "Browser workflow completed; all steps verified.")
     return outcome.done(
         "browser_control",
         steps_completed=completed,
