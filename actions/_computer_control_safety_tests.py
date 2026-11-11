@@ -495,5 +495,58 @@ class ComputerControlSafetyTests(unittest.TestCase):
         locate.assert_not_called()
         click.assert_not_called()
 
+
+    def test_screen_find_crops_target_window_and_restores_desktop_coordinates(self):
+        class FakeImage:
+            def save(self, stream, format=None):
+                stream.write(b"window-crop")
+
+        desktop = SimpleNamespace(
+            size=lambda: (100, 80),
+            screenshot=Mock(return_value=FakeImage()),
+        )
+        fake_google = types.ModuleType("google")
+        fake_google.__path__ = []
+        fake_genai = types.ModuleType("google.genai")
+        fake_genai.types = SimpleNamespace(
+            Part=SimpleNamespace(from_bytes=lambda **kwargs: ("image", kwargs["data"])),
+        )
+        fake_google.genai = fake_genai
+        modules = {
+            "google": fake_google,
+            "google.genai": fake_genai,
+        }
+        with patch.object(control, "_get_api_key", return_value="test-key"), \
+             patch.object(control, "_require_pyautogui"), \
+             patch.object(control, "pyautogui", desktop), \
+             patch.dict(sys.modules, modules), \
+             patch(
+                 "core.gemini.call",
+                 return_value=SimpleNamespace(text="20,30"),
+             ) as gemini_call:
+            result = control._screen_find(
+                "gear icon", "settings.exe", (10, 20, 90, 70),
+            )
+        self.assertEqual(result, (30, 50))
+        desktop.screenshot.assert_called_once_with(region=(10, 20, 80, 50))
+        prompt = gemini_call.call_args.args[0][1]
+        self.assertIn("80×50 pixels", prompt)
+        self.assertIn("crop of the target application window", prompt)
+
+    def test_screen_find_does_not_capture_full_desktop_when_target_is_offscreen(self):
+        desktop = SimpleNamespace(
+            size=lambda: (100, 80),
+            screenshot=Mock(),
+        )
+        with patch.object(control, "_get_api_key", return_value="test-key"), \
+             patch.object(control, "_require_pyautogui"), \
+             patch.object(control, "pyautogui", desktop), \
+             patch.object(control, "_safe_print"):
+            result = control._screen_find(
+                "gear icon", "settings.exe", (120, 20, 220, 70),
+            )
+        self.assertIsNone(result)
+        desktop.screenshot.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
