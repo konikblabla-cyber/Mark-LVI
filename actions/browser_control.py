@@ -1286,9 +1286,12 @@ class _BrowserSession:
     const visible = el => {
         const rect = el.getBoundingClientRect();
         const style = window.getComputedStyle(el);
+        const opacity = Number.parseFloat(style.opacity || '1');
         return rect.width > 0 && rect.height > 0
             && style.visibility !== 'hidden' && style.display !== 'none'
-            && style.opacity !== '0';
+            && opacity > 0.01 && style.pointerEvents !== 'none'
+            && !el.closest('[aria-hidden="true"]')
+            && !el.closest('[inert]');
     };
     const clean = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 180);
     return Array.from(document.querySelectorAll(selector))
