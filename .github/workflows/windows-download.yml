@@ -17,6 +17,7 @@ on:
       - "actions/**"
       - "plugins/**"
       - "memory/**"
+      - "dashboard/**"
       - "config/**"
       - ".github/workflows/windows-download.yml"
   pull_request:
@@ -27,6 +28,14 @@ on:
       - "readme.md"
       - "setup.py"
       - "requirements.txt"
+      - "main.py"
+      - "ui.py"
+      - "core/**"
+      - "actions/**"
+      - "plugins/**"
+      - "memory/**"
+      - "dashboard/**"
+      - "config/**"
       - ".github/workflows/windows-download.yml"
   workflow_dispatch:
 

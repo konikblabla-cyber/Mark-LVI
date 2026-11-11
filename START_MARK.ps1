@@ -25,7 +25,8 @@ function Find-Python {
     $launcher = Get-Command "py.exe" -ErrorAction SilentlyContinue
     if ($launcher) {
         foreach ($version in @("3.12", "3.11", "3.13")) {
-            & $launcher.Source "-$version" -c "import sys; print(sys.version)" *> $null
+            # MARK's audio and Qt wheels are shipped for 64-bit Windows only.
+            & $launcher.Source "-$version" -c "import struct,sys; sys.exit(0 if struct.calcsize('P') == 8 else 2)" *> $null
             if ($LASTEXITCODE -eq 0) {
                 return @{
                     Executable = $launcher.Source
@@ -38,12 +39,12 @@ function Find-Python {
 
     $python = Get-Command "python.exe" -ErrorAction SilentlyContinue
     if ($python) {
-        $versionText = & $python.Source --version 2>&1
-        if ($LASTEXITCODE -eq 0 -and "$versionText" -match "Python 3\.(11|12|13)\.") {
+        $pythonInfo = & $python.Source -c "import struct,sys; print('Python %d.%d %d-bit' % (sys.version_info[0], sys.version_info[1], struct.calcsize('P') * 8))" 2>&1
+        if ($LASTEXITCODE -eq 0 -and "$pythonInfo" -match "^Python 3\.(11|12|13) 64-bit$") {
             return @{
                 Executable = $python.Source
                 Prefix = @()
-                Version = ($Matches[0] -replace "Python ", "")
+                Version = ($Matches[0] -replace "^Python ", "" -replace " 64-bit$", "")
             }
         }
     }

@@ -63,6 +63,10 @@ def offer_latest_audio(queue: asyncio.Queue, item) -> bool:
         queue.get_nowait()
     except asyncio.QueueEmpty:
         pass
+    else:
+        # A dropped frame is a completed queue item too. Keep Queue.join()
+        # accounting correct for future diagnostics and shutdown drains.
+        queue.task_done()
 
     try:
         queue.put_nowait(item)

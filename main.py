@@ -1785,30 +1785,33 @@ class JarvisLive:
         )
 
     async def _send_realtime(self):
+        queue = self.out_queue
         while True:
-            msg = await self.out_queue.get()
+            msg = await queue.get()
+            try:
+                await self.session.send_realtime_input(
+                    audio=types.Blob(
+                        data=msg["data"],
+                        mime_type=msg.get("mime_type", "audio/pcm"),
+                    )
+                )
+            finally:
+                queue.task_done()
             # Gemini 3.x Live rejects the old realtime_input.media_chunks field
             # (what `media=...` maps to) and closes the socket with a 1007. Send
             # mic / phone PCM through the new `audio` field instead. Queue items
             # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
             # the phone relay.
-            await self.session.send_realtime_input(
-                audio=types.Blob(
-                    data=msg["data"],
-                    mime_type=msg.get("mime_type", "audio/pcm"),
-                )
-            )
-
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
+        audio_queue = self.out_queue
         last_input_callback = [time.monotonic()]
 
         def _enqueue_latest_audio(message):
             # Runs on the asyncio loop, not the real-time PortAudio callback.
-            q = self.out_queue
-            if q is not None:
-                offer_latest_audio(q, message)
+            if audio_queue is not None:
+                offer_latest_audio(audio_queue, message)
 
         def callback(indata, frames, time_info, status):
             # PortAudio can leave a stream object present after a USB endpoint
@@ -2758,11 +2761,14 @@ class JarvisLive:
                 # No audio for 1 s → phone mic inactive, give PC mic back
                 self._phone_active = False
                 continue
-            self._phone_active = True   # phone is streaming — silence PC mic
-            with self._speaking_lock:
-                speaking = self._is_speaking
-            if not speaking and not self.ui.muted:
-                offer_latest_audio(self.out_queue, chunk)
+            try:
+                self._phone_active = True   # phone is streaming — silence PC mic
+                with self._speaking_lock:
+                    speaking = self._is_speaking
+                if not speaking and not self.ui.muted:
+                    offer_latest_audio(self.out_queue, chunk)
+            finally:
+                q.task_done()
 
     def _on_phone_connected(self) -> None:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")

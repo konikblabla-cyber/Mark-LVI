@@ -18,6 +18,17 @@ class AudioRecoveryTests(unittest.TestCase):
         self.assertEqual(q.get_nowait(), "second")
         self.assertEqual(q.get_nowait(), "latest")
 
+    def test_dropped_audio_frame_does_not_leave_unfinished_queue_work(self):
+        async def exercise():
+            q = asyncio.Queue(maxsize=1)
+            offer_latest_audio(q, "old")
+            offer_latest_audio(q, "new")  # drops and completes "old"
+            self.assertEqual(await q.get(), "new")
+            q.task_done()
+            await asyncio.wait_for(q.join(), timeout=0.1)
+
+        asyncio.run(exercise())
+
     def test_live_audio_queue_capacity_is_short_enough_for_low_latency_streaming(self):
         self.assertLessEqual(LIVE_AUDIO_QUEUE_SIZE, 16)
         q = asyncio.Queue(maxsize=LIVE_AUDIO_QUEUE_SIZE)
