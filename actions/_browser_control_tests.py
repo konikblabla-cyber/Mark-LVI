@@ -28,6 +28,7 @@ class FakeLocator:
         self.value = ""
         self.type_enabled = True
         self.click_error = None
+        self.evaluate_error = None
 
     async def count(self):
         return self._count
@@ -61,6 +62,8 @@ class FakeLocator:
         return self.value
 
     async def evaluate(self, script):
+        if self.evaluate_error:
+            raise self.evaluate_error
         return self.attrs.get("__evaluate_result", "")
 
 
@@ -88,6 +91,20 @@ class FakePage:
 
 
 class BrowserBehaviorSafetyTests(unittest.TestCase):
+    def test_sequence_fails_closed_when_dom_risk_metadata_cannot_be_read(self):
+        locator = FakeLocator()
+        locator.evaluate_error = RuntimeError("DOM metadata unavailable")
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session,
+            selector="button#unknown",
+            expected_text="Completed",
+            block_high_impact=True,
+        ))
+        self.assertIn("status=failed", result)
+        self.assertEqual(locator.clicked, 0)
+
     def test_sequence_click_checks_real_control_metadata_before_clicking(self):
         locator = FakeLocator(attrs={"aria-label": "Delete account"})
         page = FakePage(locator)
