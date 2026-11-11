@@ -342,9 +342,15 @@ def _read_window_snapshot(window_handle=None, expected_process_id=None) -> dict:
             bounds = None
     except Exception:
         bounds = None
+    try:
+        import psutil
+        process_name = str(psutil.Process(int(process_id)).name() or "")[:100]
+    except Exception:
+        process_name = ""
     return {
         "handle": int(handle),
         "process_id": int(process_id),
+        "process_name": process_name,
         "bounds": bounds,
         "records": records,
         "clickables": clickables,
