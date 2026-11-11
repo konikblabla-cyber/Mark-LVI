@@ -2428,7 +2428,7 @@ TOOL = {
             },
             "steps": {
                 "type": "ARRAY",
-                "description": "For action=sequence: 2 to 8 ordered steps in one browser session. Each step is an object with action=go_to and url; action=click with exactly one of selector/text plus expected_text or expected_url; action=smart_click with description plus expected_text or expected_url; action=type with selector and text; or action=smart_type with description and text. Each step is verified before the next. No Enter/submit, form submit, clear_first, payments, purchases, sends or destructive actions in a sequence.",
+                "description": "For action=sequence: 2 to 8 ordered steps in one browser session. Each go_to step requires url plus expected_text or expected_url to verify the final destination after redirects; each click step requires exactly one of selector/text plus expected_text or expected_url; action=smart_click with description plus expected_text or expected_url; action=type with selector and text; or action=smart_type with description and text. Each step is verified before the next. No Enter/submit, form submit, clear_first, payments, purchases, sends or destructive actions in a sequence.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
