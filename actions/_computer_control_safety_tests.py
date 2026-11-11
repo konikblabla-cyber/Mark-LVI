@@ -3,7 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, call
 
 from actions import computer_control as control
 
@@ -375,7 +375,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
             "gear icon", "settings.exe", (10, 20, 90, 70),
         )
         focus.assert_called_once_with(7, 55)
-        snapshot.assert_has_calls([unittest.mock.call(7, 55), unittest.mock.call(7, 55)])
+        snapshot.assert_has_calls([call(7, 55), call(7, 55)])
         click.assert_called_once_with(x=20, y=30)
 
     def test_verified_visual_click_never_clicks_if_expected_result_is_already_visible(self):
