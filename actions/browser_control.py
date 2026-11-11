@@ -1518,6 +1518,254 @@ class _SessionRegistry:
 
 _registry = _SessionRegistry()
 
+_MAX_BROWSER_SEQUENCE_STEPS = 8
+_MAX_BROWSER_SEQUENCE_SECONDS = 300.0
+
+
+def _validate_browser_sequence_steps(raw_steps, session_memory=None):
+    """Accept only exact, bounded browser operations with observable outcomes."""
+    if not isinstance(raw_steps, list) or not 2 <= len(raw_steps) <= _MAX_BROWSER_SEQUENCE_STEPS:
+        return None, f"sequence must contain 2 to {_MAX_BROWSER_SEQUENCE_STEPS} steps"
+
+    from core.autonomy_policy import requires_ui_confirmation, scope_request
+
+    request = scope_request(session_memory)
+    validated = []
+    for index, raw in enumerate(raw_steps, start=1):
+        if not isinstance(raw, dict):
+            return None, f"step {index} must be an object"
+        action = str(raw.get("action") or "").strip().lower()
+
+        if action == "go_to":
+            if set(raw) != {"action", "url"}:
+                return None, f"step {index}: go_to requires only action and url"
+            url = raw.get("url")
+            if not isinstance(url, str) or not url.strip() or len(url) > 2048:
+                return None, f"step {index}: url must contain 1 to 2048 characters"
+            try:
+                safe_url = _normalize_url(url)
+            except Exception as exc:
+                return None, f"step {index}: unsafe URL ({type(exc).__name__})"
+            if not safe_url.startswith(("http://", "https://")):
+                return None, f"step {index}: only http and https navigation is supported"
+            validated.append({"action": action, "url": safe_url})
+            continue
+
+        if action in {"click", "smart_click"}:
+            if action == "click":
+                allowed = {"action", "selector", "text", "expected_text", "expected_url"}
+                if set(raw) - allowed:
+                    return None, f"step {index}: unsupported click parameter"
+                selector, text = raw.get("selector"), raw.get("text")
+                if bool(selector) == bool(text):
+                    return None, f"step {index}: click requires exactly one of selector or text"
+                if any(not isinstance(v, str) or not v.strip() or len(v) > 240
+                       for v in (selector or text,)):
+                    return None, f"step {index}: click target must contain 1 to 240 characters"
+                target = str(text or selector)
+                safe = {
+                    "action": action,
+                    "selector": selector or "",
+                    "text": text or "",
+                }
+            else:
+                allowed = {"action", "description", "expected_text", "expected_url"}
+                if set(raw) - allowed:
+                    return None, f"step {index}: unsupported smart_click parameter"
+                description = raw.get("description")
+                if not isinstance(description, str) or not description.strip() or len(description) > 240:
+                    return None, f"step {index}: description must contain 1 to 240 characters"
+                target = description
+                safe = {"action": action, "description": description.strip()}
+
+            expected_text, expected_url, error = _validate_click_postcondition(
+                raw.get("expected_text", ""), raw.get("expected_url", ""),
+            )
+            if error or (not expected_text and not expected_url):
+                return None, f"step {index}: an exact expected_text or expected_url is required"
+            if (requires_browser_confirmation(action, target)
+                    and requires_ui_confirmation(target, user_request=request)):
+                return None, (
+                    f"step {index} targets a potentially external/high-impact action. "
+                    "Run it as a separate browser action so its HUD confirmation can be shown."
+                )
+            safe["expected_text"] = expected_text
+            safe["expected_url"] = expected_url
+            validated.append(safe)
+            continue
+
+        if action in {"type", "smart_type"}:
+            allowed = (
+                {"action", "selector", "text"}
+                if action == "type"
+                else {"action", "description", "text"}
+            )
+            if set(raw) != allowed:
+                return None, f"step {index}: text entry accepts only its target and literal text"
+            target_key = "selector" if action == "type" else "description"
+            target = raw.get(target_key)
+            text = raw.get("text")
+            if not isinstance(target, str) or not target.strip() or len(target) > 240:
+                return None, f"step {index}: field target must contain 1 to 240 characters"
+            if not isinstance(text, str) or not text or len(text) > 4000:
+                return None, f"step {index}: text must contain 1 to 4000 characters"
+            if is_sensitive_field_descriptor(target):
+                return None, f"step {index}: sensitive fields are not supported"
+            validated.append({
+                "action": action,
+                target_key: target.strip(),
+                "text": text,
+            })
+            continue
+
+        return None, (
+            f"step {index}: unsupported action. Use go_to, click, smart_click, "
+            "type or smart_type; form submission and key presses are not part of a sequence."
+        )
+
+    return validated, ""
+
+
+def _run_browser_sequence(parameters: dict, browser_name: str | None,
+                          player=None, session_memory=None) -> str:
+    """Run one bounded browser workflow; stop immediately on any uncertain step."""
+    params = parameters if isinstance(parameters, dict) else {}
+    steps, error = _validate_browser_sequence_steps(params.get("steps"), session_memory)
+    if steps is None:
+        return outcome.failed("browser_control", error)
+
+    pending = confirm.pending_title()
+    if pending:
+        return outcome.ask(
+            "browser_control",
+            "another action is waiting for HUD confirmation; finish or cancel it before starting a browser sequence",
+            pending_title=pending,
+        )
+
+    try:
+        session = _registry.get(browser_name)
+    except Exception as exc:
+        return outcome.failed(
+            "browser_control",
+            f"could not start the browser session ({type(exc).__name__})",
+        )
+
+    # Continue from a URL just opened through the user's native browser path.
+    last = _registry.pop_native_url()
+    if last:
+        try:
+            resumed = session.run(session.go_to(last), timeout=60)
+            if not str(resumed).startswith("status=done"):
+                return outcome.unverified(
+                    "browser_control",
+                    "the previously opened page could not be resumed safely; no sequence steps were started",
+                )
+        except Exception as exc:
+            return outcome.unverified(
+                "browser_control",
+                f"the previous page may not have resumed ({type(exc).__name__}); no sequence steps were started",
+            )
+
+    deadline = time.monotonic() + _MAX_BROWSER_SEQUENCE_SECONDS
+    completed = 0
+    for index, step in enumerate(steps, start=1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return outcome.unverified(
+                "browser_control",
+                "the browser sequence reached its time limit; remaining steps were not started",
+                steps_completed=completed,
+                total_steps=len(steps),
+                stopped_at=index,
+            )
+        timeout = max(1, min(60, int(remaining)))
+        action = step["action"]
+        try:
+            if action == "go_to":
+                result = session.run(session.go_to(step["url"]), timeout=timeout)
+            elif action == "click":
+                result = session.run(
+                    session.click(
+                        step.get("selector") or None,
+                        step.get("text") or None,
+                        expected_text=step["expected_text"],
+                        expected_url=step["expected_url"],
+                    ),
+                    timeout=timeout,
+                )
+            elif action == "smart_click":
+                result = session.run(
+                    session.smart_click(
+                        step["description"],
+                        expected_text=step["expected_text"],
+                        expected_url=step["expected_url"],
+                    ),
+                    timeout=timeout,
+                )
+            elif action == "type":
+                result = session.run(
+                    session.type_text(step["selector"], step["text"], clear_first=False),
+                    timeout=timeout,
+                )
+            else:
+                result = session.run(
+                    session.smart_type(step["description"], step["text"], clear_first=False),
+                    timeout=timeout,
+                )
+        except concurrent.futures.TimeoutError:
+            return outcome.unverified(
+                "browser_control",
+                "the step timed out; its effect may have happened, so MARK stopped without retrying",
+                steps_completed=completed,
+                total_steps=len(steps),
+                stopped_at=index,
+                step_action=action,
+            )
+        except Exception as exc:
+            return outcome.unverified(
+                "browser_control",
+                f"the step may have changed the page but the result is uncertain ({type(exc).__name__}); MARK stopped",
+                steps_completed=completed,
+                total_steps=len(steps),
+                stopped_at=index,
+                step_action=action,
+            )
+
+        result_text = str(result or "")
+        if not result_text.startswith("status=done") or "verified=true" not in result_text:
+            status = "failed" if result_text.startswith("status=failed") else "unverified"
+            reason = (
+                "the step returned a definite failure"
+                if status == "failed"
+                else "the step did not produce a verified outcome"
+            )
+            return (
+                outcome.failed(
+                    "browser_control", reason,
+                    steps_completed=completed,
+                    total_steps=len(steps),
+                    stopped_at=index,
+                    step_action=action,
+                )
+                if status == "failed"
+                else outcome.unverified(
+                    "browser_control", reason,
+                    steps_completed=completed,
+                    total_steps=len(steps),
+                    stopped_at=index,
+                    step_action=action,
+                )
+            )
+        completed += 1
+
+    return outcome.done(
+        "browser_control",
+        steps_completed=completed,
+        total_steps=len(steps),
+        verified=True,
+    )
+
+
 def _browser_control_execute(
     parameters:    dict = None,
     response=None,
@@ -1528,6 +1776,13 @@ def _browser_control_execute(
     action  = params.get("action", "").lower().strip()
     browser = params.get("browser", "").lower().strip() or None
     result  = "Unknown action."
+
+    if action == "sequence":
+        result = _run_browser_sequence(
+            params, browser, player=player, session_memory=session_memory,
+        )
+        _log(player, result)
+        return result
 
     if action == "switch":
         target = browser or params.get("target", "").lower().strip()
@@ -1750,7 +2005,9 @@ TOOL = {
     "name": "browser_control",
     "description": (
         "Controls the web browser: open an address, search, click, type, "
-        "scroll, read the page, manage tabs, go back and forward. "
+        "scroll, read the page, manage tabs, go back and forward. It can also "
+        "run a 2–8 step verified browser sequence in one session. Each step must "
+        "be verified before the next starts; uncertain outcomes stop the sequence. "
         "THIS TOOL OPENS THE BROWSER ITSELF. Never call open_app for the "
         "browser first - doing both launches it twice, the second copy on a "
         "different profile with none of the user's sign-ins. 'Open Chrome and "
@@ -1778,7 +2035,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
+                "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | sequence | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
             },
             "browser": {
                 "type": "STRING",
@@ -1811,6 +2068,23 @@ TOOL = {
             "expected_url": {
                 "type": "STRING",
                 "description": "For click/smart_click: exact http/https URL that must become the current page URL before MARK reports verified success. Without an expected_text or expected_url the click remains unverified."
+            },
+            "steps": {
+                "type": "ARRAY",
+                "description": "For action=sequence: 2 to 8 ordered steps in one browser session. Each step is an object with action=go_to and url; action=click with exactly one of selector/text plus expected_text or expected_url; action=smart_click with description plus expected_text or expected_url; action=type with selector and text; or action=smart_type with description and text. Each step is verified before the next. No Enter/submit, form submit, clear_first, payments, purchases, sends or destructive actions in a sequence.",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "action": {"type": "STRING", "enum": ["go_to", "click", "smart_click", "type", "smart_type"]},
+                        "url": {"type": "STRING"},
+                        "selector": {"type": "STRING"},
+                        "text": {"type": "STRING"},
+                        "description": {"type": "STRING"},
+                        "expected_text": {"type": "STRING"},
+                        "expected_url": {"type": "STRING"}
+                    },
+                    "required": ["action"]
+                }
             },
             "description": {
                 "type": "STRING",
