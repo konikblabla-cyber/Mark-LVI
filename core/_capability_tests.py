@@ -495,7 +495,7 @@ class UISequenceKeyboardStepTests(unittest.TestCase):
     def test_key_combo_rejects_text_injection_and_unknown_modifiers(self):
         from actions.ui_sequence import _normalise_key_combo
 
-        for value in ("Ctrl+Alt+R;whoami", "Win+R", "Ctrl+", "", "arbitrary text"):
+        for value in ("Ctrl+Alt+R;whoami", "Win+R", "Ctrl+", "Ctrl+Control+S", "", "arbitrary text"):
             rendered, error = _normalise_key_combo(value)
             self.assertIsNone(rendered, value)
             self.assertTrue(error, value)
