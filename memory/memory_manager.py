@@ -749,8 +749,3 @@ def format_experience_hints(query: str, limit: int = 2) -> str:
     return "\n".join(lines)
 
 
-__all__ += [
-    "record_verified_mission",
-    "find_similar_missions",
-    "format_experience_hints",
-]
