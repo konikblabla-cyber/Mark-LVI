@@ -653,7 +653,7 @@ async def _async_value(value):
 class BrowserSequenceTests(unittest.TestCase):
     def test_sequence_validation_accepts_only_bounded_verified_steps(self):
         steps, error = browser._validate_browser_sequence_steps([
-            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "click", "text": "Open", "expected_text": "Workspace"},
             {"action": "smart_type", "description": "Search", "text": "JARVIS"},
         ])
@@ -661,16 +661,24 @@ class BrowserSequenceTests(unittest.TestCase):
         self.assertEqual(len(steps), 3)
 
     def test_sequence_requires_two_to_eight_steps(self):
-        for steps in ([], [{"action": "go_to", "url": "https://example.test/"}],
-                      [{"action": "go_to", "url": "https://example.test/"}] * 9):
+        for steps in ([], [{"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"}],
+                      [{"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"}] * 9):
             with self.subTest(count=len(steps)):
                 result, error = browser._validate_browser_sequence_steps(steps)
                 self.assertIsNone(result)
                 self.assertIn("2 to 8", error)
 
-    def test_sequence_click_requires_exact_postcondition(self):
+    def test_sequence_navigation_requires_destination_postcondition(self):
         result, error = browser._validate_browser_sequence_steps([
             {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Open", "expected_text": "Workspace"},
+        ])
+        self.assertIsNone(result)
+        self.assertIn("expected_text or expected_url", error)
+
+    def test_sequence_click_requires_exact_postcondition(self):
+        result, error = browser._validate_browser_sequence_steps([
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "click", "text": "Open"},
         ])
         self.assertIsNone(result)
@@ -680,7 +688,7 @@ class BrowserSequenceTests(unittest.TestCase):
         for target in ("Send", "Delete account", "Pay now", "Place order", "Złóż zamówienie"):
             with self.subTest(target=target):
                 result, error = browser._validate_browser_sequence_steps([
-                    {"action": "go_to", "url": "https://example.test/"},
+                    {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
                     {"action": "click", "text": target, "expected_text": "Done"},
                 ])
                 self.assertIsNone(result)
@@ -688,7 +696,7 @@ class BrowserSequenceTests(unittest.TestCase):
 
     def test_sequence_keeps_high_impact_actions_out_even_when_requested(self):
         result, error = browser._validate_browser_sequence_steps([
-            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "click", "text": "Send", "expected_text": "Message sent"},
         ], {"user_request": "click Send", "expires_at": browser.time.monotonic() + 30})
         self.assertIsNone(result)
@@ -700,7 +708,7 @@ class BrowserSequenceTests(unittest.TestCase):
             {"action": "type", "selector": "#name", "text": "Mark", "clear_first": True},
         ):
             result, error = browser._validate_browser_sequence_steps([
-                {"action": "go_to", "url": "https://example.test/"},
+                {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
                 step,
             ])
             self.assertIsNone(result)
@@ -710,6 +718,7 @@ class BrowserSequenceTests(unittest.TestCase):
         executed = []
 
         class FakeSession:
+            _page = FakePage(FakeLocator(), url="https://example.test/")
             def run(self, coroutine, timeout=60):
                 return asyncio.run(coroutine)
 
@@ -726,7 +735,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 return browser.outcome.done("browser_control", typed=True, verified=True)
 
         steps = [
-            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "click", "text": "Open", "expected_text": "Workspace"},
             {"action": "type", "selector": "#search", "text": "do not run"},
         ]
@@ -746,6 +755,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 progress.append(message)
 
         class FakeSession:
+            _page = FakePage(FakeLocator(), url="https://example.test/")
             def run(self, coroutine, timeout=60):
                 return asyncio.run(coroutine)
 
@@ -758,7 +768,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 return browser.outcome.done("browser_control", clicked=True, verified=True)
 
         steps = [
-            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "click", "text": "Open", "expected_text": "Workspace"},
         ]
         with patch.object(browser._registry, "get", return_value=FakeSession()), \
@@ -775,6 +785,7 @@ class BrowserSequenceTests(unittest.TestCase):
         executed = []
 
         class FakeSession:
+            _page = FakePage(FakeLocator(), url="https://example.test/")
             def run(self, coroutine, timeout=60):
                 coroutine.close()
                 raise browser.concurrent.futures.TimeoutError()
@@ -788,7 +799,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 return browser.outcome.done("browser_control", clicked=True, verified=True)
 
         steps = [
-            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "click", "text": "Open", "expected_text": "Workspace"},
         ]
         with patch.object(browser._registry, "get", return_value=FakeSession()), \
@@ -801,6 +812,7 @@ class BrowserSequenceTests(unittest.TestCase):
         executed = []
 
         class FakeSession:
+            _page = FakePage(FakeLocator(), url="https://example.test/")
             def run(self, coroutine, timeout=60):
                 return asyncio.run(coroutine)
 
@@ -814,7 +826,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 return browser.outcome.done("browser_control", clicked=True, verified=True)
 
         steps = [
-            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "smart_click", "description": "Open workspace", "expected_text": "Workspace"},
         ]
         with patch.object(browser._registry, "get", return_value=FakeSession()), \
@@ -839,6 +851,7 @@ class BrowserSequenceTests(unittest.TestCase):
         executed = []
 
         class FakeSession:
+            _page = FakePage(FakeLocator(), url="https://example.test/")
             def run(self, coroutine, timeout=60):
                 return asyncio.run(coroutine)
 
@@ -851,7 +864,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 return browser.outcome.done("browser_control", clicked=True, verified=True)
 
         steps = [
-            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
             {"action": "click", "text": "Open", "expected_text": "Workspace"},
         ]
         with patch.object(browser._registry, "get", return_value=FakeSession()), \
