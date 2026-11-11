@@ -97,5 +97,89 @@ class ProactiveRetryTests(unittest.TestCase):
 
 
 
+class BackgroundMonitorHeadlineTests(unittest.TestCase):
+    def test_monitor_reports_multiple_new_headlines_and_migrates_legacy_hash(self):
+        from actions import background_monitor as monitor
+
+        class FakeDateTime:
+            @staticmethod
+            def now():
+                class Now:
+                    @staticmethod
+                    def strftime(_fmt):
+                        return "2026-11-11"
+                return Now()
+
+        old_title = "Previously seen headline"
+        results = [
+            {"title": old_title, "snippet": "old", "source": "old.example"},
+            {"title": "New headline one", "snippet": "summary one", "source": "one.example"},
+            {"title": "New headline two", "snippet": "summary two", "source": "two.example"},
+            {"title": "New headline three", "snippet": "summary three", "source": "three.example"},
+            {"title": "New headline four", "snippet": "summary four", "source": "four.example"},
+        ]
+        state = {
+            "jarvis": {
+                "topic": "JARVIS AI",
+                "last_check": "",
+                "last_hash": monitor._title_hash(old_title),
+            }
+        }
+        saved = {}
+
+        with (
+            patch.object(monitor, "datetime", FakeDateTime),
+            patch.object(monitor, "_load", return_value=state),
+            patch.object(monitor, "_save", side_effect=lambda value: saved.update(value)),
+            patch("actions.web_search._ddg_news", return_value=results) as search,
+        ):
+            alerts = monitor.check_all()
+
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("New headline one", alerts[0])
+        self.assertIn("New headline two", alerts[0])
+        self.assertIn("New headline three", alerts[0])
+        self.assertNotIn("New headline four", alerts[0])
+        self.assertNotIn(old_title, alerts[0])
+        self.assertEqual(len(saved["jarvis"]["seen_hashes"]), 4)
+        self.assertEqual(saved["jarvis"]["last_check"], "2026-11-11")
+        search.assert_called_once_with("JARVIS AI", max_results=5)
+
+    def test_monitor_does_not_repeat_seen_headlines_on_later_day(self):
+        from actions import background_monitor as monitor
+
+        class FakeDateTime:
+            @staticmethod
+            def now():
+                class Now:
+                    @staticmethod
+                    def strftime(_fmt):
+                        return "2026-11-12"
+                return Now()
+
+        title = "Already reported"
+        digest = monitor._title_hash(title)
+        state = {
+            "jarvis": {
+                "topic": "JARVIS AI",
+                "last_check": "2026-11-11",
+                "last_hash": digest,
+                "seen_hashes": [digest],
+            }
+        }
+        saved = {}
+        with (
+            patch.object(monitor, "datetime", FakeDateTime),
+            patch.object(monitor, "_load", return_value=state),
+            patch.object(monitor, "_save", side_effect=lambda value: saved.update(value)),
+            patch("actions.web_search._ddg_news", return_value=[{"title": title}]),
+        ):
+            alerts = monitor.check_all()
+
+        self.assertEqual(alerts, [])
+        self.assertEqual(saved["jarvis"]["last_check"], "2026-11-12")
+        self.assertEqual(saved["jarvis"]["seen_hashes"], [digest])
+
+
 if __name__ == "__main__":
     unittest.main()
