@@ -481,13 +481,13 @@ class BrowserSequenceTests(unittest.TestCase):
                 self.assertIsNone(result)
                 self.assertIn("separate browser action", error)
 
-    def test_sequence_allows_an_explicitly_requested_external_target(self):
+    def test_sequence_keeps_high_impact_actions_out_even_when_requested(self):
         result, error = browser._validate_browser_sequence_steps([
             {"action": "go_to", "url": "https://example.test/"},
             {"action": "click", "text": "Send", "expected_text": "Message sent"},
         ], {"user_request": "click Send", "expires_at": browser.time.monotonic() + 30})
-        self.assertEqual(error, "")
-        self.assertEqual(len(result), 2)
+        self.assertIsNone(result)
+        self.assertIn("Run this action separately", error)
 
     def test_sequence_rejects_sensitive_fields_and_clear_first(self):
         for step in (
