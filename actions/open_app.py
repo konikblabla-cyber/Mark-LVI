@@ -90,42 +90,179 @@ def _desktop_search(app_name: str) -> bool:
         return False
 
 
+def _windows_executable_path(app_name: str):
+    """Resolve a real Windows executable without shell parsing or guessed args."""
+    launcher = str(appidentity.launcher_name(app_name) or app_name).strip()
+    if not launcher or launcher.casefold().startswith(("ms-settings:", "shell:")):
+        return None
+
+    names = [launcher]
+    if not launcher.casefold().endswith(".exe"):
+        names.append(launcher + ".exe")
+    for name in names:
+        found = shutil.which(name)
+        if found and os.path.isfile(found):
+            return found
+
+    # Windows App Paths is the standard per-application executable registry.
+    try:
+        import winreg
+        base = r"Software\Microsoft\Windows\CurrentVersion\App Paths"
+        views = (
+            getattr(winreg, "KEY_WOW64_64KEY", 0),
+            getattr(winreg, "KEY_WOW64_32KEY", 0),
+        )
+        for name in names:
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                for view in views:
+                    try:
+                        with winreg.OpenKey(
+                            hive, base + "\\" + name, 0,
+                            getattr(winreg, "KEY_READ", 0) | view,
+                        ) as key:
+                            value, _ = winreg.QueryValueEx(key, "")
+                        candidate = str(value).strip().strip('"')
+                        if os.path.isfile(candidate) and candidate.casefold().endswith(".exe"):
+                            return candidate
+                    except (OSError, ValueError, TypeError):
+                        continue
+    except ImportError:
+        pass
+
+    # Browser vendors install per-user binaries outside PATH and App Paths.
+    key = appidentity.fold(launcher)
+    local = os.environ.get("LOCALAPPDATA", "")
+    roaming = os.environ.get("APPDATA", "")
+    pf = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+    pf86 = os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")
+    candidates = []
+    if key in {"opera", "operabrowser"}:
+        candidates.extend([
+            os.path.join(local, "Programs", "Opera", "opera.exe"),
+            os.path.join(roaming, "Opera Software", "Opera Stable", "opera.exe"),
+            os.path.join(pf, "Opera", "opera.exe"),
+            os.path.join(pf86, "Opera", "opera.exe"),
+        ])
+    elif key == "operagx":
+        candidates.extend([
+            os.path.join(local, "Programs", "Opera GX", "opera.exe"),
+            os.path.join(roaming, "Opera Software", "Opera GX Stable", "opera.exe"),
+            os.path.join(pf, "Opera GX", "opera.exe"),
+            os.path.join(pf86, "Opera GX", "opera.exe"),
+        ])
+    elif key in {"chrome", "googlechrome"}:
+        candidates.extend([
+            os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(pf86, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(local, "Google", "Chrome", "Application", "chrome.exe"),
+        ])
+    elif key in {"msedge", "edge"}:
+        candidates.extend([
+            os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+            os.path.join(pf86, "Microsoft", "Edge", "Application", "msedge.exe"),
+        ])
+    elif key == "firefox":
+        candidates.extend([
+            os.path.join(pf, "Mozilla Firefox", "firefox.exe"),
+            os.path.join(pf86, "Mozilla Firefox", "firefox.exe"),
+        ])
+    return next((path for path in candidates if os.path.isfile(path)), None)
+
+
+def _windows_start_menu_shortcut(app_name: str):
+    """Find a strong Start Menu shortcut match; refuse equally plausible apps."""
+    launcher = str(appidentity.launcher_name(app_name) or app_name)
+    queries = {appidentity.fold(app_name), appidentity.fold(launcher)}
+    queries.discard("")
+    roots = []
+    for env_name in ("PROGRAMDATA", "APPDATA"):
+        base = os.environ.get(env_name, "")
+        if base:
+            roots.append(os.path.join(
+                base, "Microsoft", "Windows", "Start Menu", "Programs"
+            ))
+
+    ranked = []
+    scanned = 0
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            for current, _dirs, files in os.walk(root):
+                for filename in files:
+                    if not filename.casefold().endswith(".lnk"):
+                        continue
+                    scanned += 1
+                    if scanned > 3000:
+                        break
+                    stem = appidentity.fold(os.path.splitext(filename)[0])
+                    if not stem:
+                        continue
+                    score = 0
+                    for query in queries:
+                        if stem == query:
+                            score = max(score, 100)
+                        elif min(len(stem), len(query)) >= 4 and (
+                            stem.startswith(query) or query.startswith(stem)
+                        ):
+                            score = max(score, 70)
+                        elif min(len(stem), len(query)) >= 4 and (
+                            query in stem or stem in query
+                        ):
+                            score = max(score, 50)
+                    if score:
+                        ranked.append((score, os.path.join(current, filename), stem))
+                if scanned > 3000:
+                    break
+        except (OSError, PermissionError):
+            continue
+
+    if not ranked:
+        return None, False
+    best_score = max(item[0] for item in ranked)
+    best = [item for item in ranked if item[0] == best_score]
+    if len({item[2] for item in best}) > 1:
+        return None, True
+    # Same shortcut label in both menus is a duplicate, not a conflict.
+    return best[0][1], False
+
+
 def _launch_windows(app_name: str) -> bool:
-    """-> was a launch REQUESTED successfully. Never 'did it open'.
+    """Start a resolved app or a uniquely matched shortcut, never a shell command."""
+    # URI schemes such as ms-settings: go through the Windows shell handler.
+    scheme, _, rest = app_name.partition(":")
+    if rest and scheme and scheme.isalnum() and len(scheme) > 1:
+        try:
+            os.startfile(app_name)               # noqa: S606 - ShellExecute, no command shell
+            return True
+        except Exception as exc:
+            print(f"[open_app] startfile failed for {app_name!r}: {type(exc).__name__}")
 
-    Three routes, none of them a shell:
-
-      1. an executable on PATH, started as a one-element argument vector. The
-         old code passed the raw string with shell=True, which is what let
-         "notepad.exe & whoami" run two things.
-      2. a URI scheme such as `ms-settings:` — handed to the OS handler with
-         os.startfile, which is what the shell would have called anyway,
-         without a command line for anything to be appended to.
-      3. the Start Menu, typed like a person would.
-    """
-    resolved = shutil.which(app_name)
+    resolved = _windows_executable_path(app_name)
     if resolved:
         try:
             subprocess.Popen(
                 [resolved],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                shell=False,
             )
             return True
         except Exception as exc:
-            print(f"[open_app] Popen failed for {resolved!r}: {exc}")
+            print(f"[open_app] Popen failed for {resolved!r}: {type(exc).__name__}")
 
-    # A scheme, not a path: "ms-settings:", "spotify:", "steam://run/...".
-    # Checked before ":" appears anywhere else — a Windows path has one too,
-    # at index 1, and that is a file, not a scheme.
-    scheme, _, rest = app_name.partition(":")
-    if rest and scheme and scheme.isalnum() and len(scheme) > 1:
+    shortcut, ambiguous = _windows_start_menu_shortcut(app_name)
+    if ambiguous:
+        print(f"[open_app] multiple Start Menu shortcuts match {app_name!r}; refusing to guess")
+        return False
+    if shortcut:
         try:
-            os.startfile(app_name)               # noqa: S606 — no shell involved
+            os.startfile(shortcut)               # noqa: S606 - trusted .lnk from Start Menu
             return True
         except Exception as exc:
-            print(f"[open_app] startfile failed for {app_name!r}: {exc}")
+            print(f"[open_app] Start Menu shortcut failed: {type(exc).__name__}")
 
+    # Last resort: native Start search, preserving Store/UWP app compatibility.
     return _desktop_search(app_name)
 
 
@@ -300,8 +437,27 @@ def _launch_and_verify(player, spoken: str, launcher_name: str,
             verification_name or spoken, before, timeout=_LAUNCH_TIMEOUT
         )
         if appeared is not None:
-            _log(player, f"JARVIS: {appeared.label} is open.")
-            return
+            # A process can exist without a usable foreground window (e.g. a
+            # background updater). Do not report "opened" until the new app is
+            # foregrounded and its process is still alive.
+            focused = False
+            alive = False
+            try:
+                focused = bool(appidentity.focus(appeared))
+                alive = bool(appidentity.is_running(appeared.pid))
+            except Exception as verify_error:
+                print(f"[open_app] foreground verification failed: {type(verify_error).__name__}")
+            if focused and alive:
+                _log(player, f"JARVIS: {appeared.label} is open and in the foreground.")
+                return
+            trouble = (
+                f"{spoken} started as a process, but MARK could not verify its "
+                "window in the foreground. It may still be loading, hidden, or "
+                "waiting behind another window; MARK will not claim it is open."
+            )
+            _log(player, f"JARVIS: {trouble}")
+            _say(player, "Tell the user, in one short sentence in their own "
+                         f"language: {trouble}")
 
         if not requested:
             trouble = (f"{spoken} could not be started - nothing on this system "
@@ -418,6 +574,9 @@ TOOL = {
         "Opens an application on this computer. Use whenever the user asks to "
         "open, launch or start any app or program. Put the application's name "
         "in 'app_name' exactly as the user said it. "
+        "On Windows, it resolves installed executables through App Paths, known browser locations, "
+        "and unique Start Menu shortcuts before using desktop search. After launch it verifies both "
+        "a matching process and that the application window is in the foreground. "
         "This tool answers immediately and confirms the launch in the "
         "background: on status=started say only that it is opening, never that "
         "it is open. If it does not appear, you will be told separately - "
