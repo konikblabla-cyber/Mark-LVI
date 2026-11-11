@@ -200,7 +200,7 @@ async def _wait_for_locator_ready(locator, timeout: float | None = None) -> bool
 def _clean_control_label(value, limit: int) -> str:
     """Bound control metadata and remove control characters before model exposure."""
     text = str(value or "")
-    text = "".join(ch for ch in text if ch in "\\t" or ord(ch) >= 32)
+    text = "".join(ch for ch in text if ord(ch) >= 32)
     return " ".join(text.split())[:max(0, int(limit))]
 
 
@@ -1347,9 +1347,6 @@ class _BrowserSession:
                 "disabled": bool(item.get("disabled")),
                 "high_impact": high_impact,
             }
-            href = _clean_control_label(item.get("href"), 240)
-            if href and tag == "a":
-                entry["href"] = href
             controls.append(entry)
             if len(controls) >= 80:
                 break
