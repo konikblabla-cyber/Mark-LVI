@@ -120,11 +120,11 @@ def _client_secrets_path() -> Path:
         path = _root() / path
     path = path.resolve()
     if not path.is_file():
+        default_path = _root() / "config" / "client_secret_google_workspace.json"
         raise FileNotFoundError(
             "Google OAuth Desktop client JSON was not found. Download an OAuth client "
             "of type 'Desktop app' from Google Cloud and place it at "
-            f"'{_root() / 'config' / 'client_secret_google_workspace.json}', "
-            "or set its path in Settings → Plugin Settings."
+            f"'{default_path}', or set its path in Settings → Plugin Settings."
         )
     if path.suffix.lower() != ".json":
         raise ValueError("The Google OAuth client file must be a .json file.")
