@@ -56,7 +56,7 @@ jobs:
           if (-not (Test-Path $venvPython)) {
             throw "The first-run installer did not create its private Python environment."
           }
-          & $venvPython -c "import main; import plugins.google_workspace; import plugins.spotify; print('JARVIS entry point, Google Workspace and Spotify plugins imported after one-click setup.')"
+          & $venvPython -c "import main; import plugins.google_workspace; import plugins.spotify; import plugins.microsoft_365; print('JARVIS entry point, Google Workspace, Spotify and Microsoft 365 plugins imported after one-click setup.')"
           if ($LASTEXITCODE -ne 0) {
             throw "The installed JARVIS entry point or a bundled integration plugin failed to import."
           }
@@ -67,6 +67,10 @@ jobs:
           & $venvPython -m plugins._spotify_tests
           if ($LASTEXITCODE -ne 0) {
             throw "Spotify offline security/behavior tests failed in the installed venv."
+          }
+          & $venvPython -m plugins._microsoft_365_tests
+          if ($LASTEXITCODE -ne 0) {
+            throw "Microsoft 365 offline security/behavior tests failed in the installed venv."
           }
           $env:QT_QPA_PLATFORM = "offscreen"
           & $venvPython -c "import os; os.environ['QT_QPA_PLATFORM']='offscreen'; from PyQt6.QtWidgets import QApplication, QWidget, QTextEdit; from ui import ConfirmBanner; app=QApplication([]); banner=ConfirmBanner('Send email?', 'x'*8000, parent=QWidget()); fields=banner.findChildren(QTextEdit); assert len(fields)==1 and fields[0].isReadOnly() and fields[0].maximumHeight()<=220; print('Long HUD confirmation is read-only and scrollable.')"
