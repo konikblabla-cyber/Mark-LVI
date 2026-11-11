@@ -309,7 +309,7 @@ class CommunicationContextTests(unittest.TestCase):
 
 
     def test_call_audio_semantic_addressing_requires_explicit_consent_and_live_proactivity(self):
-        self.assertTrue(should_stream_call_audio(True, True, True, True))
+        self.assertTrue(should_stream_call_audio(True, True, True, True, context_known=True))
         self.assertFalse(should_stream_call_audio(True, False, True, True))
         self.assertFalse(should_stream_call_audio(True, True, False, True))
         self.assertFalse(should_stream_call_audio(True, True, True, False))
