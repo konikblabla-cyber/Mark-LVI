@@ -105,7 +105,7 @@ async def _locator_ready(locator) -> bool:
 async def _locator_is_high_impact(locator, target: object = "") -> bool:
     """Classify the actual visible control and form metadata, not just its selector."""
     descriptors = [str(target or "")]
-    for attribute in ("aria-label", "title", "name", "type"):
+    for attribute in ("aria-label", "title", "name", "type", "href", "formaction"):
         try:
             descriptors.append(await locator.get_attribute(attribute) or "")
         except Exception:
