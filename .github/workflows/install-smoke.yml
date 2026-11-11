@@ -11,6 +11,11 @@ on:
       - "core/_ui_runtime_smoke.py"
       - "core/audio_devices.py"
       - "core/_audio_devices_tests.py"
+      - "core/audio_recovery.py"
+      - "core/_audio_recovery_tests.py"
+      - "core/dashboard_*.py"
+      - "core/_dashboard_*_tests.py"
+      - "dashboard/**"
       - "actions/**"
       - "plugins/**"
       - "main.py"
@@ -48,6 +53,13 @@ jobs:
         run: python -c "import sounddevice as sd; version = sd.get_portaudio_version(); print('PortAudio:', version); assert version is not None"
       - name: Probe Windows input and output endpoints
         run: python -c "from core.audio_devices import list_devices; print('Microphones:', list_devices('input', refresh=True)); print('Speakers:', list_devices('output', refresh=True))"
+      - name: Test bounded low-latency audio queues
+        run: python -m core._audio_recovery_tests
+      - name: Test remote dashboard authentication and upload limits
+        run: |
+          python -m core._dashboard_policy_tests
+          python -m core._dashboard_auth_tests
+          python -m core._dashboard_upload_tests
       - name: Smoke-test Windows WASAPI communication sessions
         run: python -c "from core.communication_context import get_active_communication_apps; print('Active communication sessions:', get_active_communication_apps())"
       - name: Smoke-test Windows foreground monitor detection
@@ -62,7 +74,7 @@ jobs:
           window.close(); app.processEvents(); print('Qt offscreen window OK')"
       - name: Import core runtime dependencies
         run: >-
-          python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,
+          python -c "import dashboard.server, PyQt6.QtCore, sounddevice, numpy, google.genai,
           httpx, requests, bs4, playwright, PIL, cv2, psutil, send2trash,
           pptx, fastapi, uvicorn, cryptography, multipart, qrcode, ddgs,
           pdfplumber, PyPDF2, docx, pynvml, googleapiclient.discovery,
