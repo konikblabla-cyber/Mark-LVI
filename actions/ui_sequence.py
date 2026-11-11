@@ -1,9 +1,11 @@
 """Sequential UI actions with a verified postcondition after every step.
 
-The sequence is deliberately narrow: it can invoke only exact, visible,
-uniquely named Button/Hyperlink/MenuItem controls through the safeguards in
-actions.ui_interaction. It cannot type, paste, execute scripts, or infer labels
-or expected results. A failed or unverified step stops the remaining sequence.
+The sequence is deliberately narrow: it can invoke exact, visible,
+uniquely named Button/Hyperlink/MenuItem controls, fill explicitly named safe
+fields, expand tree items, or send one validated key chord to the pinned
+application window. Every step needs an observable postcondition. It cannot
+paste, execute scripts, or infer labels or expected results. A failed or
+unverified step stops the remaining sequence.
 """
 from __future__ import annotations
 
@@ -595,14 +597,17 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Expand or collapse exact tree items, fill safe fields and click exact controls in a verified 2–8 step Windows UI workflow.",
+    "brief": "Run verified 2–8 step Windows UI workflows using exact control clicks, safe field entry, tree expansion and checked keyboard shortcuts.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
         "ordered steps. A press_keys step must supply one key or modifier chord and an exact visible postcondition. A set_tree_item_expanded step must supply one exact visible "
         "TreeItem label and a boolean expanded value; MARK verifies the ExpandCollapsePattern "
         "state in the original window before starting the next step. It expands or collapses "
-        "only the node and never activates a child item. A click step must name one exact visible Button, "
+        "only the node and never activates a child item. A press_keys step is refocused to the original "
+        "window and sends only one validated key or Ctrl/Alt/Shift chord; it proceeds only after the exact "
+        "expected accessible text appears. Dangerous close/delete/lock shortcuts require HUD confirmation. "
+        "A click step must name one exact visible Button, "
         "Hyperlink or MenuItem label and the exact distinctive accessible "
         "element text that should newly appear after that click. A fill_text "
         "step must name one exact accessible, non-sensitive Edit field and "
