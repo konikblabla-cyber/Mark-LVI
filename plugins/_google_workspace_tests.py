@@ -13,7 +13,10 @@ class GoogleWorkspaceTests(unittest.TestCase):
         self.assertEqual(workspace.PLUGIN["name"], "google_workspace")
         self.assertIn("gmail.readonly", workspace._SCOPES)
         self.assertIn("gmail.compose", workspace._SCOPES)
-        self.assertIn("gmail.send", workspace._SCOPES)
+        self.assertIn("calendar.events.owned", workspace._SCOPES)
+        self.assertNotIn("gmail.send", workspace._SCOPES)
+        self.assertNotIn("gmail.modify", workspace._SCOPES)
+        self.assertNotIn("https://www.googleapis.com/auth/calendar.events", workspace._SCOPES)
 
     def test_plugin_contract_is_accepted_by_auto_loader(self):
         record = _validate(workspace, "google_workspace.py")
