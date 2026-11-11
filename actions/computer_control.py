@@ -618,6 +618,12 @@ def _screen_click_verified_execute(
     process_id = before.get("process_id")
     if not handle or not process_id:
         return outcome.failed("computer_control", "the target window has no stable identity; no click was sent")
+    bounds = before.get("bounds")
+    if not isinstance(bounds, (tuple, list)) or len(bounds) != 4:
+        return outcome.failed(
+            "computer_control",
+            "the target window bounds are unavailable; no full-desktop screenshot was sent",
+        )
     if ui._has_exact_expected_text(before.get("records", []), expected):
         return outcome.unverified(
             "computer_control",
