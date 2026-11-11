@@ -309,7 +309,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
     if requires_confirmation:
         operation = {
             "cover": {"open": "open", "close": "close", "stop": "stop movement of"},
-            "lock": {"lock": "lock", "unlocked": "unlock"},
+            "lock": {"locked": "lock", "unlocked": "unlock"},
         }[domain][state]
         detail = (
             f"Home Assistant security-sensitive action\n"
