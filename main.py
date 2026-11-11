@@ -73,7 +73,7 @@ from actions.background_monitor import (
 from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
-    get_in_call_addressing_enabled,
+    get_in_call_addressing_enabled, save_in_call_addressing_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
     get_wake_word_enabled, save_wake_word_enabled, save_proactive_audio_enabled,
     get_input_device, get_output_device,
@@ -971,10 +971,22 @@ class JarvisLive:
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
-    def set_in_call_addressing_enabled(self, enabled: bool) -> None:
-        """Apply the UI's explicit consent choice without changing call detection."""
-        self._in_call_addressing_enabled = bool(enabled)
-        if self._in_call_addressing_enabled:
+    def set_in_call_addressing_enabled(self, enabled: bool) -> bool:
+        """Apply the UI's explicit consent choice only when Gemini can honour it."""
+        enabled = bool(enabled)
+        if enabled and not (
+                self._proactive_audio_enabled
+                and self._enhanced_live
+                and self._engine is None):
+            self._in_call_addressing_enabled = False
+            save_in_call_addressing_enabled(False)
+            self.ui.write_log(
+                "SYS: In-call ADDRESS-AWARE is unavailable on the current engine. "
+                "Gemini Live Proactive Audio is required; microphone privacy remains enabled."
+            )
+            return False
+        self._in_call_addressing_enabled = enabled
+        if enabled:
             self.ui.write_log(
                 "SYS: In-call ADDRESS-AWARE is ON. During a detected call, PC microphone audio "
                 "may be sent to Gemini so Proactive Audio can decide whether speech is for MARK."
@@ -984,6 +996,7 @@ class JarvisLive:
                 "SYS: In-call microphone privacy restored. Call audio stays on this PC unless "
                 "you explicitly use local wake or Push-to-Talk."
             )
+        return True
 
     def _ui_wake_toggle(self, enable: bool) -> str:
         """Switch between ADDRESS-AWARE and LOCAL PRIVACY listening modes."""
@@ -995,6 +1008,7 @@ class JarvisLive:
             # ONNX runtime or model can be loaded on this machine.
             if not self._ensure_wake_detector():
                 save_proactive_audio_enabled(True)
+                self._proactive_audio_enabled = True
                 self._wake_enabled = False
                 save_wake_word_enabled(False)
                 dispatch_to_loop(
@@ -1906,9 +1920,9 @@ class JarvisLive:
             # disappears. A callback heartbeat lets the owner task detect that
             # silent failure without doing device enumeration on the audio thread.
             last_input_callback[0] = time.monotonic()
-            # A foreground Discord/Teams/Zoom/phone app is treated as a private
-            # conversation zone. Audio is never forwarded there until a local
-            # wake phrase or explicit PTT hold opens a single request.
+            # A detected communication session stays local by default. The only
+            # exception is the user's explicit in-call semantic-addressing consent,
+            # and only when Gemini Live Proactive Audio is positively available.
             if (self._communication_app_active
                     and not should_stream_call_audio(
                         self._communication_audio_session_active,
