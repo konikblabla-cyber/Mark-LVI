@@ -200,10 +200,10 @@ def check_all() -> list[str]:
                     parts.append(f"Source: {item['source']}")
             parts.append("[END UNTRUSTED NEWS DATA]")
             alerts.append("\n".join(parts))
-            print(f"[Monitor] 🔔 {len(new_items)} new headline(s) for '{topic}'")
+            print(f"[Monitor] {len(new_items)} new headline(s) for '{topic}'")
 
         except Exception as e:
-            print(f"[Monitor] ⚠️ Check failed for '{topic}': {type(e).__name__}")
+            print(f"[Monitor] Check failed for '{topic}': {type(e).__name__}")
 
     if changed:
         _save(monitors)
