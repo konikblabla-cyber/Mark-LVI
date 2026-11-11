@@ -106,7 +106,7 @@ def _settings() -> tuple[str, str, dict]:
         value = str(entity or "").strip().lower()
         if not _ALIAS_RE.fullmatch(key) or not _ENTITY_RE.fullmatch(value):
             allowed = ", ".join(sorted(_ALLOWED_DOMAINS))
-            raise ValueError(f"Each mapping must use a simple alias and one of these entity domains: {allowed}.")
+            raise ValueError(f"Each mapping must use a simple alias and a supported entity ID from these domains: {allowed}.")
         clean[key] = value
     return base_url, token, clean
 
