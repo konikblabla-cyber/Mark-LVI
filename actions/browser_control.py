@@ -683,6 +683,23 @@ async def _verify_page_postcondition(page, expected_text: str, expected_url: str
     return False, "; ".join(details) or "the expected page state was not observed"
 
 
+async def _adopt_unique_page_after_click(context, before_pages, current_page):
+    """Adopt exactly one new tab; never guess when a click opened several."""
+    if context is None:
+        return current_page, False
+    await asyncio.sleep(0.15)
+    new_pages = [
+        candidate for candidate in list(context.pages or [])
+        if candidate not in before_pages
+        and not getattr(candidate, "is_closed", lambda: False)()
+    ]
+    if len(new_pages) > 1:
+        return current_page, True
+    if len(new_pages) == 1:
+        return new_pages[0], False
+    return current_page, False
+
+
 class _BrowserSession:
     """
     A full session for one browser instance.
@@ -995,17 +1012,24 @@ class _BrowserSession:
             # the stale page left behind by the click.
             if context is not None:
                 try:
-                    await asyncio.sleep(0.15)
-                    new_pages = [
-                        candidate for candidate in list(context.pages or [])
-                        if candidate not in pages_before
-                        and not getattr(candidate, "is_closed", lambda: False)()
-                    ]
-                    if len(new_pages) == 1:
-                        page = new_pages[0]
+                    page, ambiguous_new_page = await _adopt_unique_page_after_click(
+                        context, pages_before, page,
+                    )
+                    if ambiguous_new_page:
+                        return outcome.unverified(
+                            "browser_control",
+                            "the click opened multiple new tabs; MARK cannot safely choose which page to verify",
+                            clicked=True,
+                            target=selector or text or "",
+                        )
+                    if page is not self._page:
                         self._page = page
                 except Exception:
-                    pass
+                    return outcome.unverified(
+                        "browser_control",
+                        "the click may have opened a new tab, but MARK could not identify it safely",
+                        clicked=True,
+                    )
             verified, reason = await _verify_page_postcondition(
                 page, expected_text, expected_url,
             )
@@ -1219,17 +1243,26 @@ class _BrowserSession:
                 )
             if context is not None:
                 try:
-                    await asyncio.sleep(0.15)
-                    new_pages = [
-                        candidate for candidate in list(context.pages or [])
-                        if candidate not in pages_before
-                        and not getattr(candidate, "is_closed", lambda: False)()
-                    ]
-                    if len(new_pages) == 1:
-                        page = new_pages[0]
+                    page, ambiguous_new_page = await _adopt_unique_page_after_click(
+                        context, pages_before, page,
+                    )
+                    if ambiguous_new_page:
+                        return outcome.unverified(
+                            "browser_control",
+                            "the click opened multiple new tabs; MARK cannot safely choose which page to verify",
+                            clicked=True,
+                            role=role,
+                            target=description,
+                        )
+                    if page is not self._page:
                         self._page = page
                 except Exception:
-                    pass
+                    return outcome.unverified(
+                        "browser_control",
+                        "the click may have opened a new tab, but MARK could not identify it safely",
+                        clicked=True,
+                        role=role,
+                    )
             try:
                 verified, reason = await _verify_page_postcondition(
                     page, expected_text, expected_url,
@@ -1254,6 +1287,8 @@ class _BrowserSession:
         except Exception:
             locator = None
         if locator is not None and await _locator_ready(locator):
+            context = getattr(page, "context", None)
+            pages_before = list(getattr(context, "pages", []) or []) if context else []
             try:
                 await locator.click(timeout=5_000)
             except Exception as exc:
@@ -1263,13 +1298,27 @@ class _BrowserSession:
                     clicked=True,
                     target=description,
                 )
-            try:
-                verified, reason = await _verify_page_postcondition(
-                    page, expected_text, expected_url,
-                )
-            except Exception as exc:
-                verified = False
-                reason = f"the click may have happened but verification failed ({type(exc).__name__})"
+            if context is not None:
+                try:
+                    page, ambiguous_new_page = await _adopt_unique_page_after_click(
+                        context, pages_before, page,
+                    )
+                    if ambiguous_new_page:
+                        return outcome.unverified(
+                            "browser_control",
+                            "the click opened multiple new tabs; MARK cannot safely choose which page to verify",
+                            clicked=True,
+                            target=description,
+                        )
+                    if page is not self._page:
+                        self._page = page
+                except Exception:
+                    return outcome.unverified(
+                        "browser_control",
+                        "the click may have opened a new tab, but MARK could not identify it safely",
+                        clicked=True,
+                        target=description,
+                    )
             if not verified:
                 return outcome.unverified(
                     "browser_control", reason, clicked=True, target=description,
