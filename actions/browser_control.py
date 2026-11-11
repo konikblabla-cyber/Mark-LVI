@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 from typing import TYPE_CHECKING, Optional
 
 from core import appidentity, confirm, outcome
-from core.browser_safety import (\n    build_search_url, is_sensitive_field_descriptor, requires_browser_confirmation,\n)
+from core.browser_safety import (build_search_url, is_sensitive_field_descriptor, requires_browser_confirmation)
 
 # Importing playwright cost 198 ms at every launch, paid by action discovery
 # whether or not a browser was ever opened. It is the second-largest import in
