@@ -590,5 +590,40 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(saved["status"], "done")
         self.assertEqual(saved["verified_tool"], "computer_control")
 
+
+    def test_visual_mission_replan_refuses_if_foreground_app_changed(self):
+        previous_result = {
+            "status": "failed",
+            "step": {
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                },
+            },
+        }
+        snapshot = {
+            "handle": 9,
+            "process_id": 99,
+            "process_name": "notepad.exe",
+            "bounds": (10, 10, 500, 500),
+            "records": [],
+            "clickables": [],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot), \
+             patch("core.ui_reasoning.replan_ui_task") as replan:
+            result = mission_control._fresh_ui_plan(
+                'Click the gear icon and verify "Privacy panel"',
+                previous_result,
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(
+            result["reason"],
+            "the foreground application changed; visual replan refused",
+        )
+        replan.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
