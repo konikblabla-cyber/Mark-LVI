@@ -648,7 +648,7 @@ def _screen_click_verified_execute(
 _INPUT_ACTIONS = {
     "type", "smart_type", "click", "left_click", "double_click",
     "right_click", "move", "drag", "hotkey", "press", "scroll",
-    "copy", "paste", "screen_click", "clear_field",
+    "copy", "paste", "screen_click", "screen_click_verified", "clear_field",
 }
 
 
@@ -786,7 +786,8 @@ def computer_control(
       clear_field   — select-all + delete (HUD confirmation required)
       focus_window  — bring window to foreground
       screen_find   — AI element finder (returns x,y)
-      screen_click  — AI element finder + click
+      screen_click  — AI element finder + click (unverified)
+      screen_click_verified — AI-located click with exact same-window UIA postcondition
       random_data   — generate fake form data
       user_data     — pull real data from memory
     """
