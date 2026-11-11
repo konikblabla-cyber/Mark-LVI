@@ -577,6 +577,75 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
             "no browser on this system could be opened", url=url)
 
 
+_BROWSER_POSTCONDITION_TIMEOUT_MS = 6_000
+
+
+def _validate_click_postcondition(expected_text: object, expected_url: object):
+    """Validate an exact, observable browser postcondition before a click."""
+    text = str(expected_text or "").strip()
+    url = str(expected_url or "").strip()
+    if len(text) > 240:
+        return None, None, "expected_text must be at most 240 characters"
+    if len(url) > 2_048:
+        return None, None, "expected_url is too long"
+    if url:
+        try:
+            url = _normalize_url(url)
+        except Exception as exc:
+            return None, None, f"expected_url is invalid ({type(exc).__name__})"
+        if not url.startswith(("http://", "https://")):
+            return None, None, "expected_url must be an http or https URL"
+    return text, url, ""
+
+
+async def _verify_page_postcondition(page, expected_text: str, expected_url: str):
+    """Check only user-specified exact page state; never infer success from click()."""
+    if not expected_text and not expected_url:
+        return False, (
+            "the click was dispatched, but no expected page text or URL was supplied; "
+            "the resulting page state is unverified"
+        )
+
+    deadline = asyncio.get_running_loop().time() + (
+        max(0, int(_BROWSER_POSTCONDITION_TIMEOUT_MS)) / 1000.0
+    )
+    last_text_count = None
+    last_url = ""
+    while True:
+        text_ok = not expected_text
+        url_ok = not expected_url
+        try:
+            if expected_text:
+                locator = page.get_by_text(expected_text, exact=True)
+                last_text_count = await locator.count()
+                text_ok = last_text_count == 1 and await locator.is_visible()
+        except Exception:
+            text_ok = False
+        try:
+            if expected_url:
+                last_url = str(getattr(page, "url", "") or "")
+                url_ok = _normalize_url(last_url) == expected_url
+        except Exception:
+            url_ok = False
+        if text_ok and url_ok:
+            return True, "the requested exact browser postcondition was observed"
+        if asyncio.get_running_loop().time() >= deadline:
+            break
+        await asyncio.sleep(0.1)
+
+    details = []
+    if expected_text and not text_ok:
+        details.append(
+            f"exact visible text {expected_text!r} was not observed "
+            f"(matching elements: {last_text_count})"
+        )
+    if expected_url and not url_ok:
+        details.append(
+            f"expected URL {expected_url!r}; current URL was {last_url[:300]!r}"
+        )
+    return False, "; ".join(details) or "the expected page state was not observed"
+
+
 class _BrowserSession:
     """
     A full session for one browser instance.
@@ -862,8 +931,14 @@ class _BrowserSession:
     async def search(self, query: str, engine: str = "google") -> str:
         return await self.go_to(_search_url(query, engine))
 
-    async def click(self, selector: str = None, text: str = None) -> str:
+    async def click(self, selector: str = None, text: str = None,
+                    expected_text: str = "", expected_url: str = "") -> str:
         page = await self._get_page()
+        expected_text, expected_url, validation_error = _validate_click_postcondition(
+            expected_text, expected_url,
+        )
+        if validation_error:
+            return outcome.failed("browser_control", validation_error)
         try:
             locator = page.get_by_text(text, exact=True) if text else (
                 page.locator(selector) if selector else None
@@ -876,16 +951,52 @@ class _BrowserSession:
                     "the target was missing, ambiguous, hidden or disabled; nothing was clicked",
                     selector=selector or text,
                 )
+            context = getattr(page, "context", None)
+            pages_before = list(getattr(context, "pages", []) or []) if context else []
             await locator.click(timeout=8_000)
-            return outcome.done("browser_control", clicked=True, verified=True)
+            # Links that open a new tab are common. Verify the new page, not
+            # the stale page left behind by the click.
+            if context is not None:
+                try:
+                    await asyncio.sleep(0.15)
+                    new_pages = [
+                        candidate for candidate in list(context.pages or [])
+                        if candidate not in pages_before
+                        and not getattr(candidate, "is_closed", lambda: False)()
+                    ]
+                    if len(new_pages) == 1:
+                        page = new_pages[0]
+                        self._page = page
+                except Exception:
+                    pass
+            verified, reason = await _verify_page_postcondition(
+                page, expected_text, expected_url,
+            )
+            if not verified:
+                return outcome.unverified(
+                    "browser_control", reason, clicked=True,
+                    target=selector or text or "",
+                )
+            return outcome.done(
+                "browser_control",
+                clicked=True,
+                verified=True,
+                expected_text=expected_text or None,
+                expected_url=expected_url or None,
+                actual_url=str(getattr(page, "url", "") or "")[:500],
+            )
         except PlaywrightTimeout:
             return outcome.failed(
                 "browser_control",
                 "no unique matching target appeared on the page in time",
                 selector=selector or text,
             )
-        except Exception as e:
-            return f"Click error: {e}"
+        except Exception as exc:
+            return outcome.unverified(
+                "browser_control",
+                f"the click may have happened but its result could not be checked ({type(exc).__name__})",
+                clicked=True,
+            )
 
 
     async def type_text(self, selector: str = None, text: str = "",
@@ -1032,21 +1143,69 @@ class _BrowserSession:
         return "Form fill results: " + ", ".join(results)
 
 
-    async def smart_click(self, description: str) -> str:
+    async def smart_click(self, description: str,
+                          expected_text: str = "", expected_url: str = "") -> str:
         page = await self._get_page()
+        expected_text, expected_url, validation_error = _validate_click_postcondition(
+            expected_text, expected_url,
+        )
+        if validation_error:
+            return outcome.failed("browser_control", validation_error)
         for role in ("button", "link", "menuitem", "tab", "searchbox", "textbox"):
             try:
                 locator = page.get_by_role(role, name=description, exact=True)
-                if await _locator_ready(locator):
-                    await locator.click(timeout=5_000)
-                    return outcome.done("browser_control", clicked=True, role=role, verified=True)
+                if not await _locator_ready(locator):
+                    continue
+                context = getattr(page, "context", None)
+                pages_before = list(getattr(context, "pages", []) or []) if context else []
+                await locator.click(timeout=5_000)
+                if context is not None:
+                    try:
+                        await asyncio.sleep(0.15)
+                        new_pages = [
+                            candidate for candidate in list(context.pages or [])
+                            if candidate not in pages_before
+                            and not getattr(candidate, "is_closed", lambda: False)()
+                        ]
+                        if len(new_pages) == 1:
+                            page = new_pages[0]
+                            self._page = page
+                    except Exception:
+                        pass
+                verified, reason = await _verify_page_postcondition(
+                    page, expected_text, expected_url,
+                )
+                if not verified:
+                    return outcome.unverified(
+                        "browser_control", reason, clicked=True, role=role,
+                        target=description,
+                    )
+                return outcome.done(
+                    "browser_control", clicked=True, role=role, verified=True,
+                    expected_text=expected_text or None,
+                    expected_url=expected_url or None,
+                    actual_url=str(getattr(page, "url", "") or "")[:500],
+                )
             except Exception:
                 continue
+
         try:
             locator = page.get_by_text(description, exact=True)
             if await _locator_ready(locator):
                 await locator.click(timeout=5_000)
-                return outcome.done("browser_control", clicked=True, verified=True)
+                verified, reason = await _verify_page_postcondition(
+                    page, expected_text, expected_url,
+                )
+                if not verified:
+                    return outcome.unverified(
+                        "browser_control", reason, clicked=True, target=description,
+                    )
+                return outcome.done(
+                    "browser_control", clicked=True, verified=True,
+                    expected_text=expected_text or None,
+                    expected_url=expected_url or None,
+                    actual_url=str(getattr(page, "url", "") or "")[:500],
+                )
         except Exception:
             pass
         return outcome.failed(
@@ -1316,7 +1475,11 @@ def _browser_control_execute(
                 print(f"[Browser] Could not resume last page ({last}): {e}")
 
         if action == "click":
-            result = sess.run(sess.click(params.get("selector"), params.get("text")))
+            result = sess.run(sess.click(
+                params.get("selector"), params.get("text"),
+                expected_text=params.get("expected_text", ""),
+                expected_url=params.get("expected_url", ""),
+            ))
         elif action == "type":
             result = sess.run(sess.type_text(
                 params.get("selector"), params.get("text", ""), params.get("clear_first", False)))
@@ -1325,7 +1488,11 @@ def _browser_control_execute(
         elif action == "fill_form":
             result = sess.run(sess.fill_form(params.get("fields", {})))
         elif action == "smart_click":
-            result = sess.run(sess.smart_click(params.get("description", "")))
+            result = sess.run(sess.smart_click(
+                params.get("description", ""),
+                expected_text=params.get("expected_text", ""),
+                expected_url=params.get("expected_url", ""),
+            ))
         elif action == "smart_type":
             result = sess.run(sess.smart_type(
                 params.get("description", ""), params.get("text", ""),
@@ -1457,10 +1624,14 @@ TOOL = {
         "browser first - doing both launches it twice, the second copy on a "
         "different profile with none of the user's sign-ins. 'Open Chrome and "
         "go to YouTube' is ONE call to this tool. "
-        "Read the status it returns. 'done' means it was confirmed - for an "
-        "open, the url reported back is the page's OWN address, so if it "
-        "differs from what was asked for the site redirected and the user "
-        "should be told. 'unverified' means the address was handed to the "
+        "Read the status it returns. A click or smart_click requires an exact "
+        "expected_text or expected_url postcondition to report verified success. "
+        "Without one, MARK reports only that the click was dispatched; it does "
+        "not claim the requested page change occurred. 'done' means the "
+        "postcondition was observed. For an open, the url reported back is the "
+        "page's OWN address, so if it differs from what was asked for the site "
+        "redirected and the user should be told. 'unverified' also means the "
+        "address was handed to the "
         "system's default browser, which never reports back: say it was opened "
         "but not confirmed, never that the page is up. 'failed' means nothing "
         "happened. Typing into a field preserves its existing contents by "
@@ -1501,6 +1672,14 @@ TOOL = {
             "text": {
                 "type": "STRING",
                 "description": "Text to click or type"
+            },
+            "expected_text": {
+                "type": "STRING",
+                "description": "For click/smart_click: exact visible text that must appear after the click before MARK reports verified success. Without an expected_text or expected_url the click remains unverified."
+            },
+            "expected_url": {
+                "type": "STRING",
+                "description": "For click/smart_click: exact http/https URL that must become the current page URL before MARK reports verified success. Without an expected_text or expected_url the click remains unverified."
             },
             "description": {
                 "type": "STRING",
