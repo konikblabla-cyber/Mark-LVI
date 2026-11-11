@@ -1806,8 +1806,9 @@ def _validate_browser_sequence_steps(raw_steps, session_memory=None):
         action = str(raw.get("action") or "").strip().lower()
 
         if action == "go_to":
-            if set(raw) != {"action", "url"}:
-                return None, f"step {index}: go_to requires only action and url"
+            allowed = {"action", "url", "expected_text", "expected_url"}
+            if set(raw) - allowed:
+                return None, f"step {index}: unsupported go_to parameter"
             url = raw.get("url")
             if not isinstance(url, str) or not url.strip() or len(url) > 2048:
                 return None, f"step {index}: url must contain 1 to 2048 characters"
@@ -1817,7 +1818,20 @@ def _validate_browser_sequence_steps(raw_steps, session_memory=None):
                 return None, f"step {index}: unsafe URL ({type(exc).__name__})"
             if not safe_url.startswith(("http://", "https://")):
                 return None, f"step {index}: only http and https navigation is supported"
-            validated.append({"action": action, "url": safe_url})
+            expected_text, expected_url, error = _validate_click_postcondition(
+                raw.get("expected_text", ""), raw.get("expected_url", ""),
+            )
+            if error or (not expected_text and not expected_url):
+                return None, (
+                    f"step {index}: go_to requires an exact expected_text or expected_url "
+                    "to verify the destination after redirects"
+                )
+            validated.append({
+                "action": action,
+                "url": safe_url,
+                "expected_text": expected_text,
+                "expected_url": expected_url,
+            })
             continue
 
         if action in {"click", "smart_click"}:
@@ -1967,6 +1981,42 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
         try:
             if action == "go_to":
                 result = session.run(session.go_to(step["url"]), timeout=timeout)
+                if not str(result or "").startswith("status=done"):
+                    return outcome.unverified(
+                        "browser_control",
+                        "navigation was not confirmed; later steps were not started",
+                        steps_completed=completed,
+                        total_steps=len(steps),
+                        stopped_at=index,
+                        step_action=action,
+                    )
+                try:
+                    destination_verified, destination_reason = session.run(
+                        _verify_page_postcondition(
+                            session._page,
+                            step["expected_text"],
+                            step["expected_url"],
+                        ),
+                        timeout=timeout,
+                    )
+                except Exception as exc:
+                    destination_verified = False
+                    destination_reason = f"destination verification failed ({type(exc).__name__})"
+                if not destination_verified:
+                    return outcome.unverified(
+                        "browser_control",
+                        "navigation reached a page, but the expected destination was not verified: "
+                        + str(destination_reason)[:400],
+                        steps_completed=completed,
+                        total_steps=len(steps),
+                        stopped_at=index,
+                        step_action=action,
+                    )
+                result = outcome.done(
+                    "browser_control",
+                    opened=str(getattr(session._page, "url", "") or "")[:500],
+                    verified=True,
+                )
             elif action == "click":
                 result = session.run(
                     session.click(
