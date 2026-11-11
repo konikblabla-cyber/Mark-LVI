@@ -12,7 +12,7 @@ class GoogleWorkspaceTests(unittest.TestCase):
         self.assertEqual(workspace.PLUGIN["name"], "google_workspace")
         self.assertIn("gmail.readonly", workspace._SCOPES)
         self.assertIn("gmail.compose", workspace._SCOPES)
-        self.assertNotIn("gmail.send", workspace._SCOPES)
+        self.assertIn("gmail.send", workspace._SCOPES)
 
     def test_token_is_stored_outside_the_repository(self):
         token = workspace._token_path().resolve()
@@ -128,6 +128,23 @@ class GoogleWorkspaceTests(unittest.TestCase):
         create.assert_not_called()
         self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
         self.assertIn("Exact body", gate.call_args.kwargs["detail"])
+
+    def test_gmail_send_is_parked_behind_hud_confirmation(self):
+        with mock.patch.object(workspace.confirm, "request",
+                               return_value="[CONFIRMATION_PENDING]") as gate, \
+             mock.patch.object(workspace, "_gmail_send") as send:
+            result = workspace.run({
+                "action": "gmail_send",
+                "to": "person@example.com",
+                "subject": "Exact subject",
+                "body": "Exact message body",
+            })
+        self.assertEqual(result, "[CONFIRMATION_PENDING]")
+        gate.assert_called_once()
+        send.assert_not_called()
+        self.assertIn("person@example.com", gate.call_args.kwargs["detail"])
+        self.assertIn("Exact message body", gate.call_args.kwargs["detail"])
+        self.assertIn("only after you confirm", gate.call_args.kwargs["detail"])
 
     def test_calendar_create_is_parked_behind_hud_confirmation(self):
         with mock.patch.object(workspace.confirm, "request",
