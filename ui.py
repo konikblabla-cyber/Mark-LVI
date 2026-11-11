@@ -6884,7 +6884,26 @@ class MainWindow(QMainWindow):
         try:
             save_in_call_addressing_enabled(want)
             if self.on_in_call_addressing_change:
-                self.on_in_call_addressing_change(want)
+                applied = self.on_in_call_addressing_change(want)
+                if want and applied is False:
+                    save_in_call_addressing_enabled(False)
+                    QMessageBox.information(
+                        self,
+                        "IN-CALL ADDRESSING UNAVAILABLE",
+                        "The active engine cannot provide Gemini Live Proactive Audio. "
+                        "The setting remains OFF and microphone privacy is unchanged.",
+                    )
+                    self._refresh_in_call_addressing_btn()
+                    return
+            elif want:
+                save_in_call_addressing_enabled(False)
+                QMessageBox.warning(
+                    self,
+                    "IN-CALL ADDRESSING",
+                    "The live microphone controller is not ready. The setting remains OFF.",
+                )
+                self._refresh_in_call_addressing_btn()
+                return
         except Exception as exc:
             if want:
                 save_in_call_addressing_enabled(False)
