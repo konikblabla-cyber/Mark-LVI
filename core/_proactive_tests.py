@@ -59,7 +59,7 @@ class ProactiveRetryTests(unittest.TestCase):
             self.assertFalse(can_deliver_proactive(last_user_speech=invalid, **base))
 
     def test_context_cleaner_removes_control_chars_and_bounds_length(self):
-        self.assertEqual(_clean_context("hello\\x00\\nworld", 20), "hello\\nworld")
+        self.assertEqual(_clean_context("hello" + chr(0) + chr(10) + "world", 20), "hello" + chr(10) + "world")
         self.assertEqual(len(_clean_context("x" * 100, 12)), 12)
 
     def test_prompt_marks_memory_and_recent_turns_as_untrusted_data(self):
