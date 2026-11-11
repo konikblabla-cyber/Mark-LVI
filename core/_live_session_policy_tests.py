@@ -2,7 +2,10 @@
 import unittest
 from types import SimpleNamespace
 
-from core.live_session_policy import go_away_notice, go_away_time_left, live_turn_is_active
+from core.live_session_policy import (
+    go_away_notice, go_away_time_left, live_turn_is_active,
+    should_sleep_after_addressed_response,
+)
 
 
 class GoAwayPolicyTests(unittest.TestCase):
@@ -33,6 +36,17 @@ class GoAwayPolicyTests(unittest.TestCase):
         self.assertTrue(live_turn_is_active(audio_pending=True))
         self.assertTrue(live_turn_is_active(assistant_speaking=True))
         self.assertTrue(live_turn_is_active(tool_call_pending=True))
+    def test_addressed_mode_sleeps_after_a_real_final_reply(self):
+        self.assertTrue(should_sleep_after_addressed_response(True, True, "Here is the answer"))
+
+    def test_addressed_mode_does_not_sleep_for_tool_handoffs_or_empty_replies(self):
+        self.assertFalse(should_sleep_after_addressed_response(True, True, "", False))
+        self.assertFalse(should_sleep_after_addressed_response(True, True, "Searching...", True))
+
+    def test_open_mic_mode_keeps_continuous_conversation(self):
+        self.assertFalse(should_sleep_after_addressed_response(False, True, "Here is the answer"))
+        self.assertFalse(should_sleep_after_addressed_response(True, False, "Proactive message"))
+
     def test_missing_time_left_is_not_an_error(self):
         self.assertIsNone(go_away_time_left(SimpleNamespace(go_away=object())))
 

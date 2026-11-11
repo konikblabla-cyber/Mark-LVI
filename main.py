@@ -93,7 +93,9 @@ from core.project_context import (
 )
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
-from core.live_session_policy import go_away_notice, live_turn_is_active
+from core.live_session_policy import (
+    go_away_notice, live_turn_is_active, should_sleep_after_addressed_response,
+)
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     communication_context_unchanged, initial_communication_gate,
@@ -689,6 +691,9 @@ class JarvisLive:
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
+        # Wake-word mode grants one addressed request at a time.
+        self._addressed_turn_pending = False
+        self._addressed_response_complete = False
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
         self._queued_process_alerts: list[dict] = []
         self._startup_mission_recovery_injected = False
@@ -795,6 +800,8 @@ class JarvisLive:
         if self._awake:
             return
         self._awake = True
+        self._addressed_turn_pending = False
+        self._addressed_response_complete = False
         self._last_user_speech = time.monotonic()   # start the auto-sleep clock now
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
@@ -2115,6 +2122,8 @@ class JarvisLive:
                             # flag and skip all further processing for that turn.
                             if self._interrupted:
                                 self._interrupted = False
+                                self._addressed_turn_pending = False
+                                self._addressed_response_complete = False
                                 in_buf  = []
                                 out_buf = []
                                 self._visemes.reset()
@@ -2125,6 +2134,7 @@ class JarvisLive:
 
                             full_in = " ".join(in_buf).strip()
                             if full_in:
+                                self._addressed_turn_pending = True
                                 from core.autonomy_policy import new_turn_authorization
                                 self._turn_authorization = new_turn_authorization(full_in)
                                 self._last_out_logged = ""   # new exchange
@@ -2151,6 +2161,14 @@ class JarvisLive:
                                 if full_out in self._last_out_logged:
                                     full_out = ""
                             if full_out:
+                                if should_sleep_after_addressed_response(
+                                    self._wake_enabled,
+                                    self._addressed_turn_pending,
+                                    full_out,
+                                    bool(response.tool_call),
+                                ):
+                                    self._addressed_response_complete = True
+                                    self._addressed_turn_pending = False
                                 self._last_out_logged = full_out
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
@@ -2273,6 +2291,10 @@ class JarvisLive:
                     ):
                         self.set_speaking(False)
                         self._turn_done_event.clear()
+                        if self._addressed_response_complete and self._wake_enabled:
+                            self._addressed_response_complete = False
+                            if self._awake:
+                                self.sleep(reason="request finished — waiting for Hey Jarvis")
                     continue
 
                 self.set_speaking(True)

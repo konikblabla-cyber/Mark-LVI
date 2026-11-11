@@ -66,7 +66,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧚 Push-to-Talk | Hold **Ctrl+Space** and the mic opens — closed the rest of the time. Truly global on Windows, window-scoped elsewhere |
 | 🔇 Self-Echo Guard | Never answers its own last sentence: the tail of its own voice is recognised and dropped without muting you |
 | 🪪 Runtime Self-Knowledge | Name, OS, abilities **and limits** are generated from the live system each session — rename it or add a plugin and it knows |
-| 🎙️ Wake Word | Local **"Hey Jarvis"** detection — sleeps until called, auto-sleeps after 2 min of silence, and never streams audio while asleep |
+| 🎙️ Wake Word | Local **"Hey Jarvis"** detection — one addressed request per wake phrase, then automatically returns to local-only listening; never streams audio while asleep |
 | ⚡ Instant Acknowledgment | Speaks a short, context-aware reply in **your language** the instant a longer task starts — no more silent waiting |
 | 🚀 Faster Live Engine | Runs on stable **Gemini 3.8 Live**, with Gemini 3.1 Live and Gemini 2.5 Native Audio retained as compatibility fallbacks |
 | 🧩 Self-Describing Skills | Every bundled skill declares its own `TOOL` dict + handler and is auto-discovered at launch — adding one is a single file |
@@ -605,7 +605,7 @@ python3 main.py
 
 `setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. Install `libegl1` for the Qt interface. For full X11 desktop input, screenshots and clipboard, also install `gnome-screenshot`, `python3-tk` and `xclip` (Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip`). `scrot` alone is not sufficient for the current PyScreeze screenshot backend. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
 
-> ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. The optional **wake word** engine is *not* installed here — grab it in one click from **⚙ → WAKE WORD** inside the app.
+> ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. The optional **wake word** engine is *not* installed here — grab it in one click from **⚙ → WAKE WORD** inside the app. In wake-word mode, each "Hey Jarvis" authorizes one request; after the final answer finishes playing, MARK returns to local wake-word listening so nearby self-talk is not sent to Gemini.
 
 ---
 
