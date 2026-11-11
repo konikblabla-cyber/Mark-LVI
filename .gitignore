@@ -69,6 +69,8 @@ memory/conversation_history.jsonl
 memory/conversation_history.jsonl.tmp
 memory/missions.json
 memory/missions.json.tmp
+memory/experiences.json
+memory/experiences.json.tmp
 .history-*.tmp
 .missions-*.tmp
 **/.jarvis-*.tmp
