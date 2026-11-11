@@ -531,6 +531,67 @@ class BrowserSequenceTests(unittest.TestCase):
         self.assertIn("status=unverified", result)
         self.assertEqual([item[0] for item in executed], ["go_to", "click"])
 
+
+    def test_sequence_reports_progress_for_each_verified_step(self):
+        executed = []
+        progress = []
+
+        class FakePlayer:
+            def write_log(self, message):
+                progress.append(message)
+
+        class FakeSession:
+            def run(self, coroutine, timeout=60):
+                return asyncio.run(coroutine)
+
+            async def go_to(self, url):
+                executed.append("go_to")
+                return browser.outcome.done("browser_control", opened=url, verified=True)
+
+            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+                executed.append("click")
+                return browser.outcome.done("browser_control", clicked=True, verified=True)
+
+        steps = [
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Open", "expected_text": "Workspace"},
+        ]
+        with patch.object(browser._registry, "get", return_value=FakeSession()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""):
+            result = browser._run_browser_sequence(
+                {"steps": steps}, None, player=FakePlayer()
+            )
+        self.assertIn("status=done", result)
+        self.assertTrue(any("step 1/2: go_to" in item for item in progress))
+        self.assertTrue(any("verified step 2/2" in item for item in progress))
+        self.assertTrue(any("all steps verified" in item for item in progress))
+
+    def test_sequence_timeout_stops_without_starting_later_steps(self):
+        executed = []
+
+        class FakeSession:
+            def run(self, coroutine, timeout=60):
+                coroutine.close()
+                raise browser.concurrent.futures.TimeoutError()
+
+            async def go_to(self, url):
+                executed.append("go_to")
+                return browser.outcome.done("browser_control", opened=url, verified=True)
+
+            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+                executed.append("click")
+                return browser.outcome.done("browser_control", clicked=True, verified=True)
+
+        steps = [
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Open", "expected_text": "Workspace"},
+        ]
+        with patch.object(browser._registry, "get", return_value=FakeSession()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""):
+            result = browser._run_browser_sequence({"steps": steps}, None)
+        self.assertIn("status=unverified", result)
+        self.assertEqual(executed, [])
+
     def test_sequence_reports_done_only_after_every_step_verified(self):
         executed = []
 
