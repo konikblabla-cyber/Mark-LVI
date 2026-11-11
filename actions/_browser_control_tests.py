@@ -714,6 +714,38 @@ class BrowserSequenceTests(unittest.TestCase):
             self.assertIsNone(result)
             self.assertNotEqual(error, "")
 
+    def test_sequence_stops_after_redirect_when_expected_destination_does_not_match(self):
+        executed = []
+
+        class FakeSession:
+            def __init__(self):
+                self._page = FakePage(FakeLocator(), url="https://example.test/login")
+
+            def run(self, coroutine, timeout=60):
+                return asyncio.run(coroutine)
+
+            async def go_to(self, url):
+                executed.append("go_to")
+                self._page.url = "https://example.test/login"
+                return browser.outcome.done(
+                    "browser_control", opened=self._page.url, verified=True
+                )
+
+            async def click(self, selector=None, text=None, expected_text="", expected_url="", **kwargs):
+                executed.append("click")
+                return browser.outcome.done("browser_control", clicked=True, verified=True)
+
+        steps = [
+            {"action": "go_to", "url": "https://example.test/", "expected_url": "https://example.test/"},
+            {"action": "click", "text": "Continue", "expected_text": "Dashboard"},
+        ]
+        with patch.object(browser._registry, "get", return_value=FakeSession()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""):
+            result = browser._run_browser_sequence({"steps": steps}, None)
+        self.assertIn("status=unverified", result)
+        self.assertIn("expected URL", result)
+        self.assertEqual(executed, ["go_to"])
+
     def test_sequence_rejects_unverified_step_and_stops_later_steps(self):
         executed = []
 
@@ -841,6 +873,7 @@ class BrowserSequenceTests(unittest.TestCase):
         properties = browser.TOOL["parameters"]["properties"]
         self.assertIn("sequence", properties["action"]["description"])
         self.assertIn("steps", properties)
+        self.assertIn("expected_text or expected_url to verify the final destination", properties["steps"]["description"])
         self.assertIn("2 to 8 ordered steps", properties["steps"]["description"])
         self.assertEqual(
             properties["steps"]["items"]["properties"]["action"]["enum"],
