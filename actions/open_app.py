@@ -595,6 +595,7 @@ def _launch_and_verify(player, spoken: str, launcher_name: str,
             _log(player, f"JARVIS: {trouble}")
             _say(player, "Tell the user, in one short sentence in their own "
                          f"language: {trouble}")
+            return
 
         if not requested:
             trouble = (f"{spoken} could not be started - nothing on this system "
