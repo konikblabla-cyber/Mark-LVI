@@ -252,6 +252,19 @@ def save_proactive_audio_enabled(enabled: bool) -> None:
     _save_flag("proactive_audio", enabled)
 
 
+def get_in_call_addressing_enabled() -> bool:
+    """Whether the user explicitly allows Gemini to hear PC mic audio during calls.
+
+    False by default: other participants' voices can be captured by the PC
+    microphone and sent to Gemini when this setting is enabled.
+    """
+    return bool(load_api_keys().get("in_call_addressing", False))
+
+
+def save_in_call_addressing_enabled(enabled: bool) -> None:
+    _save_flag("in_call_addressing", bool(enabled))
+
+
 MEDIA_RESOLUTIONS = ("default", "low", "medium", "high")
 
 
