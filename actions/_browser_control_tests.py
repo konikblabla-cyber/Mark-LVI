@@ -177,6 +177,16 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertIn("status=done", result)
         self.assertEqual(target.clicked, 1)
 
+    def test_non_string_browser_postconditions_are_rejected(self):
+        self.assertEqual(
+            browser._validate_click_postcondition(True, ""),
+            (None, None, "expected_text must be a string"),
+        )
+        self.assertEqual(
+            browser._validate_click_postcondition("", 123),
+            (None, None, "expected_url must be a string"),
+        )
+
     def test_invalid_expected_url_is_rejected_before_click(self):
         target = FakeLocator()
         page = FakePage(target)
