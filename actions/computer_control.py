@@ -496,7 +496,7 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
     )
 
 
-def _screen_find(description: str) -> tuple[int, int] | None:
+def _screen_find(description: str, target_app: str = "") -> tuple[int, int] | None:
     api_key = _get_api_key()
     if not api_key:
         _safe_print("[ComputerControl] ⚠️ No API key for screen_find")
@@ -515,7 +515,9 @@ def _screen_find(description: str) -> tuple[int, int] | None:
 
         prompt = (
             f"This is a screenshot of a {w}×{h} pixel screen. "
-            f"Locate the UI element described as: '{description}'. "
+            f"Locate the UI element described as: '{str(description)[:200]}'. "
+            + (f"Only search inside the foreground application {str(target_app)[:100]}. "
+               if target_app else "")
             f"Reply with ONLY the center coordinates as: x,y "
             f"If the element is not visible, reply: NOT_FOUND"
         )
@@ -540,6 +542,108 @@ def _screen_find(description: str) -> tuple[int, int] | None:
         _safe_print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
 
     return None
+
+
+
+def _screen_click_verified_execute(
+    description: str,
+    expected_result: str,
+    target_app: str,
+) -> str:
+    """Use visual grounding for a control, then verify the exact result in that app."""
+    description = " ".join(str(description or "").split())
+    expected = " ".join(str(expected_result or "").split())
+    target = " ".join(str(target_app or "").split())
+    if not description or len(description) > 200:
+        return outcome.failed("computer_control", "a visual control description of 1 to 200 characters is required")
+    if not expected or len(expected) > 160:
+        return outcome.failed("computer_control", "an exact accessible result of 1 to 160 characters is required")
+    if platform.system().casefold() != "windows":
+        return outcome.failed("computer_control", "verified visual clicking currently requires Windows UI Automation")
+    if not target or len(target) > 100:
+        return outcome.failed("computer_control", "target_app must be the exact foreground executable name")
+
+    blocked = _input_window_guard(target)
+    if blocked:
+        return blocked
+    try:
+        from actions import ui_interaction as ui
+        before = ui._snapshot()
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"could not pin the target window for verification ({type(exc).__name__}); no click was sent",
+        )
+
+    handle = before.get("handle")
+    process_id = before.get("process_id")
+    if not handle or not process_id:
+        return outcome.failed("computer_control", "the target window has no stable identity; no click was sent")
+    if ui._has_exact_expected_text(before.get("records", []), expected):
+        return outcome.unverified(
+            "computer_control",
+            "the expected result was already visible; no click was sent and its cause is unknown",
+            operation="screen_click_verified", expected=expected,
+        )
+
+    # The screenshot locator proposes a point; the app process/window identity
+    # is checked again before any input reaches the desktop.
+    coordinates = _screen_find(description, target)
+    if coordinates is None:
+        return outcome.failed(
+            "computer_control", "the requested visual control could not be located",
+            operation="screen_click_verified", target=target,
+        )
+    try:
+        x, y = int(coordinates[0]), int(coordinates[1])
+        width, height = pyautogui.size()
+    except Exception as exc:
+        return outcome.failed("computer_control", f"screen coordinates are unavailable ({type(exc).__name__})")
+    if not (0 <= x < int(width) and 0 <= y < int(height)):
+        return outcome.failed(
+            "computer_control", "visual locator returned coordinates outside the primary screen",
+            x=x, y=y, width=width, height=height,
+        )
+
+    blocked = _input_window_guard(target)
+    if blocked:
+        return blocked
+    try:
+        current = ui._snapshot(int(handle), int(process_id))
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"the original target window changed during visual analysis ({type(exc).__name__}); no click was sent",
+        )
+    if ui._has_exact_expected_text(current.get("records", []), expected):
+        return outcome.unverified(
+            "computer_control",
+            "the expected result appeared during visual analysis; no click was sent",
+            operation="screen_click_verified", expected=expected,
+        )
+
+    blocked = _input_window_guard(target)
+    if blocked:
+        return blocked
+    click_result = _click(x=x, y=y)
+    if "status=failed" in str(click_result).lower():
+        return click_result
+
+    verified = ui._wait_for_expected_result(
+        expected, lambda: ui._snapshot(int(handle), int(process_id)),
+    )
+    if not verified:
+        return outcome.unverified(
+            "computer_control",
+            "the visual click was sent, but the exact expected accessible result did not appear. Do not retry automatically.",
+            operation="screen_click_verified", target=target,
+            expected=expected, x=x, y=y,
+        )
+    return outcome.done(
+        "computer_control", operation="screen_click_verified",
+        target=target, expected=expected, x=x, y=y, verified=True,
+    )
+
 
 _INPUT_ACTIONS = {
     "type", "smart_type", "click", "left_click", "double_click",
@@ -795,12 +899,12 @@ def computer_control(
             return _screenshot(params.get("path"))
 
         if action == "screen_find":
-            coords = _screen_find(params.get("description", ""))
+            coords = _screen_find(params.get("description", ""), target_app)
             return f"{coords[0]},{coords[1]}" if coords else "NOT_FOUND"
 
         if action == "screen_click":
-            desc   = params.get("description", "")
-            coords = _screen_find(desc)
+            desc = params.get("description", "")
+            coords = _screen_find(desc, target_app)
             if coords:
                 time.sleep(0.2)
                 # Screenshot analysis may take seconds. Recheck the exact foreground
@@ -812,6 +916,29 @@ def computer_control(
                 _click(x=coords[0], y=coords[1])
                 return f"Clicked '{desc}' at {coords}"
             return f"Element not found on screen: '{desc}'"
+
+        if action == "screen_click_verified":
+            from core.autonomy_policy import requires_ui_confirmation, scope_request
+            desc = str(params.get("description") or "").strip()
+            expected = str(params.get("expected_result") or "").strip()
+            target = str(target_app or "").strip()
+            if requires_ui_confirmation(
+                " ".join((desc, expected)),
+                user_request=scope_request(session_memory),
+            ):
+                return confirm.request(
+                    key="computer_control.screen_click_verified",
+                    title="Confirm visual computer action",
+                    detail=(
+                        f"Application: {target[:100]}\n"
+                        f"Visual target: {desc[:200]}\n"
+                        f"Expected visible result: {expected[:160]}\n\n"
+                        "MARK will locate the target from a screen capture, click once, "
+                        "and verify the exact result in the same application."
+                    )[:1600],
+                    run=lambda: _screen_click_verified_execute(desc, expected, target),
+                )
+            return _screen_click_verified_execute(desc, expected, target)
 
         if action == "wait":
             secs = float(params.get("seconds", 1.0))
@@ -863,6 +990,9 @@ TOOL = {
     "name": "computer_control",
     "description": (
         "Direct computer control: type, click, hotkeys, scroll, move mouse. "
+        "For visual controls in apps without usable accessibility labels, use screen_click_verified: "
+        "name the visual target, exact new accessible label expected after it opens, and target_app. "
+        "It clicks once and reports success only when that exact label appears in the same pinned window. "
         "On Windows, before typing or clicking, call action='foreground_app' and pass its exact "
         "executable name as target_app; the active window is checked before input. "
         "This foreground-identity guard is Windows-only. On macOS/Linux, do not call "
@@ -888,7 +1018,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "foreground_app | type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | random_data | user_data"
+                "description": "foreground_app | type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | screen_click_verified | random_data | user_data"
             },
             "app_name": {
                 "type": "STRING",
@@ -949,6 +1079,10 @@ TOOL = {
             "description": {
                 "type": "STRING",
                 "description": "Element description for screen_find/screen_click"
+            },
+            "expected_result": {
+                "type": "STRING",
+                "description": "For screen_click_verified: exact accessible label that must appear in the target app before success is reported."
             },
             "type": {
                 "type": "STRING",
