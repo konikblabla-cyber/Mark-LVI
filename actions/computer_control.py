@@ -568,6 +568,11 @@ def _screen_click_verified_execute(
         return blocked
     try:
         from actions import ui_interaction as ui
+        if ui._is_sensitive_input_label(description) or ui._is_sensitive_input_label(expected):
+            return outcome.failed(
+                "computer_control",
+                "visual targets or expected labels involving credentials, verification codes or payment data are not supported",
+            )
         before = ui._snapshot()
     except Exception as exc:
         return outcome.failed(
@@ -994,7 +999,8 @@ TOOL = {
         "For visual controls in apps without usable accessibility labels, use screen_click_verified: "
         "name the visual target, exact new accessible label expected after it opens, and target_app. "
         "It sends a screen capture to configured Gemini for visual grounding, clicks once, and reports "
-        "success only when that exact label appears in the same pinned window. "
+        "success only when that exact label appears in the same pinned window. Legacy screen_click only "
+        "sends a click and is unverified; prefer screen_click_verified for actual interaction. "
         "On Windows, before typing or clicking, call action='foreground_app' and pass its exact "
         "executable name as target_app; the active window is checked before input. "
         "This foreground-identity guard is Windows-only. On macOS/Linux, do not call "
