@@ -62,10 +62,11 @@ class FakeLocator:
 
 
 class FakePage:
-    def __init__(self, locator, url="https://example.test/", postconditions=None):
+    def __init__(self, locator, url="https://example.test/", postconditions=None, context=None):
         self._locator = locator
         self.url = url
         self._postconditions = postconditions or {}
+        self.context = context
 
     def locator(self, selector):
         return self._locator
@@ -134,6 +135,46 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         ))
         self.assertIn("status=done", result)
         self.assertIn("verified=true", result)
+        self.assertEqual(target.clicked, 1)
+
+    def test_click_adopts_the_unique_new_tab_before_verifying(self):
+        target = FakeLocator()
+        new_page_locator = FakeLocator()
+        new_page = FakePage(new_page_locator, url="https://example.test/next")
+        context = SimpleNamespace(pages=[])
+        old_page = FakePage(target, context=context)
+        target.on_click = lambda: context.pages.append(new_page)
+        session = SimpleNamespace(_get_page=lambda: _async_value(old_page), _page=old_page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session, text="Open", expected_url="https://example.test/next"
+        ))
+        self.assertIn("status=done", result)
+        self.assertIs(session._page, new_page)
+
+    def test_click_with_multiple_new_tabs_is_unverified_without_guessing(self):
+        target = FakeLocator()
+        first = FakePage(FakeLocator(), url="https://example.test/one")
+        second = FakePage(FakeLocator(), url="https://example.test/two")
+        context = SimpleNamespace(pages=[])
+        old_page = FakePage(target, context=context)
+        target.on_click = lambda: context.pages.extend([first, second])
+        session = SimpleNamespace(_get_page=lambda: _async_value(old_page), _page=old_page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session, text="Open", expected_url="https://example.test/one"
+        ))
+        self.assertIn("status=unverified", result)
+        self.assertIs(session._page, old_page)
+
+    def test_smart_click_text_fallback_verifies_expected_result(self):
+        target = FakeLocator()
+        postcondition = FakeLocator()
+        page = FakePage(target, postconditions={"Workspace": postcondition})
+        page.get_by_role = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("role unavailable"))
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.smart_click(
+            session, "Open", expected_text="Workspace"
+        ))
+        self.assertIn("status=done", result)
         self.assertEqual(target.clicked, 1)
 
     def test_invalid_expected_url_is_rejected_before_click(self):
