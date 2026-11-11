@@ -556,7 +556,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
         }
         with patch.object(control.platform, "system", return_value="Windows"), \
              patch.object(control, "_input_window_guard", return_value=""), \
-             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch("actions.ui_interaction.focus_window_identity", return_value=before), \
              patch.object(control, "_screen_find") as locate, \
              patch.object(control, "_click") as click:
             result = control._screen_click_verified_execute(
