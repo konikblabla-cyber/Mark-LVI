@@ -6975,9 +6975,16 @@ class MainWindow(QMainWindow):
                     ok, msg = False, str(e)
                 if ok and self.on_wake_toggle:
                     try:
-                        self.on_wake_toggle(True)   # auto-enable after a successful download
-                    except Exception:
-                        pass
+                        result = self.on_wake_toggle(True)  # enable after the model download
+                        if result == "unavailable":
+                            ok = False
+                            msg = (
+                                "The wake models downloaded, but the local detector "
+                                "could not start. ADDRESS-AWARE mode remains enabled."
+                            )
+                    except Exception as exc:
+                        ok = False
+                        msg = f"The wake models downloaded, but LOCAL PRIVACY could not start: {type(exc).__name__}."
                 self._wake_dl_sig.emit(ok, msg)
             threading.Thread(target=_work, daemon=True).start()
             return
