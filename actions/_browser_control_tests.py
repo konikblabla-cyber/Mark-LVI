@@ -85,6 +85,32 @@ class FakePage:
 
 
 class BrowserBehaviorSafetyTests(unittest.TestCase):
+    def test_sequence_click_checks_real_control_metadata_before_clicking(self):
+        locator = FakeLocator(attrs={"aria-label": "Delete account"})
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session,
+            selector="button#action",
+            expected_text="Account deleted",
+            block_high_impact=True,
+        ))
+        self.assertIn("status=failed", result)
+        self.assertEqual(locator.clicked, 0)
+
+    def test_sequence_smart_click_checks_real_control_metadata_before_clicking(self):
+        locator = FakeLocator(attrs={"title": "Place order"})
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.smart_click(
+            session,
+            "Confirm",
+            expected_text="Order placed",
+            block_high_impact=True,
+        ))
+        self.assertIn("status=failed", result)
+        self.assertEqual(locator.clicked, 0)
+
     def test_click_refuses_ambiguous_locator(self):
         locator = FakeLocator(count=2)
         session = SimpleNamespace(_get_page=lambda: _async_value(FakePage(locator)))
@@ -522,7 +548,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 executed.append(("go_to", url))
                 return browser.outcome.done("browser_control", opened=url, verified=True)
 
-            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+            async def click(self, selector=None, text=None, expected_text="", expected_url="", block_high_impact=False):
                 executed.append(("click", text or selector))
                 return browser.outcome.unverified("browser_control", "expected text missing")
 
@@ -558,7 +584,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 executed.append("go_to")
                 return browser.outcome.done("browser_control", opened=url, verified=True)
 
-            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+            async def click(self, selector=None, text=None, expected_text="", expected_url="", block_high_impact=False):
                 executed.append("click")
                 return browser.outcome.done("browser_control", clicked=True, verified=True)
 
@@ -588,7 +614,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 executed.append("go_to")
                 return browser.outcome.done("browser_control", opened=url, verified=True)
 
-            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+            async def click(self, selector=None, text=None, expected_text="", expected_url="", block_high_impact=False):
                 executed.append("click")
                 return browser.outcome.done("browser_control", clicked=True, verified=True)
 
@@ -613,7 +639,7 @@ class BrowserSequenceTests(unittest.TestCase):
                 executed.append("go_to")
                 return browser.outcome.done("browser_control", opened=url, verified=True)
 
-            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+            async def click(self, selector=None, text=None, expected_text="", expected_url="", block_high_impact=False):
                 executed.append("click")
                 return browser.outcome.done("browser_control", clicked=True, verified=True)
 
