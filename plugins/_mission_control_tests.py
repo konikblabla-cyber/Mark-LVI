@@ -541,5 +541,54 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertIn("[MISSION_UI_RECOVERY]", result)
         replan.assert_not_called()
 
+
+    def test_mission_control_persists_and_verifies_visual_computer_control_step(self):
+        mission_id = self._running_mission(
+            'Click the gear icon and verify "Privacy panel"',
+        )
+        visual_plan = {
+            "status": "planned",
+            "steps": [{
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                },
+                "risk": "low",
+                "requires_confirmation": False,
+                "reason": "Use a cropped visual target and exact postcondition",
+                "expected_result": "Privacy panel appears in the same window",
+            }],
+        }
+        snapshot = {
+            "handle": 7,
+            "process_id": 55,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [],
+            "clickables": [],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=visual_plan):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_PLAN]", result)
+        saved = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(saved["ui_action"]["tool"], "computer_control")
+        self.assertEqual(saved["ui_action"]["parameters"]["action"], "screen_click_verified")
+
+        self.assertTrue(mission_control.record_tool_result(
+            self.scope, "computer_control",
+            "status=done action=computer_control verified=true expected=Privacy_panel",
+        ))
+        completed = self.complete(mission_id, "S01")
+        self.assertIn("[MISSION_COMPLETE]", completed)
+        saved = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(saved["status"], "done")
+        self.assertEqual(saved["verified_tool"], "computer_control")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
