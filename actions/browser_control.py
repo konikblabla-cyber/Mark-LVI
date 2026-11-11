@@ -1023,9 +1023,10 @@ class _BrowserSession:
                 actual_url=str(getattr(page, "url", "") or "")[:500],
             )
         except PlaywrightTimeout:
-            return outcome.failed(
+            return outcome.unverified(
                 "browser_control",
-                "no unique matching target appeared on the page in time",
+                "the click timed out; it may have been activated, so MARK will not retry automatically",
+                clicked=True,
                 selector=selector or text,
             )
         except Exception as exc:
@@ -1038,6 +1039,8 @@ class _BrowserSession:
 
     async def type_text(self, selector: str = None, text: str = "",
                         clear_first: bool = False) -> str:
+        if not isinstance(text, str) or not text:
+            return outcome.failed("browser_control", "no text was supplied")
         page = await self._get_page()
         try:
             locator = page.locator(selector) if selector else page.locator(":focus")
@@ -1189,63 +1192,94 @@ class _BrowserSession:
         )
         if validation_error:
             return outcome.failed("browser_control", validation_error)
+
         for role in ("button", "link", "menuitem", "tab", "searchbox", "textbox"):
             try:
                 locator = page.get_by_role(role, name=description, exact=True)
-                if not await _locator_ready(locator):
-                    continue
-                context = getattr(page, "context", None)
-                pages_before = list(getattr(context, "pages", []) or []) if context else []
+            except Exception:
+                continue
+            if not await _locator_ready(locator):
+                continue
+
+            # Once a candidate is clicked, never fall through to another
+            # candidate. A timeout or verification error may mean the first
+            # click already changed the site; another click could duplicate a
+            # purchase, submission or message.
+            context = getattr(page, "context", None)
+            pages_before = list(getattr(context, "pages", []) or []) if context else []
+            try:
                 await locator.click(timeout=5_000)
-                if context is not None:
-                    try:
-                        await asyncio.sleep(0.15)
-                        new_pages = [
-                            candidate for candidate in list(context.pages or [])
-                            if candidate not in pages_before
-                            and not getattr(candidate, "is_closed", lambda: False)()
-                        ]
-                        if len(new_pages) == 1:
-                            page = new_pages[0]
-                            self._page = page
-                    except Exception:
-                        pass
+            except Exception as exc:
+                return outcome.unverified(
+                    "browser_control",
+                    f"the click may have happened but its result is uncertain ({type(exc).__name__})",
+                    clicked=True,
+                    role=role,
+                    target=description,
+                )
+            if context is not None:
+                try:
+                    await asyncio.sleep(0.15)
+                    new_pages = [
+                        candidate for candidate in list(context.pages or [])
+                        if candidate not in pages_before
+                        and not getattr(candidate, "is_closed", lambda: False)()
+                    ]
+                    if len(new_pages) == 1:
+                        page = new_pages[0]
+                        self._page = page
+                except Exception:
+                    pass
+            try:
                 verified, reason = await _verify_page_postcondition(
                     page, expected_text, expected_url,
                 )
-                if not verified:
-                    return outcome.unverified(
-                        "browser_control", reason, clicked=True, role=role,
-                        target=description,
-                    )
-                return outcome.done(
-                    "browser_control", clicked=True, role=role, verified=True,
-                    expected_text=expected_text or None,
-                    expected_url=expected_url or None,
-                    actual_url=str(getattr(page, "url", "") or "")[:500],
+            except Exception as exc:
+                verified = False
+                reason = f"the click may have happened but verification failed ({type(exc).__name__})"
+            if not verified:
+                return outcome.unverified(
+                    "browser_control", reason, clicked=True, role=role,
+                    target=description,
                 )
-            except Exception:
-                continue
+            return outcome.done(
+                "browser_control", clicked=True, role=role, verified=True,
+                expected_text=expected_text or None,
+                expected_url=expected_url or None,
+                actual_url=str(getattr(page, "url", "") or "")[:500],
+            )
 
         try:
             locator = page.get_by_text(description, exact=True)
-            if await _locator_ready(locator):
+        except Exception:
+            locator = None
+        if locator is not None and await _locator_ready(locator):
+            try:
                 await locator.click(timeout=5_000)
+            except Exception as exc:
+                return outcome.unverified(
+                    "browser_control",
+                    f"the click may have happened but its result is uncertain ({type(exc).__name__})",
+                    clicked=True,
+                    target=description,
+                )
+            try:
                 verified, reason = await _verify_page_postcondition(
                     page, expected_text, expected_url,
                 )
-                if not verified:
-                    return outcome.unverified(
-                        "browser_control", reason, clicked=True, target=description,
-                    )
-                return outcome.done(
-                    "browser_control", clicked=True, verified=True,
-                    expected_text=expected_text or None,
-                    expected_url=expected_url or None,
-                    actual_url=str(getattr(page, "url", "") or "")[:500],
+            except Exception as exc:
+                verified = False
+                reason = f"the click may have happened but verification failed ({type(exc).__name__})"
+            if not verified:
+                return outcome.unverified(
+                    "browser_control", reason, clicked=True, target=description,
                 )
-        except Exception:
-            pass
+            return outcome.done(
+                "browser_control", clicked=True, verified=True,
+                expected_text=expected_text or None,
+                expected_url=expected_url or None,
+                actual_url=str(getattr(page, "url", "") or "")[:500],
+            )
         return outcome.failed(
             "browser_control",
             "no single visible and enabled exact target matched; nothing was clicked",
@@ -1255,6 +1289,8 @@ class _BrowserSession:
 
     async def smart_type(self, description: str, text: str,
                          clear_first: bool = False) -> str:
+        if not isinstance(text, str) or not text:
+            return outcome.failed("browser_control", "no text was supplied")
         page = await self._get_page()
         candidates = [
             page.get_by_placeholder(description, exact=True),
