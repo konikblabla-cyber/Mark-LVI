@@ -26,7 +26,7 @@ Both are the same setting, because all of them speak the same protocol.
 never the live voice engine. To use it, select Groq in **CODING** (not
 **BACKGROUND REQUESTS** or the main conversation) and explicitly enable it in
 the task-router settings. MARK enforces a local hard stop of 3 chat calls/day,
-8,000 input characters per call, 20,000 input characters/day and 512 output
+8,000 input characters per call, 20,000 input characters/day and 1,024 output
 tokens per call. Image requests are not sent to Groq. The local ledger is saved
 under the per-user config directory; it does not include other applications or
 people using the same Groq organization/key, so your real provider quota may be

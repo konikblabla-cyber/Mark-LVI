@@ -99,6 +99,33 @@ class RouterSafetyTests(unittest.TestCase):
             with self.assertRaises(router.RouterError):
                 router.dispatch("search the web", tier="search")
 
+    def test_groq_is_not_used_for_general_reasoning(self):
+        settings = {"enabled": True, "zero_cost_confirmed": True, "groq_enabled": True,
+                    "gemma_vision": True}
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_provider_for", return_value="openai_compat@groq"), \
+             patch.object(router, "_is_groq_provider", return_value=True), \
+             patch.object(router, "_reserve") as reserve:
+            result = router.dispatch("Explain how this works", tier="smart")
+        self.assertIs(result, router.NOT_ROUTED)
+        reserve.assert_not_called()
+
+    def test_groq_is_allowed_for_coding_without_the_free_plan_ack(self):
+        settings = {"enabled": True, "zero_cost_confirmed": False, "groq_enabled": True,
+                    "gemma_vision": True, "second_opinion": False}
+        reply = router.RouterReply("generated code")
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_provider_for", return_value="openai_compat@groq"), \
+             patch.object(router, "_is_groq_provider", return_value=True), \
+             patch.object(router, "_assert_zero_cost_provider"), \
+             patch.object(router, "_reserve", return_value=25), \
+             patch.object(router, "_provider_call", return_value=reply) as provider_call, \
+             patch.object(router, "_audit"):
+            result = router.dispatch("Write Python code to parse JSON", tier="smart")
+        self.assertIs(result, reply)
+        self.assertEqual(provider_call.call_args.args[0], "openai_compat@groq")
+        self.assertEqual(provider_call.call_args.args[4], "coding")
+
     def test_enabled_router_uses_configured_fast_provider(self):
         settings = {
             "enabled": True, "zero_cost_confirmed": True,
@@ -252,7 +279,7 @@ class RouterSafetyTests(unittest.TestCase):
         llm.model = "openai/gpt-oss-120b"
         llm.caps = {"tools": False}
         body = llm._body([{"role": "user", "content": "hello"}], None, False, None)
-        self.assertEqual(body.get("max_completion_tokens"), 512)
+        self.assertEqual(body.get("max_completion_tokens"), 1024)
 
     def test_only_allowlisted_gemma_is_accepted(self):
         self.assertEqual(router.GEMMA_VISION_MODEL, "gemma-4-26b-a4b-it")

@@ -3499,7 +3499,7 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._label(
             "Groq is allowed only when selected under CODING (not BACKGROUND REQUESTS or ② THINKING). "
             "MARK hard stop: 3 calls/day, 8,000 input characters per request, 20,000 input characters/day, "
-            "512 output tokens/request. A 429 is not retried against Groq. These local limits do not cover other apps using the same Groq key.",
+            "1,024 output tokens/request. A 429 is not retried against Groq. These local limits do not cover other apps using the same Groq key.",
             7, C.TEXT_DIM))
         self._router_free_combo = self._combo()
         self._router_free_combo.addItem("Not verified — router stays blocked", False)

@@ -639,6 +639,8 @@ def _provider_call(provider_id: str, contents, config, timeout_ms: int,
     from providers import registry
 
     cfg = get_provider_config(provider_id)
+    if _is_groq_provider(provider_id) and task != "coding":
+        raise RouterError("Groq is reserved for explicit coding tasks")
     _assert_zero_cost_provider(provider_id)
     missing = registry.missing_fields(provider_id, cfg)
     if missing:
@@ -680,13 +682,22 @@ def dispatch(contents, tier: str = "smart", config=None,
     if not task:
         raise RouterError("this request has no safe route; specify a supported task type")
 
+    primary_id = (
+        _provider_for(task, provider_override)
+        if task != "review" and not (task == "vision" and settings.get("gemma_vision", True))
+        else ""
+    )
+    # Groq never handles everyday reasoning, fast/background work or vision.
+    # Return control to the normal Gemini ladder without spending a Groq call.
+    if task != "coding" and primary_id and _is_groq_provider(primary_id):
+        return NOT_ROUTED
+
     if not settings.get("zero_cost_confirmed"):
-        primary = _provider_for(task, provider_override) if task not in ("vision", "review") else ""
         # The one metered exception is explicit Groq coding. Every other route
         # still needs the separate $0-plan acknowledgement.
-        if task != "coding" or not primary or not _is_groq_provider(primary):
+        if task != "coding" or not primary_id or not _is_groq_provider(primary_id):
             raise RouterError("enable only after verifying the $0 providers; Groq is allowed only for opted-in coding")
-        _assert_zero_cost_provider(primary)
+        _assert_zero_cost_provider(primary_id)
 
     chars = _reserve(contents, settings)
     started = time.monotonic()
@@ -699,7 +710,6 @@ def dispatch(contents, tier: str = "smart", config=None,
             target = str(settings.get("gemma_model") or GEMMA_VISION_MODEL)
             response = _gemma_call(contents, config, timeout_ms, target)
         else:
-            primary_id = _provider_for(task, provider_override)
             if not primary_id:
                 raise RouterError(f"no provider assigned to the {task} route")
             target = primary_id

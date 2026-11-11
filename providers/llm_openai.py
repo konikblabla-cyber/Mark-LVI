@@ -423,7 +423,7 @@ class OpenAICompatLLM:
         if "api.groq.com" in self.base:
             # A hard output bound keeps accidental code-generation loops cheap.
             # Groq's current API accepts max_completion_tokens for chat completions.
-            body["max_completion_tokens"] = 512
+            body["max_completion_tokens"] = 1024
         if "minimax" in self.base:
             # MiniMax's M2 models put their thinking inline as <think>…</think>
             # unless asked not to. The pipeline filters that out of speech, but
