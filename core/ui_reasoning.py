@@ -256,7 +256,13 @@ def _plan_visual_click(goal: str, snapshot: Any,
     metadata = snapshot if isinstance(snapshot, dict) else {}
     target_app = str(metadata.get("process_name") or "").strip()
     bounds = metadata.get("bounds")
+    try:
+        window_handle = int(metadata.get("handle"))
+        process_id = int(metadata.get("process_id"))
+    except (TypeError, ValueError, OverflowError):
+        window_handle = process_id = 0
     if (not target_app or len(target_app) > 100
+            or window_handle <= 0 or process_id <= 0
             or not isinstance(bounds, (list, tuple)) or len(bounds) != 4):
         return _clarify(
             "I cannot securely identify and crop the active application window. Keep the window in the foreground and try again.",
@@ -283,6 +289,8 @@ def _plan_visual_click(goal: str, snapshot: Any,
             "description": description,
             "expected_result": expected_label,
             "target_app": target_app,
+            "target_window_handle": window_handle,
+            "target_process_id": process_id,
         },
         "target": {"role": "VisualTarget", "name": description},
         "reason": (
