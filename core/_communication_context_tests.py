@@ -310,10 +310,11 @@ class CommunicationContextTests(unittest.TestCase):
 
     def test_call_audio_semantic_addressing_requires_explicit_consent_and_live_proactivity(self):
         self.assertTrue(should_stream_call_audio(True, True, True, True, context_known=True))
-        self.assertFalse(should_stream_call_audio(True, False, True, True))
-        self.assertFalse(should_stream_call_audio(True, True, False, True))
-        self.assertFalse(should_stream_call_audio(True, True, True, False))
-        self.assertFalse(should_stream_call_audio(False, True, True, True))
+        self.assertFalse(should_stream_call_audio(True, False, True, True, context_known=True))
+        self.assertFalse(should_stream_call_audio(True, True, False, True, context_known=True))
+        self.assertFalse(should_stream_call_audio(True, True, True, False, context_known=True))
+        self.assertFalse(should_stream_call_audio(False, True, True, True, context_known=True))
+        self.assertFalse(should_stream_call_audio(True, True, True, True))
 
     def test_unknown_communication_context_keeps_audio_local(self):
         self.assertFalse(should_stream_call_audio(
@@ -322,7 +323,7 @@ class CommunicationContextTests(unittest.TestCase):
 
     def test_phone_audio_never_opens_the_pc_communication_audio_gate(self):
         self.assertFalse(should_stream_call_audio(
-            True, True, True, True, phone_audio_active=True
+            True, True, True, True, phone_audio_active=True, context_known=True
         ))
 
     def test_in_call_consent_configuration_defaults_to_false_and_rejects_malformed_values(self):
