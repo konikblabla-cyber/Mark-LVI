@@ -6,9 +6,9 @@ from core.live_model_policy import (
     PRIMARY_LIVE_MODEL,
     blocking_tool_declarations,
     supports_legacy_thinking_budget,
+    supports_live_thinking_config,
 )
 from core import gemini
-
 
 
 class LiveModelPolicyTests(unittest.TestCase):
@@ -43,6 +43,9 @@ class LiveModelPolicyTests(unittest.TestCase):
             "models/gemini-3.1-flash-live-preview"
         ))
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    def test_main_entry_point_thinking_policy_alias_matches_legacy_policy(self):
+        for model in LIVE_MODEL_FALLBACKS:
+            self.assertEqual(
+                supports_live_thinking_config(model),
+                supports_legacy_thinking_budget(model),
+            )
