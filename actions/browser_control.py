@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import importlib.util
+import json
 import os
 import platform
 import re
@@ -194,6 +195,13 @@ async def _wait_for_locator_ready(locator, timeout: float | None = None) -> bool
         if asyncio.get_running_loop().time() >= deadline:
             return False
         await asyncio.sleep(0.1)
+
+
+def _clean_control_label(value, limit: int) -> str:
+    """Bound control metadata and remove control characters before model exposure."""
+    text = str(value or "")
+    text = "".join(ch for ch in text if ch in "\\t" or ord(ch) >= 32)
+    return " ".join(text.split())[:max(0, int(limit))]
 
 
 async def _locator_is_sensitive(locator) -> bool:
@@ -1257,6 +1265,106 @@ class _BrowserSession:
         except Exception as e:
             return f"Could not get page text: {e}"
 
+    async def inspect_controls(self) -> str:
+        """Describe visible interactive controls without reading field values."""
+        page = await self._get_page()
+        script = r"""
+() => {
+    const selector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="menuitem"]';
+    const visible = el => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0
+            && style.visibility !== 'hidden' && style.display !== 'none'
+            && style.opacity !== '0';
+    };
+    const clean = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 180);
+    return Array.from(document.querySelectorAll(selector))
+        .filter(visible)
+        .slice(0, 120)
+        .map(el => {
+            const labels = el.labels ? Array.from(el.labels).map(node => node.innerText).join(' ') : '';
+            const text = clean(
+                el.getAttribute('aria-label') || labels || el.innerText
+                || el.getAttribute('title') || el.getAttribute('placeholder')
+            );
+            const type = clean(el.getAttribute('type') || el.tagName.toLowerCase()).toLowerCase();
+            const tag = String(el.tagName || '').toLowerCase();
+            const form = el.form || (el.closest ? el.closest('form') : null);
+            const formSubmit = !!form && (
+                (tag === 'button' && (!el.getAttribute('type') || type === 'submit'))
+                || (tag === 'input' && ['submit', 'image'].includes(type))
+            );
+            return {
+                tag,
+                role: clean(el.getAttribute('role')),
+                type,
+                label: text,
+                placeholder: clean(el.getAttribute('placeholder')),
+                name: clean(el.getAttribute('name')),
+                disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
+                href: tag === 'a' ? clean(el.getAttribute('href')) : '',
+                form_submit: formSubmit
+            };
+        });
+}
+"""
+        try:
+            raw = await page.evaluate(script)
+        except Exception as exc:
+            return outcome.failed(
+                "browser_control",
+                f"interactive page controls could not be inspected ({type(exc).__name__})",
+            )
+        if not isinstance(raw, list):
+            return outcome.failed("browser_control", "the browser returned an invalid controls snapshot")
+
+        controls = []
+        for item in raw[:120]:
+            if not isinstance(item, dict):
+                continue
+            tag = str(item.get("tag") or "")[:20]
+            role = str(item.get("role") or "")[:40]
+            kind = str(item.get("type") or "")[:40]
+            label = _clean_control_label(item.get("label"), 180)
+            placeholder = _clean_control_label(item.get("placeholder"), 120)
+            name = _clean_control_label(item.get("name"), 100)
+            if not label and not placeholder:
+                continue
+            if is_sensitive_field_descriptor(tag, role, kind, label, placeholder, name):
+                continue
+            target = label or placeholder
+            high_impact = bool(
+                item.get("form_submit")
+                or requires_browser_confirmation("smart_click", target)
+            )
+            entry = {
+                "tag": tag,
+                "role": role,
+                "type": kind,
+                "label": label,
+                "placeholder": placeholder,
+                "disabled": bool(item.get("disabled")),
+                "high_impact": high_impact,
+            }
+            href = _clean_control_label(item.get("href"), 240)
+            if href and tag == "a":
+                entry["href"] = href
+            controls.append(entry)
+            if len(controls) >= 80:
+                break
+
+        if not controls:
+            summary = "No labelled, visible, non-sensitive interactive controls were found."
+        else:
+            summary = json.dumps(
+                {"visible_controls": controls},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )[:6_000]
+        return outcome.untrusted("browser-controls", summary)
+
+
     async def get_url(self) -> str:
         page = await self._get_page()
         return outcome.untrusted("browser-url", page.url)
@@ -2044,6 +2152,8 @@ def _browser_control_execute(
             ))
         elif action == "get_text":
             result = sess.run(sess.get_text())
+        elif action == "inspect":
+            result = sess.run(sess.inspect_controls())
         elif action == "get_url":
             result = sess.run(sess.get_url())
         elif action == "press":
@@ -2163,7 +2273,7 @@ TOOL = {
     "name": "browser_control",
     "description": (
         "Controls the web browser: open an address, search, click, type, "
-        "scroll, read the page, manage tabs, go back and forward. It can also "
+        "scroll, inspect visible buttons/links/fields, read the page, manage tabs, go back and forward. It can also "
         "run a 2–8 step verified browser sequence in one session. Each step must "
         "be verified before the next starts; uncertain outcomes stop the sequence. "
         "High-impact send, submit, delete, publish and purchase actions are not permitted inside a batch; run such actions separately for their own confirmation. "
@@ -2194,7 +2304,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | sequence | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
+                "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | sequence | inspect | get_text | get_url | press | new_tab | close_tab | screenshot | back | forward | reload | switch | list_browsers | close | close_all"
             },
             "browser": {
                 "type": "STRING",
