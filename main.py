@@ -937,6 +937,7 @@ class JarvisLive:
                             self._enhanced_live
                             and self._engine_caps is None
                             and self._engine is None
+                            and self.session is not None
                         ),
                         self._phone_active,
                         self._communication_context_known,
@@ -1938,6 +1939,7 @@ class JarvisLive:
                             self._enhanced_live
                             and self._engine_caps is None
                             and self._engine is None
+                            and self.session is not None
                         ),
                         self._phone_active,
                         self._communication_context_known,
