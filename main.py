@@ -1118,9 +1118,9 @@ class JarvisLive:
         self._turn_authorization = new_turn_authorization(text)
         # Respect wake-word sleep: a typed command must not be answered while
         # asleep either (the sleep gate is not just for the mic). Wake first with
-        # "Hey Jarvis" or the WAKE NOW button.
+        # "a wake phrase" or the WAKE NOW button.
         if self._wake_enabled and not self._awake:
-            self.ui.write_log("SYS: I'm asleep — say 'Hey Jarvis' or tap WAKE NOW first.")
+            self.ui.write_log("SYS: I'm asleep — say a wake phrase or tap WAKE NOW first.")
             return
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
@@ -2192,7 +2192,7 @@ class JarvisLive:
                                     self._communication_turn_open = False
                                     self._communication_turn_deadline = 0.0
                                     self.ui.write_log(
-                                        "SYS: Privacy gate closed. Say 'Hey Jarvis' "
+                                        "SYS: Privacy gate closed. Say a wake phrase "
                                         "for the next request."
                                     )
                             out_buf = []
@@ -3011,12 +3011,12 @@ class JarvisLive:
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
                     # Wake word: if enabled, come up ASLEEP (mic gated, silent)
-                    # until the user says "Hey Jarvis" or taps wake in the UI.
+                    # until the user says "a wake phrase" or taps wake in the UI.
                     if self._wake_enabled:
                         self._ensure_wake_detector()
                         self._awake = False
                         self.ui.set_state("SLEEPING")
-                        self.ui.write_log("SYS: JARVIS online — sleeping. Say 'Hey Jarvis' to wake me.")
+                        self.ui.write_log("SYS: JARVIS online — sleeping. Say a wake phrase to wake me.")
                     else:
                         self._awake = True
                         self.ui.set_state("LISTENING")
