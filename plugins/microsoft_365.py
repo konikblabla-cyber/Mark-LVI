@@ -28,7 +28,7 @@ import requests
 from core import confirm
 from memory.config_manager import get_plugin_config
 
-_REDIRECT_URI = "http://127.0.0.1:8766/callback"
+_REDIRECT_URI = "http://localhost:8766/callback"
 _GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 _DEFAULT_ZONE = "Europe/Warsaw"
 _SCOPES = (
@@ -222,7 +222,7 @@ def _oauth_connect() -> str:
     }
     server = None
     try:
-        server = HTTPServer(("127.0.0.1", 8766), CallbackHandler)
+        server = HTTPServer(("localhost", 8766), CallbackHandler)
         server.timeout = 1.0
         auth_url = _authority(tenant) + "/authorize?" + urlencode(params)
         opened = webbrowser.open(auth_url, new=1, autoraise=True)
