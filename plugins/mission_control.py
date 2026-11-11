@@ -255,36 +255,56 @@ def _fresh_ui_plan(goal: str, previous_result: dict | None = None) -> dict:
         from actions import ui_interaction
         from core.ui_reasoning import plan_ui_task, replan_ui_task
 
-        snapshot = ui_interaction._snapshot()
-        if previous_result is not None:
-            previous_step = previous_result.get("step")
-            previous_params = (
-                previous_step.get("parameters")
-                if isinstance(previous_step, dict) else None
-            )
-            previous_tool = (
-                previous_step.get("tool")
-                if isinstance(previous_step, dict) else ""
-            )
-            if previous_tool == "computer_control" and isinstance(previous_params, dict):
-                expected_app = str(previous_params.get("target_app") or "").strip().casefold()
-                active_app = str(snapshot.get("process_name") or "").strip().casefold()
-                try:
-                    expected_handle = int(previous_params.get("target_window_handle"))
-                    expected_pid = int(previous_params.get("target_process_id"))
-                except (TypeError, ValueError, OverflowError):
-                    expected_handle = expected_pid = 0
-                if (
-                    not expected_app or not active_app or active_app != expected_app
-                    or expected_handle <= 0 or expected_pid <= 0
-                    or snapshot.get("handle") != expected_handle
-                    or snapshot.get("process_id") != expected_pid
-                ):
-                    return {
-                        "status": "blocked",
-                        "reason": "the original target window or process changed; visual replan refused",
-                        "steps": [],
-                    }
+        previous_step = (
+            previous_result.get("step")
+            if isinstance(previous_result, dict) else None
+        )
+        previous_params = (
+            previous_step.get("parameters")
+            if isinstance(previous_step, dict) else None
+        )
+        previous_tool = (
+            previous_step.get("tool")
+            if isinstance(previous_step, dict) else ""
+        )
+        if previous_tool == "computer_control" and isinstance(previous_params, dict):
+            try:
+                expected_handle = int(previous_params.get("target_window_handle"))
+                expected_pid = int(previous_params.get("target_process_id"))
+            except (TypeError, ValueError, OverflowError):
+                expected_handle = expected_pid = 0
+            if expected_handle <= 0 or expected_pid <= 0:
+                return {
+                    "status": "blocked",
+                    "reason": "the visual step has no verified target window identity; replan refused",
+                    "steps": [],
+                }
+            try:
+                # Re-activate only the exact window that was pinned by the
+                # previous plan, never whichever window the HUD left active.
+                snapshot = ui_interaction.focus_window_identity(
+                    expected_handle, expected_pid,
+                )
+            except Exception as exc:
+                return {
+                    "status": "blocked",
+                    "reason": f"the original target window could not be restored ({type(exc).__name__}); visual replan refused",
+                    "steps": [],
+                }
+            expected_app = str(previous_params.get("target_app") or "").strip().casefold()
+            active_app = str(snapshot.get("process_name") or "").strip().casefold()
+            if (
+                not expected_app or not active_app or active_app != expected_app
+                or snapshot.get("handle") != expected_handle
+                or snapshot.get("process_id") != expected_pid
+            ):
+                return {
+                    "status": "blocked",
+                    "reason": "the original target window or process changed; visual replan refused",
+                    "steps": [],
+                }
+        else:
+            snapshot = ui_interaction._snapshot()
         proposed = (
             replan_ui_task(goal, snapshot, previous_result)
             if previous_result is not None
