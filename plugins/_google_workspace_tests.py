@@ -59,6 +59,10 @@ class GoogleWorkspaceTests(unittest.TestCase):
             workspace._parse_recipients("not-an-address")
         with self.assertRaises(ValueError):
             workspace._parse_recipients("a@example.com\nBcc: victim@example.com")
+        with self.assertRaises(ValueError):
+            workspace._parse_recipients(",".join(f"user{i}@example.com" for i in range(11)))
+        with self.assertRaises(ValueError):
+            workspace._parse_recipients("x" * 255 + "@example.com")
 
     def test_result_limit_is_never_above_ten(self):
         self.assertEqual(workspace._max_results(1000), 10)
