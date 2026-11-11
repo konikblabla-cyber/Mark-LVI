@@ -529,6 +529,10 @@ class HudCanvas(QWidget):
         except Exception:
             pass
 
+    def refresh_in_call_addressing_btn(self) -> None:
+        """Refresh microphone privacy state through Qt's owning event loop."""
+        self._win._wake_btns_sig.emit()
+
     def set_audio_level(self, level: float) -> None:
         """Thread-safe entry point for the audio threads. Stores the louder of
         the incoming level and the current value so brief gaps between chunks
