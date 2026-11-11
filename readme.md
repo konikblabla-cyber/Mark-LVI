@@ -564,11 +564,22 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 
 ## ⚡ Quick Start
 
+### Windows 10/11 — one-click setup
+
+1. Install **64-bit Python 3.12** from [python.org](https://www.python.org/downloads/windows/). Enable the Python Launcher during setup.
+2. Download and extract the **MARK-LVI-Windows-Portable** ZIP from the [Windows package workflow](https://github.com/konikblabla-cyber/Mark-LVI/actions/workflows/windows-download.yml).
+3. Double-click `START_MARK.bat`. It creates a private `.venv`, installs the required packages and Playwright browsers, then opens MARK.
+4. On first launch, enter your Gemini API key in the setup window. The key is saved locally in `config/api_keys.json` and is not part of the download.
+
+For installation without launching, double-click `INSTALL_MARK.bat`. Later launches through `START_MARK.bat` reuse the environment and only rerun setup when `requirements.txt` or `setup.py` changes.
+
+### macOS / Linux
+
 ```bash
 git clone https://github.com/konikblabla-cyber/Mark-LVI.git
 cd Mark-LVI
-python setup.py        # installs deps for YOUR OS + the browser automation engine
-python main.py
+python3 setup.py        # installs deps for YOUR OS + the browser automation engine
+python3 main.py
 ```
 
 `setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. Install `libegl1` for the Qt interface. For full X11 desktop input, screenshots and clipboard, also install `gnome-screenshot`, `python3-tk` and `xclip` (Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip`). `scrot` alone is not sufficient for the current PyScreeze screenshot backend. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
