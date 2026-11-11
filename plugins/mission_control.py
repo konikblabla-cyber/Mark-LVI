@@ -498,8 +498,14 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                 if expected is None or expected.get("id") != sid or step.get("status") != "running":
                     return "Call begin_step for the current mission step before planning its UI action."
                 if step.get("ui_action"):
-                    previous_action = step.get("ui_action")
+                    previous_action = (
+                        step.get("ui_action") if isinstance(step.get("ui_action"), dict) else {}
+                    )
                     attempt = step.get("ui_last_attempt")
+                    try:
+                        replan_count = max(0, int(step.get("ui_replan_count", 0) or 0))
+                    except (TypeError, ValueError, OverflowError):
+                        replan_count = 1
                     if _has_valid_persisted_tool_evidence(step):
                         result = (
                             "[MISSION_UI_RESULT_VERIFIED] The planned UI tool returned a persisted "
@@ -510,7 +516,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                         isinstance(attempt, dict)
                         and attempt.get("status") == "failed"
                         and attempt.get("tool_name") == previous_action.get("tool")
-                        and int(step.get("ui_replan_count", 0) or 0) < 1
+                        and replan_count < 1
                     ):
                         previous_result = {
                             "status": "failed",
@@ -805,7 +811,9 @@ PLUGIN = {
         "privacy-filtered local UI snapshot and returns at most one exact existing verified action; "
         "it never executes that action. Execute only that returned tool and parameters once, then "
         "complete_step only with real verification evidence. A UI plan is persisted before hand-off; "
-        "after interruption never reissue it—inspect read-only and complete or block. If the planner "
+        "after interruption never reissue it—inspect read-only and complete or block. After a definite " 
+        "status=failed from the exact planned tool, one fresh-snapshot alternative may be planned; " 
+        "unverified, pending or ambiguous outcomes never trigger retries or replanning. If the planner "
         "asks for clarification or blocks, do not guess. High-impact actions still require the real "
         "HUD confirmation. Never mark a step done without tool evidence. Stop at "
         "[CONFIRMATION_PENDING] and ask for the real HUD confirmation. The live assistant executes "
