@@ -629,5 +629,38 @@ class MissionControlReliabilityTests(unittest.TestCase):
         )
         replan.assert_not_called()
 
+
+    def test_visual_ui_plan_without_exact_window_ids_is_blocked(self):
+        snapshot = {
+            "handle": 7,
+            "process_id": 55,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [],
+            "clickables": [],
+        }
+        proposed = {
+            "status": "planned",
+            "steps": [{
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                },
+                "risk": "low",
+                "requires_confirmation": False,
+            }],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=proposed):
+            result = mission_control._fresh_ui_plan(
+                'Click the gear icon and verify "Privacy panel"',
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("unsupported UI action shape", result["reason"])
+        self.assertEqual(result["steps"], [])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
