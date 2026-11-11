@@ -141,7 +141,7 @@ def _load_google_modules():
     except ImportError as exc:
         raise RuntimeError(
             "Google Workspace libraries are missing. Run INSTALL_MARK.bat or "
-            "install google-api-python-client and google-auth-oauthlib."
+            "install google-api-python-client, google-auth-oauthlib and google-auth-httplib2."
         ) from exc
     return Request, Credentials, InstalledAppFlow, build
 
