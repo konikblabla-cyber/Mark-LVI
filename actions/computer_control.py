@@ -570,7 +570,10 @@ def _screen_find(
 
         match = re.search(r"(\d+)\s*,\s*(\d+)", text)
         if match:
-            return int(match.group(1)), int(match.group(2))
+            return (
+                int(match.group(1)) + offset_x,
+                int(match.group(2)) + offset_y,
+            )
 
     except Exception as e:
         _safe_print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
