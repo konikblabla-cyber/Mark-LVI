@@ -717,6 +717,12 @@ def _screen_click_verified_execute(
             "computer_control",
             f"the original target window changed during visual analysis ({type(exc).__name__}); no click was sent",
         )
+    if current.get("bounds") != bounds:
+        return outcome.unverified(
+            "computer_control",
+            "the target window moved or resized during visual analysis; stale coordinates were discarded and no click was sent",
+            operation="screen_click_verified", target=target,
+        )
     if ui._has_exact_expected_text(current.get("records", []), expected):
         return outcome.unverified(
             "computer_control",
@@ -731,6 +737,31 @@ def _screen_click_verified_execute(
         return outcome.failed(
             "computer_control",
             "the exact planned window changed before the click; no input was sent",
+            target=target,
+        )
+    try:
+        final_snapshot = ui._snapshot(int(handle), int(process_id))
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"the target window could not be rechecked immediately before clicking ({type(exc).__name__}); no click was sent",
+        )
+    if final_snapshot.get("bounds") != bounds:
+        return outcome.unverified(
+            "computer_control",
+            "the target window moved or resized before the click; stale coordinates were discarded and no click was sent",
+            operation="screen_click_verified", target=target,
+        )
+    if ui._has_exact_expected_text(final_snapshot.get("records", []), expected):
+        return outcome.unverified(
+            "computer_control",
+            "the exact expected result appeared before the click; no click was sent",
+            operation="screen_click_verified", expected=expected,
+        )
+    if not _pinned_window_is_foreground(handle, process_id):
+        return outcome.failed(
+            "computer_control",
+            "the exact planned window is no longer foreground; no click was sent",
             target=target,
         )
     click_result = _click(x=x, y=y)
