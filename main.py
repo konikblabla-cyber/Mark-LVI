@@ -1591,7 +1591,7 @@ class JarvisLive:
             out["realtime_input_config"] = types.RealtimeInputConfig(
                 automatic_activity_detection=detect)
 
-        # Screenshots and camera frames are tokenised at this resolution and then
+        # Screen captures are tokenised at this resolution and then
         # stay in the session's context. 'medium' keeps on-screen text legible
         # for a fraction of a full-resolution frame.
         res = get_media_resolution()
