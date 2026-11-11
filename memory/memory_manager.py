@@ -629,7 +629,17 @@ def record_verified_mission(mission: dict) -> bool:
     steps = mission.get("steps")
     if not mission_id or not isinstance(steps, list) or not steps:
         return False
-    if any(not isinstance(step, dict) or step.get("status") != "done" for step in steps):
+    if any(
+        not isinstance(step, dict)
+        or step.get("status") != "done"
+        or not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]{0,79}",
+            str(step.get("verified_tool") or ""),
+        )
+        for step in steps
+    ):
+        # A completed-looking row without the app-recorded tool receipt is
+        # not a learning example.
         return False
 
     step_records = []
