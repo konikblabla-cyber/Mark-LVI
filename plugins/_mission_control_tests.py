@@ -555,6 +555,8 @@ class MissionControlReliabilityTests(unittest.TestCase):
                     "description": "gear icon",
                     "expected_result": "Privacy panel",
                     "target_app": "settings.exe",
+                    "target_window_handle": 7,
+                    "target_process_id": 55,
                 },
                 "risk": "low",
                 "requires_confirmation": False,
@@ -601,6 +603,8 @@ class MissionControlReliabilityTests(unittest.TestCase):
                     "description": "gear icon",
                     "expected_result": "Privacy panel",
                     "target_app": "settings.exe",
+                    "target_window_handle": 7,
+                    "target_process_id": 55,
                 },
             },
         }
@@ -621,7 +625,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertEqual(
             result["reason"],
-            "the foreground application changed; visual replan refused",
+            "the original target window or process changed; visual replan refused",
         )
         replan.assert_not_called()
 
