@@ -25,6 +25,7 @@ from core.dashboard_auth_policy import (
 from core.dashboard_upload_policy import (
     MAX_UPLOAD_FILES, MAX_UPLOAD_TOTAL_BYTES, MAX_UPLOAD_TOTAL_MB, upload_usage,
 )
+from core.audio_recovery import LIVE_AUDIO_QUEUE_SIZE, offer_latest_audio
 
 _DEPS_OK = False
 try:
@@ -739,7 +740,7 @@ class DashboardServer:
         self._pending_keys: dict[str, float] = {}
         self._throttle                    = _Throttle()
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
-        self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
+        self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=LIVE_AUDIO_QUEUE_SIZE)
         self._uploads_dir                 = UPLOADS_DIR
         self._upload_lock                 = asyncio.Lock()
         # Set by serve() when the port could not be taken, so the UI can say
@@ -1068,12 +1069,10 @@ class DashboardServer:
             try:
                 while True:
                     data = await websocket.receive_bytes()
-                    try:
-                        self._phone_audio_queue.put_nowait(
-                            {"data": data, "mime_type": "audio/pcm"}
-                        )
-                    except asyncio.QueueFull:
-                        pass  # drop frame rather than block
+                    offer_latest_audio(
+                        self._phone_audio_queue,
+                        {"data": data, "mime_type": "audio/pcm"},
+                    )
             except WebSocketDisconnect:
                 pass
             finally:

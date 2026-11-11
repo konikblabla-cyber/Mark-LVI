@@ -87,7 +87,9 @@ from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
-from core.audio_recovery import callback_is_stalled, stream_is_active
+from core.audio_recovery import (
+    callback_is_stalled, stream_is_active, offer_latest_audio, LIVE_AUDIO_QUEUE_SIZE,
+)
 from core.focus_context import FocusContextTracker
 from core.project_context import (
     inspect_project_folder, format_project_context, remember_project_snapshot,
@@ -133,7 +135,8 @@ LIVE_MODEL          = PRIMARY_LIVE_MODEL
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 
 RECEIVE_SAMPLE_RATE = 24000
-CHUNK_SIZE          = 1024
+CHUNK_SIZE          = 1024   # speaker callback: ~42.7 ms at 24 kHz
+INPUT_AUDIO_BLOCK_SIZE = 512  # microphone callback: 32 ms at 16 kHz
 
 # RMS below which 16-bit PCM is treated as room silence; above _LEVEL_FULL it
 # reads as a full-height waveform. Tuned so ordinary speech lands mid-range and
@@ -1801,6 +1804,12 @@ class JarvisLive:
         loop = asyncio.get_event_loop()
         last_input_callback = [time.monotonic()]
 
+        def _enqueue_latest_audio(message):
+            # Runs on the asyncio loop, not the real-time PortAudio callback.
+            q = self.out_queue
+            if q is not None:
+                offer_latest_audio(q, message)
+
         def callback(indata, frames, time_info, status):
             # PortAudio can leave a stream object present after a USB endpoint
             # disappears. A callback heartbeat lets the owner task detect that
@@ -1905,10 +1914,14 @@ class JarvisLive:
             
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                try:
+                    loop.call_soon_threadsafe(
+                        _enqueue_latest_audio,
+                        {"data": data, "mime_type": "audio/pcm"},
+                    )
+                except RuntimeError:
+                    # Session shutdown raced the last PortAudio callback.
+                    pass
                 # Feed the live mic level to the HUD so the waveform reacts to
                 # the user's actual voice while listening. Purely cosmetic — any
                 # failure here must never disturb the mic.
@@ -1923,7 +1936,7 @@ class JarvisLive:
                     samplerate=SEND_SAMPLE_RATE,
                     channels=CHANNELS,
                     dtype="int16",
-                    blocksize=CHUNK_SIZE,
+                    blocksize=INPUT_AUDIO_BLOCK_SIZE,
                     device=dev,
                     callback=callback,
                 )
@@ -2749,10 +2762,7 @@ class JarvisLive:
             with self._speaking_lock:
                 speaking = self._is_speaking
             if not speaking and not self.ui.muted:
-                try:
-                    self.out_queue.put_nowait(chunk)
-                except asyncio.QueueFull:
-                    pass
+                offer_latest_audio(self.out_queue, chunk)
 
     def _on_phone_connected(self) -> None:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
@@ -2996,7 +3006,7 @@ class JarvisLive:
 
                     self.session          = session
                     self.audio_in_queue   = asyncio.Queue()
-                    self.out_queue        = asyncio.Queue(maxsize=200)
+                    self.out_queue        = asyncio.Queue(maxsize=LIVE_AUDIO_QUEUE_SIZE)
                     self._turn_done_event = asyncio.Event()
                     self._rx_deadline     = None
 

@@ -1,11 +1,31 @@
 """Offline tests for audio stream recovery decisions."""
+import asyncio
 import unittest
 from types import SimpleNamespace
 
-from core.audio_recovery import callback_is_stalled, stream_is_active
+from core.audio_recovery import (
+    LIVE_AUDIO_QUEUE_SIZE, callback_is_stalled, offer_latest_audio, stream_is_active,
+)
 
 
 class AudioRecoveryTests(unittest.TestCase):
+    def test_live_audio_queue_keeps_recent_frames_when_the_sender_falls_behind(self):
+        q = asyncio.Queue(maxsize=2)
+        self.assertTrue(offer_latest_audio(q, "first"))
+        self.assertTrue(offer_latest_audio(q, "second"))
+        self.assertTrue(offer_latest_audio(q, "latest"))
+        self.assertEqual(q.qsize(), 2)
+        self.assertEqual(q.get_nowait(), "second")
+        self.assertEqual(q.get_nowait(), "latest")
+
+    def test_live_audio_queue_capacity_is_short_enough_for_low_latency_streaming(self):
+        self.assertLessEqual(LIVE_AUDIO_QUEUE_SIZE, 16)
+        q = asyncio.Queue(maxsize=LIVE_AUDIO_QUEUE_SIZE)
+        for frame in range(LIVE_AUDIO_QUEUE_SIZE * 3):
+            self.assertTrue(offer_latest_audio(q, frame))
+        self.assertEqual(q.qsize(), LIVE_AUDIO_QUEUE_SIZE)
+        self.assertEqual(q.get_nowait(), LIVE_AUDIO_QUEUE_SIZE * 2)
+
     def test_missing_or_stopped_stream_is_unhealthy(self):
         self.assertFalse(stream_is_active(None))
         self.assertFalse(stream_is_active(SimpleNamespace(active=False)))
