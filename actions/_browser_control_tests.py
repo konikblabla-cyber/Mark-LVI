@@ -24,6 +24,7 @@ class FakeLocator:
         self.clicked = 0
         self.typed = []
         self.cleared = 0
+        self.on_click = None
 
     async def count(self):
         return self._count
@@ -39,6 +40,8 @@ class FakeLocator:
 
     async def click(self, **kwargs):
         self.clicked += 1
+        if self.on_click:
+            self.on_click()
 
     async def clear(self):
         self.cleared += 1
@@ -48,14 +51,16 @@ class FakeLocator:
 
 
 class FakePage:
-    def __init__(self, locator):
+    def __init__(self, locator, url="https://example.test/", postconditions=None):
         self._locator = locator
+        self.url = url
+        self._postconditions = postconditions or {}
 
     def locator(self, selector):
         return self._locator
 
     def get_by_text(self, text, **kwargs):
-        return self._locator
+        return self._postconditions.get(text, self._locator)
 
     def get_by_role(self, role, **kwargs):
         return self._locator
@@ -75,12 +80,71 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertIn("failed", result)
         self.assertEqual(locator.clicked, 0)
 
-    def test_click_uses_exact_unique_visible_enabled_locator(self):
+    def test_click_is_verified_only_after_exact_expected_text_appears(self):
         locator = FakeLocator()
-        session = SimpleNamespace(_get_page=lambda: _async_value(FakePage(locator)))
-        result = asyncio.run(browser._BrowserSession.click(session, text="Save"))
-        self.assertIn("done", result)
+        postcondition = FakeLocator()
+        page = FakePage(locator, postconditions={"Saved": postcondition})
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session, text="Save", expected_text="Saved"
+        ))
+        self.assertIn("status=done", result)
+        self.assertIn("verified=true", result)
         self.assertEqual(locator.clicked, 1)
+
+    def test_click_without_postcondition_is_unverified_even_if_dispatch_succeeds(self):
+        locator = FakeLocator()
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(session, text="Save"))
+        self.assertIn("status=unverified", result)
+        self.assertNotIn("status=done", result)
+        self.assertEqual(locator.clicked, 1)
+
+    def test_click_expected_text_timeout_is_unverified_not_failed_or_done(self):
+        target = FakeLocator()
+        missing = FakeLocator(count=0)
+        page = FakePage(target, postconditions={"Saved": missing})
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        with patch.object(browser, "_BROWSER_POSTCONDITION_TIMEOUT_MS", 20):
+            result = asyncio.run(browser._BrowserSession.click(
+                session, text="Save", expected_text="Saved"
+            ))
+        self.assertIn("status=unverified", result)
+        self.assertEqual(target.clicked, 1)
+
+    def test_click_verifies_exact_expected_url_after_navigation(self):
+        target = FakeLocator()
+        page = FakePage(target)
+        target.on_click = lambda: setattr(page, "url", "https://example.test/saved")
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session, text="Save", expected_url="https://example.test/saved"
+        ))
+        self.assertIn("status=done", result)
+        self.assertIn("verified=true", result)
+        self.assertEqual(target.clicked, 1)
+
+    def test_invalid_expected_url_is_rejected_before_click(self):
+        target = FakeLocator()
+        page = FakePage(target)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session, text="Save", expected_url="javascript:alert(1)"
+        ))
+        self.assertIn("status=failed", result)
+        self.assertEqual(target.clicked, 0)
+
+    def test_smart_click_requires_and_verifies_exact_postcondition(self):
+        target = FakeLocator()
+        postcondition = FakeLocator()
+        page = FakePage(target, postconditions={"Account": postcondition})
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.smart_click(
+            session, "Settings", expected_text="Account"
+        ))
+        self.assertIn("status=done", result)
+        self.assertEqual(target.clicked, 1)
 
     def test_type_text_blocks_password_without_reading_its_value(self):
         locator = FakeLocator(attrs={"type": "password", "name": "current-password"})
