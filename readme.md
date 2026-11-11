@@ -75,6 +75,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧾 Conversation History | Optional local text transcript archive with retention controls, secret-pattern redaction, search and HUD-confirmed deletion; audio and screenshots are never saved |
 | 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
 | 🔁 Mission Recovery | After a restart, JARVIS finds the oldest interrupted authorised mission and resumes through read-only recovery; it never blindly repeats the in-flight action |
+| 🧠 Verified Experience Memory | After an entire mission succeeds, JARVIS stores only privacy-filtered topic keywords and the verified tool sequence; similar future missions receive historical hints, never automatic proof or blind replay |
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
 | 🖱️ Verified UI Workflows | Run 2–8 exact clicks in one application, verify every visible result before continuing, stop on ambiguity and pause critical steps for HUD confirmation |
 | 🎯 Foreground-Aware Input | On Windows, read the active executable locally before sending mouse/keyboard input and verify the same target again before delayed clicks. macOS/Linux use their OS accessibility path without this Windows-only guard |
@@ -484,6 +485,8 @@ Storage and prompt budget are now separate problems:
 The part that is easy to get wrong: **a model cannot look something up if it doesn't know the thing exists.** So the prompt also carries an **index of the keys** it had no room for. Without that, "who is Ayşe?" gets "I don't know" while `ayse_sister` sits on disk unread. This index interleaves categories rather than sorting by recency — sorting like the core, a memory with forty preferences pushed the one entry the index existed for off the end.
 
 ⚙ → **🧠 MEMORY** shows every stored fact, when it was learned, and an ✕ to forget it. Everything stays in `memory/long_term.json` on your machine.
+
+Verified task experience is separate in `memory/experiences.json`. It stores only topic keywords, completion dates and verified tool names—not raw prompts, tool output, email addresses, credentials or file paths. To clear this history, close MARK and delete that file.
 
 ### ↩️ Undo — it can take back what it did
 
