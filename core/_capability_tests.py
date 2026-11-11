@@ -520,5 +520,44 @@ class UISequenceKeyboardStepTests(unittest.TestCase):
 
 
 
+class UISequenceFormStepTests(unittest.TestCase):
+    def test_validates_checkbox_radio_and_dropdown_steps(self):
+        from actions.ui_sequence import _validate_steps
+
+        steps, error = _validate_steps([
+            {"action": "set_checkbox_state", "checkbox_label": "Remember me", "checked": True},
+            {"action": "select_radio_option", "radio_label": "Dark mode"},
+            {"action": "select_dropdown_option", "combo_label": "Language", "option_label": "Polish"},
+        ])
+        self.assertEqual(error, "")
+        self.assertEqual(steps[0]["checked"], True)
+        self.assertEqual(steps[1]["radio_label"], "Dark mode")
+        self.assertEqual(steps[2]["option_label"], "Polish")
+
+    def test_rejects_sensitive_and_ambiguous_form_step_arguments(self):
+        from actions.ui_sequence import _validate_steps
+
+        invalid_sets = [
+            [
+                {"action": "set_checkbox_state", "checkbox_label": "Password", "checked": True},
+                {"action": "select_radio_option", "radio_label": "Dark mode"},
+            ],
+            [
+                {"action": "set_checkbox_state", "checkbox_label": "Remember me", "checked": "yes"},
+                {"action": "select_radio_option", "radio_label": "Dark mode"},
+            ],
+            [
+                {"action": "select_dropdown_option", "combo_label": "Language", "option_label": "Polish", "extra": "unexpected"},
+                {"action": "select_radio_option", "radio_label": "Dark mode"},
+            ],
+        ]
+        for invalid in invalid_sets:
+            steps, error = _validate_steps(invalid)
+            self.assertIsNone(steps)
+            self.assertTrue(error)
+
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
