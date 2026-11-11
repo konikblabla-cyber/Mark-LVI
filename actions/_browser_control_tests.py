@@ -472,7 +472,7 @@ class BrowserSequenceTests(unittest.TestCase):
         self.assertIn("expected_text or expected_url", error)
 
     def test_sequence_rejects_submission_and_destructive_steps_without_direct_authorization(self):
-        for target in ("Send", "Delete account", "Pay now"):
+        for target in ("Send", "Delete account", "Pay now", "Place order", "Złóż zamówienie"):
             with self.subTest(target=target):
                 result, error = browser._validate_browser_sequence_steps([
                     {"action": "go_to", "url": "https://example.test/"},
