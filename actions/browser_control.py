@@ -1375,14 +1375,25 @@ class _BrowserSession:
             if len(controls) >= 80:
                 break
 
-        if not controls:
+        bounded_controls = []
+        for entry in controls:
+            candidate = json.dumps(
+                {"visible_controls": bounded_controls + [entry]},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            if len(candidate) > 6_000:
+                break
+            bounded_controls.append(entry)
+
+        if not bounded_controls:
             summary = "No labelled, visible, non-sensitive interactive controls were found."
         else:
             summary = json.dumps(
-                {"visible_controls": controls},
+                {"visible_controls": bounded_controls},
                 ensure_ascii=False,
                 separators=(",", ":"),
-            )[:6_000]
+            )
         return outcome.untrusted("browser-controls", summary)
 
 
