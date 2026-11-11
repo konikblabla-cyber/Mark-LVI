@@ -1137,13 +1137,18 @@ class _BrowserSession:
 
 
     async def type_text(self, selector: str = None, text: str = "",
-                        clear_first: bool = False) -> str:
+                        clear_first: bool = False,
+                        wait_for_target: bool = False) -> str:
         if not isinstance(text, str) or not text:
             return outcome.failed("browser_control", "no text was supplied")
         page = await self._get_page()
         try:
             locator = page.locator(selector) if selector else page.locator(":focus")
-            if not await _locator_ready(locator):
+            ready = (
+                await _wait_for_locator_ready(locator)
+                if wait_for_target else await _locator_ready(locator)
+            )
+            if not ready:
                 return outcome.failed(
                     "browser_control",
                     "the input was missing, ambiguous, hidden or disabled",
@@ -1455,7 +1460,8 @@ class _BrowserSession:
 
 
     async def smart_type(self, description: str, text: str,
-                         clear_first: bool = False) -> str:
+                         clear_first: bool = False,
+                         wait_for_target: bool = False) -> str:
         if not isinstance(text, str) or not text:
             return outcome.failed("browser_control", "no text was supplied")
         page = await self._get_page()
@@ -1466,9 +1472,21 @@ class _BrowserSession:
             page.get_by_role("searchbox", name=description, exact=True),
             page.get_by_role("combobox", name=description, exact=True),
         ]
+        ready_deadline = (
+            asyncio.get_running_loop().time() + _LOCATOR_READY_TIMEOUT_SECONDS
+            if wait_for_target else None
+        )
         for locator in candidates:
             try:
-                if not await _locator_ready(locator):
+                if wait_for_target:
+                    remaining = max(
+                        0.0,
+                        float(ready_deadline) - asyncio.get_running_loop().time(),
+                    )
+                    ready = await _wait_for_locator_ready(locator, timeout=remaining)
+                else:
+                    ready = await _locator_ready(locator)
+                if not ready:
                     continue
                 if await _locator_is_sensitive(locator):
                     return outcome.failed(
@@ -1831,12 +1849,18 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
                 )
             elif action == "type":
                 result = session.run(
-                    session.type_text(step["selector"], step["text"], clear_first=False),
+                    session.type_text(
+                        step["selector"], step["text"],
+                        clear_first=False, wait_for_target=True,
+                    ),
                     timeout=timeout,
                 )
             else:
                 result = session.run(
-                    session.smart_type(step["description"], step["text"], clear_first=False),
+                    session.smart_type(
+                        step["description"], step["text"],
+                        clear_first=False, wait_for_target=True,
+                    ),
                     timeout=timeout,
                 )
         except concurrent.futures.TimeoutError:
