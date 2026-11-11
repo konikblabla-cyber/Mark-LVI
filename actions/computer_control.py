@@ -618,9 +618,6 @@ def _screen_click_verified_execute(
                 "computer_control", "the planned target window identity is invalid",
             )
 
-    blocked = _input_window_guard(target)
-    if blocked:
-        return blocked
     try:
         from actions import ui_interaction as ui
         if ui._is_sensitive_input_label(description) or ui._is_sensitive_input_label(expected):
@@ -628,12 +625,26 @@ def _screen_click_verified_execute(
                 "computer_control",
                 "visual targets or expected labels involving credentials, verification codes or payment data are not supported",
             )
-        before = ui._snapshot()
+        if expected_window_handle is not None:
+            # A real HUD confirmation may briefly make MARK the foreground
+            # window. Restore only the HWND/PID that the planner originally
+            # approved, then prove it became active before taking a screenshot.
+            before = ui.focus_window_identity(
+                expected_window_handle, expected_process_id,
+            )
+        else:
+            blocked = _input_window_guard(target)
+            if blocked:
+                return blocked
+            before = ui._snapshot()
     except Exception as exc:
         return outcome.failed(
             "computer_control",
             f"could not pin the target window for verification ({type(exc).__name__}); no click was sent",
         )
+    blocked = _input_window_guard(target)
+    if blocked:
+        return blocked
 
     handle = before.get("handle")
     process_id = before.get("process_id")
