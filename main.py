@@ -103,7 +103,7 @@ from core.live_session_policy import (
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     communication_context_unchanged, initial_communication_gate,
-    should_auto_wake, should_forward_microphone,
+    should_auto_wake, should_forward_microphone, communication_gate_state,
 )
 from core.desktop_context import get_desktop_context, should_run_proactive_checkin
 from core.viseme               import VisemeStream
@@ -614,6 +614,9 @@ class JarvisLive:
         # Fail closed until the first Windows audio-session probe confirms there is no call.
         self._communication_app_active = initial_communication_gate()
         self._communication_context_known = False
+        # Keep the mic gate closed briefly after WASAPI stops reporting a call;
+        # transient session-list gaps must not leak a fragment of conversation.
+        self._communication_last_active_at = None
         # Foreground categories stay local unless desktop awareness is opted in.
         self._focus_tracker = FocusContextTracker(stable_seconds=8.0)
         self._focus_context = None
@@ -851,6 +854,9 @@ class JarvisLive:
                 # sessions to keep privacy while a real call runs in background.
                 active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
                 active = is_communication_context(foreground_app, active_audio_apps)
+                gate_active, self._communication_last_active_at = communication_gate_state(
+                    active, self._communication_last_active_at, time.monotonic()
+                )
                 # The executable is already read locally for call privacy. A
                 # stable category provides broad context, never window contents.
                 focus_change = self._focus_tracker.observe(foreground_app, time.monotonic())
@@ -868,15 +874,15 @@ class JarvisLive:
                 continue
 
             if communication_context_unchanged(
-                    active, self._communication_app_active,
+                    gate_active, self._communication_app_active,
                     self._communication_context_known):
                 # This remains a local decision. Recent keyboard/mouse input can
                 # wake a sleeping JARVIS for a direct command, but never in a
                 # known communication context.
-                if (not active and self._wake_enabled and not self._awake
+                if (not gate_active and self._wake_enabled and not self._awake
                         and should_auto_wake(
                             context.get("idle_seconds") if isinstance(context, dict) else None,
-                            active,
+                            gate_active,
                         )):
                     self.wake(reason="desktop activity")
                 continue
@@ -886,14 +892,14 @@ class JarvisLive:
             # call gate open while a stale wake-word turn is still marked open.
             self._communication_turn_open = False
             self._communication_turn_deadline = 0.0
-            self._communication_app_active = active
+            self._communication_app_active = gate_active
             self._communication_context_known = True
-            if not active and self._wake_enabled and not self._awake:
+            if not gate_active and self._wake_enabled and not self._awake:
                 if should_auto_wake(
                         context.get("idle_seconds") if isinstance(context, dict) else None,
-                        active):
+                        gate_active):
                     self.wake(reason="desktop activity")
-            if active:
+            if gate_active:
                 if active_audio_apps is None and sys.platform == "win32":
                     self.ui.write_log(
                         "SYS: Windows audio-session detection is unavailable. "
