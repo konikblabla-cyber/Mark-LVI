@@ -66,7 +66,7 @@ from core import outcome
 from core.action_loader import strip_meta
 from actions.screen_processor  import _capture_camera, _capture_screen
 from actions.system_monitor    import SystemMonitor, get_system_status
-from actions.proactive         import ProactiveEngine
+from actions.proactive         import ProactiveEngine, can_deliver_proactive
 from actions.background_monitor import (
     add_monitor, remove_monitor, list_monitors, check_all as monitor_check_all,
 )
@@ -2747,7 +2747,7 @@ class JarvisLive:
                     self._phone_active, _desktop_ctx):
                 continue
 
-            self._proactive.mark_attempted()
+            proactive_session = self.session
 
             try:
                 memory       = await asyncio.to_thread(load_memory)
@@ -2771,7 +2771,23 @@ class JarvisLive:
                     focus_context = self._focus_context if _desktop_opt_in else None,
                     project_context = project_context,
                 )
-                await self.session.send_client_content(
+                with self._speaking_lock:
+                    speaking_now = self._is_speaking
+                if not can_deliver_proactive(
+                    session_available=(
+                        proactive_session is not None
+                        and self.session is proactive_session
+                    ),
+                    communication_active=self._communication_app_active,
+                    phone_active=self._phone_active,
+                    speaking=speaking_now,
+                    last_user_speech=self._last_user_speech,
+                    now=time.monotonic(),
+                    min_silence_secs=self._proactive.min_silence_secs,
+                ):
+                    continue
+                self._proactive.mark_attempted()
+                await proactive_session.send_client_content(
                     turns={"role": "user", "parts": [{"text": prompt}]},
                     turn_complete=True,
                 )
