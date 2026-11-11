@@ -22,7 +22,8 @@ class SmartHomeTests(unittest.TestCase):
             "access_token": "secret-token",
             "entities_json": (
                 '{"desk":"light.desk","ceiling":"light.living_room",'
-                '"plug":"switch.pc_plug","fan":"fan.office","climate":"climate.office"}'
+                '"plug":"switch.pc_plug","fan":"fan.office","climate":"climate.office",'
+                '"front_door":"lock.front_door","garage":"cover.garage_door","vacuum":"vacuum.robot"}'
             ),
         }
         self.cfg = patch.object(smart_home, "get_plugin_config", return_value=self.config)
@@ -37,6 +38,9 @@ class SmartHomeTests(unittest.TestCase):
         self.assertIn("plug (switch.pc_plug)", result)
         self.assertIn("fan (fan.office)", result)
         self.assertIn("climate (climate.office)", result)
+        self.assertIn("front_door (lock.front_door)", result)
+        self.assertIn("garage (cover.garage_door)", result)
+        self.assertIn("vacuum (vacuum.robot)", result)
         self.assertNotIn("secret-token", result)
 
     def test_turn_on_light_posts_and_verifies_brightness(self):
@@ -99,9 +103,93 @@ class SmartHomeTests(unittest.TestCase):
         self.assertIn("not configured", unknown)
         self.assertFalse(post.called)
 
-        self.config["entities_json"] = '{"front_door":"lock.front_door"}'
+        self.config["entities_json"] = '{"alarm":"alarm_control_panel.home_alarm"}'
         result = smart_home.run({"action": "list"})
         self.assertIn("entity ID", result)
+
+    def test_unlock_requires_hud_confirmation_and_verifies_state(self):
+        with patch.object(smart_home.confirm, "request",
+                          return_value="[CONFIRMATION_PENDING]") as gate, \
+             patch.object(smart_home.requests, "post", return_value=FakeResponse(state="unlocked")) as post, \
+             patch.object(smart_home.requests, "get", return_value=FakeResponse(state="unlocked")) as get:
+            result = smart_home.run({
+                "action": "set", "device": "front_door", "state": "unlock",
+            })
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            post.assert_not_called()
+            self.assertIn("front_door", gate.call_args.kwargs["title"])
+            self.assertIn("unlock", gate.call_args.kwargs["detail"])
+            gate.call_args.kwargs["run"]()
+            post.assert_called_once_with(
+                "https://home.example.test/api/services/lock/unlock",
+                headers={
+                    "Authorization": "Bearer secret-token",
+                    "Content-Type": "application/json",
+                },
+                json={"entity_id": "lock.front_door"},
+                timeout=(3.0, 5.0),
+                allow_redirects=False,
+            )
+            get.assert_called_once()
+        self.assertEqual(gate.call_args.kwargs["key"], "smart_home_lock")
+
+    def test_lock_requires_hud_confirmation_before_locking(self):
+        with patch.object(smart_home.confirm, "request",
+                          return_value="[CONFIRMATION_PENDING]") as gate, \
+             patch.object(smart_home.requests, "post", return_value=FakeResponse(state="locked")) as post, \
+             patch.object(smart_home.requests, "get", return_value=FakeResponse(state="locked")):
+            result = smart_home.run({
+                "action": "set", "device": "front_door", "state": "lock",
+            })
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            post.assert_not_called()
+            self.assertIn("lock — front_door", gate.call_args.kwargs["title"])
+            gate.call_args.kwargs["run"]()
+            post.assert_called_once()
+            self.assertIn("/api/services/lock/lock", post.call_args.args[0])
+
+    def test_cover_open_requires_hud_confirmation_and_verifies_state(self):
+        with patch.object(smart_home.confirm, "request",
+                          return_value="[CONFIRMATION_PENDING]") as gate, \
+             patch.object(smart_home.requests, "post", return_value=FakeResponse(state="open")) as post, \
+             patch.object(smart_home.requests, "get", return_value=FakeResponse(state="open")):
+            result = smart_home.run({
+                "action": "set", "device": "garage", "state": "open",
+            })
+            self.assertEqual(result, "[CONFIRMATION_PENDING]")
+            post.assert_not_called()
+            self.assertIn("garage", gate.call_args.kwargs["detail"])
+            gate.call_args.kwargs["run"]()
+            post.assert_called_once()
+            self.assertEqual(
+                post.call_args.args[0],
+                "https://home.example.test/api/services/cover/open_cover",
+            )
+        self.assertEqual(gate.call_args.kwargs["key"], "smart_home_cover")
+
+    def test_vacuum_start_is_sent_to_allowlisted_entity_and_verified(self):
+        with patch.object(smart_home.requests, "post", return_value=FakeResponse(state="cleaning")) as post, \
+             patch.object(smart_home.requests, "get", return_value=FakeResponse(state="cleaning")):
+            result = smart_home.run({
+                "action": "set", "device": "vacuum", "state": "start",
+            })
+        self.assertEqual(result, "vacuum is now cleaning.")
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://home.example.test/api/services/vacuum/start",
+        )
+        self.assertEqual(post.call_args.kwargs["json"], {"entity_id": "vacuum.robot"})
+
+    def test_security_sensitive_home_action_never_runs_without_confirm_ui(self):
+        with patch.object(smart_home.confirm, "request",
+                          return_value="The interface is not available.") as gate, \
+             patch.object(smart_home.requests, "post") as post:
+            result = smart_home.run({
+                "action": "set", "device": "front_door", "state": "unlock",
+            })
+        gate.assert_called_once()
+        post.assert_not_called()
+        self.assertIn("interface is not available", result)
 
     def test_invalid_brightness_percentage_and_temperature_are_rejected(self):
         cases = [
