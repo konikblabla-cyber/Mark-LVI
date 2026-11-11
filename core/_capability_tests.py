@@ -507,7 +507,7 @@ class UISequenceKeyboardStepTests(unittest.TestCase):
             {"action": "press_keys", "keys": "Ctrl+S", "expected_result": "Saved"},
             {"action": "click", "button_label": "Done", "expected_result": "Complete"},
         ])
-        self.assertIsNone(error)
+        self.assertEqual(error, "")
         self.assertEqual(valid[0]["keys"], "^s")
         self.assertEqual(valid[0]["expected_result"], "Saved")
 
