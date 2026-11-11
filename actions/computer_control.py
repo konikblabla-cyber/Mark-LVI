@@ -496,7 +496,27 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
     )
 
 
-def _screen_find(description: str, target_app: str = "") -> tuple[int, int] | None:
+def _visible_window_region(bounds, screen_size) -> tuple[int, int, int, int] | None:
+    """Return the part of a target window visible on the controllable primary screen."""
+    try:
+        left, top, right, bottom = (int(value) for value in bounds)
+        screen_width, screen_height = (int(value) for value in screen_size)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if screen_width <= 0 or screen_height <= 0:
+        return None
+    x0, y0 = max(0, left), max(0, top)
+    x1, y1 = min(screen_width, right), min(screen_height, bottom)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1 - x0, y1 - y0
+
+
+def _screen_find(
+    description: str,
+    target_app: str = "",
+    window_bounds=None,
+) -> tuple[int, int] | None:
     api_key = _get_api_key()
     if not api_key:
         _safe_print("[ComputerControl] ⚠️ No API key for screen_find")
@@ -507,18 +527,32 @@ def _screen_find(description: str, target_app: str = "") -> tuple[int, int] | No
         from google.genai import types as gtypes
 
         _require_pyautogui()
-        w, h  = pyautogui.size()
-        img   = pyautogui.screenshot()
-        buf   = io.BytesIO()
+        screen_width, screen_height = pyautogui.size()
+        offset_x = offset_y = 0
+        if window_bounds is not None:
+            region = _visible_window_region(
+                window_bounds, (screen_width, screen_height),
+            )
+            if region is None:
+                return None
+            offset_x, offset_y, capture_width, capture_height = region
+            img = pyautogui.screenshot(region=region)
+            capture_scope = "a crop of the target application window"
+        else:
+            capture_width, capture_height = screen_width, screen_height
+            img = pyautogui.screenshot()
+            capture_scope = "the full screen"
+
+        buf = io.BytesIO()
         img.save(buf, format="PNG")
         image_bytes = buf.getvalue()
 
         prompt = (
-            f"This is a screenshot of a {w}×{h} pixel screen. "
+            f"This image is {capture_scope}, {capture_width}×{capture_height} pixels. "
             f"Locate the UI element described as: '{str(description)[:200]}'. "
             + (f"Only search inside the foreground application {str(target_app)[:100]}. "
                if target_app else "")
-            + "Reply with ONLY the center coordinates as: x,y "
+            + "Reply with ONLY the center coordinates as: x,y relative to this image. "
             + "If the element is not visible, reply: NOT_FOUND"
         )
 
@@ -593,7 +627,7 @@ def _screen_click_verified_execute(
 
     # The screenshot locator proposes a point; the app process/window identity
     # is checked again before any input reaches the desktop.
-    coordinates = _screen_find(description, target)
+    coordinates = _screen_find(description, target, before.get("bounds"))
     if coordinates is None:
         return outcome.failed(
             "computer_control", "the requested visual control could not be located",
