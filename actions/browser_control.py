@@ -100,6 +100,43 @@ async def _locator_ready(locator) -> bool:
         return False
 
 
+async def _read_field_value_locally(locator):
+    """Read a non-sensitive field value only inside this process for comparison."""
+    try:
+        return str(await locator.input_value())
+    except Exception:
+        try:
+            value = await locator.text_content()
+            return str(value) if value is not None else None
+        except Exception:
+            return None
+
+
+async def _type_and_verify(locator, text: str, clear_first: bool) -> str:
+    """Type only into the chosen field and verify the resulting value locally."""
+    before = await _read_field_value_locally(locator)
+    if clear_first:
+        await locator.clear()
+    await locator.type(text, delay=50)
+    after = await _read_field_value_locally(locator)
+    if after is None:
+        return outcome.unverified(
+            "browser_control",
+            "text was entered, but the field does not expose a safe local value for verification",
+            typed=True,
+        )
+    expected = text if clear_first else (
+        before + text if before is not None else None
+    )
+    if expected is not None and after == expected:
+        return outcome.done("browser_control", typed=True, verified=True)
+    return outcome.unverified(
+        "browser_control",
+        "text entry was attempted, but the resulting field value did not match the requested text",
+        typed=True,
+    )
+
+
 async def _locator_is_sensitive(locator) -> bool:
     """Inspect field metadata only; never read or return the field's value."""
     descriptors = []
@@ -1014,12 +1051,13 @@ class _BrowserSession:
                     "browser_control",
                     "sensitive fields (passwords, PINs, one-time codes and payment data) are blocked",
                 )
-            if clear_first:
-                await locator.clear()
-            await locator.type(text, delay=50)
-            return outcome.done("browser_control", typed=True, verified=True)
-        except Exception as e:
-            return f"Type error: {e}"
+            return await _type_and_verify(locator, str(text or ""), bool(clear_first))
+        except Exception as exc:
+            return outcome.unverified(
+                "browser_control",
+                f"text may have been entered but field verification failed ({type(exc).__name__})",
+                typed=True,
+            )
 
 
     async def scroll(self, direction: str = "down", amount: int = 500) -> str:
@@ -1234,12 +1272,13 @@ class _BrowserSession:
                         "browser_control",
                         "sensitive fields (passwords, PINs, one-time codes and payment data) are blocked",
                     )
-                if clear_first:
-                    await locator.clear()
-                await locator.type(text, delay=50)
-                return outcome.done("browser_control", typed=True, verified=True)
-            except Exception:
-                continue
+                return await _type_and_verify(locator, str(text or ""), bool(clear_first))
+            except Exception as exc:
+                return outcome.unverified(
+                    "browser_control",
+                    f"text may have been entered but field verification failed ({type(exc).__name__})",
+                    typed=True,
+                )
         return outcome.failed(
             "browser_control",
             "no single visible, enabled and non-sensitive input matched",
