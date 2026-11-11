@@ -34,7 +34,16 @@ def blocking_tool_declarations(declarations):
     return result
 
 
-def supports_live_thinking_config(model_name: str) -> bool:
-    """The standard Gemini 3.8 Live endpoint rejects a thinking_config field."""
+def supports_legacy_thinking_budget(model_name: str) -> bool:
+    """Whether MARK's legacy thinking_budget=-1 setting is valid for this model.
+
+    Gemini 3.8's standard Live endpoint omits thinking config entirely. Its
+    Extended Thinking endpoint uses thinking_level=low|medium|high and has a
+    different asynchronous interaction lifecycle; never pass the legacy
+    thinking_budget field to either 3.8 endpoint.
+    """
     name = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
-    return name != "gemini-3.8-live"
+    return name not in {
+        "gemini-3.8-live",
+        "gemini-3.8-live-extended-thinking",
+    }
