@@ -444,5 +444,119 @@ async def _async_value(value):
     return value
 
 
+
+class BrowserSequenceTests(unittest.TestCase):
+    def test_sequence_validation_accepts_only_bounded_verified_steps(self):
+        steps, error = browser._validate_browser_sequence_steps([
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Open", "expected_text": "Workspace"},
+            {"action": "smart_type", "description": "Search", "text": "JARVIS"},
+        ])
+        self.assertEqual(error, "")
+        self.assertEqual(len(steps), 3)
+
+    def test_sequence_requires_two_to_eight_steps(self):
+        for steps in ([], [{"action": "go_to", "url": "https://example.test/"}],
+                      [{"action": "go_to", "url": "https://example.test/"}] * 9):
+            with self.subTest(count=len(steps)):
+                result, error = browser._validate_browser_sequence_steps(steps)
+                self.assertIsNone(result)
+                self.assertIn("2 to 8", error)
+
+    def test_sequence_click_requires_exact_postcondition(self):
+        result, error = browser._validate_browser_sequence_steps([
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Open"},
+        ])
+        self.assertIsNone(result)
+        self.assertIn("expected_text or expected_url", error)
+
+    def test_sequence_rejects_submission_and_destructive_steps_without_direct_authorization(self):
+        for target in ("Send", "Delete account", "Pay now"):
+            with self.subTest(target=target):
+                result, error = browser._validate_browser_sequence_steps([
+                    {"action": "go_to", "url": "https://example.test/"},
+                    {"action": "click", "text": target, "expected_text": "Done"},
+                ])
+                self.assertIsNone(result)
+                self.assertIn("separate browser action", error)
+
+    def test_sequence_allows_an_explicitly_requested_external_target(self):
+        result, error = browser._validate_browser_sequence_steps([
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Send", "expected_text": "Message sent"},
+        ], {"user_request": "click Send", "expires_at": browser.time.monotonic() + 30})
+        self.assertEqual(error, "")
+        self.assertEqual(len(result), 2)
+
+    def test_sequence_rejects_sensitive_fields_and_clear_first(self):
+        for step in (
+            {"action": "type", "selector": "input[name=password]", "text": "secret"},
+            {"action": "type", "selector": "#name", "text": "Mark", "clear_first": True},
+        ):
+            result, error = browser._validate_browser_sequence_steps([
+                {"action": "go_to", "url": "https://example.test/"},
+                step,
+            ])
+            self.assertIsNone(result)
+            self.assertNotEqual(error, "")
+
+    def test_sequence_rejects_unverified_step_and_stops_later_steps(self):
+        executed = []
+
+        class FakeSession:
+            def run(self, coroutine, timeout=60):
+                return asyncio.run(coroutine)
+
+            async def go_to(self, url):
+                executed.append(("go_to", url))
+                return browser.outcome.done("browser_control", opened=url, verified=True)
+
+            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+                executed.append(("click", text or selector))
+                return browser.outcome.unverified("browser_control", "expected text missing")
+
+            async def type_text(self, selector=None, text="", clear_first=False):
+                executed.append(("type", selector))
+                return browser.outcome.done("browser_control", typed=True, verified=True)
+
+        steps = [
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Open", "expected_text": "Workspace"},
+            {"action": "type", "selector": "#search", "text": "do not run"},
+        ]
+        with patch.object(browser._registry, "get", return_value=FakeSession()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""):
+            result = browser._run_browser_sequence({"steps": steps}, None)
+        self.assertIn("status=unverified", result)
+        self.assertEqual([item[0] for item in executed], ["go_to", "click"])
+
+    def test_sequence_reports_done_only_after_every_step_verified(self):
+        executed = []
+
+        class FakeSession:
+            def run(self, coroutine, timeout=60):
+                return asyncio.run(coroutine)
+
+            async def go_to(self, url):
+                executed.append("go_to")
+                return browser.outcome.done("browser_control", opened=url, verified=True)
+
+            async def click(self, selector=None, text=None, expected_text="", expected_url=""):
+                executed.append("click")
+                return browser.outcome.done("browser_control", clicked=True, verified=True)
+
+        steps = [
+            {"action": "go_to", "url": "https://example.test/"},
+            {"action": "click", "text": "Open", "expected_text": "Workspace"},
+        ]
+        with patch.object(browser._registry, "get", return_value=FakeSession()), \
+             patch.object(browser._registry, "pop_native_url", return_value=""):
+            result = browser._run_browser_sequence({"steps": steps}, None)
+        self.assertIn("status=done", result)
+        self.assertIn("verified=true", result)
+        self.assertEqual(executed, ["go_to", "click"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
