@@ -1378,73 +1378,6 @@ class _DropCanvas(QWidget):
             z.mousePressEvent(e)
 
 
-class _CameraPreview(QWidget):
-    """Floating overlay that briefly shows what the camera captured."""
-
-    _W, _H = 244, 188
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(f"""
-            _CameraPreview {{
-                background: rgba(0, 6, 10, 242);
-                border: 1px solid {C.PRI};
-                border-radius: 6px;
-            }}
-        """)
-        self.setFixedWidth(self._W)
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(6, 5, 6, 6)
-        lay.setSpacing(4)
-
-        hdr = QHBoxLayout()
-        title = QLabel("◈  VISUAL INPUT")
-        title.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        hdr.addWidget(title)
-        hdr.addStretch()
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(16, 16)
-        close_btn.setFont(QFont("Courier New", 8))
-        close_btn.setStyleSheet(
-            f"color: {C.TEXT_DIM}; background: transparent; border: none;"
-        )
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self.hide)
-        hdr.addWidget(close_btn)
-        lay.addLayout(hdr)
-
-        self._img_lbl = QLabel()
-        self._img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img_lbl.setStyleSheet("background: transparent;")
-        lay.addWidget(self._img_lbl)
-
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.hide)
-
-        self.hide()
-
-    def show_frame(self, img_bytes: bytes) -> None:
-        px = QPixmap()
-        px.loadFromData(img_bytes)
-        if not px.isNull():
-            max_w = self._W - 12
-            scaled = px.scaled(
-                max_w, 160,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._img_lbl.setPixmap(scaled)
-            self._img_lbl.setFixedSize(scaled.width(), scaled.height())
-            self.adjustSize()
-        self.show()
-        self.raise_()
-        self._timer.start(6_000)   # auto-dismiss after 6 s
-
-
 class SetupOverlay(QWidget):
     done = pyqtSignal(str, str)
 
@@ -4518,9 +4451,6 @@ class MainWindow(QMainWindow):
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
     _codejob_sig    = pyqtSignal(object)     # dev_agent job state — live coding panel
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
-    _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
-    _cam_stream_sig = pyqtSignal(bool)       # True=start live stream, False=stop
-    _cam_frame_sig  = pyqtSignal(bytes)      # live camera frame → HUD area
     _video_open_sig  = pyqtSignal(str, str, bool, str)  # video, title, muted, audio
     _wake_btns_sig   = pyqtSignal()          # wake state resolved off-thread
     _video_close_sig = pyqtSignal()
@@ -4599,46 +4529,7 @@ class MainWindow(QMainWindow):
         self._content_panel = self._build_content_panel()
         self._quiz_panel = self._build_quiz_panel()
 
-        # Live camera container — replaces HUD when camera stream is active
-        _cam_cont = QWidget()
-        _cam_cont.setStyleSheet("background: #000308;")
-        _cam_v = QVBoxLayout(_cam_cont)
-        _cam_v.setContentsMargins(0, 0, 0, 0)
-        _cam_v.setSpacing(0)
-        _cam_hdr = QHBoxLayout()
-        _cam_hdr.setContentsMargins(8, 5, 8, 5)
-        _cam_title = QLabel("◈  CAMERA FEED")
-        _cam_title.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        _cam_title.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        _cam_hdr.addWidget(_cam_title)
-        _cam_hdr.addStretch()
-        _cam_x = QPushButton("✕  CLOSE")
-        _cam_x.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        _cam_x.setCursor(Qt.CursorShape.PointingHandCursor)
-        _cam_x.setStyleSheet(f"""
-            QPushButton {{
-                color: {C.TEXT_DIM}; background: transparent;
-                border: none; padding: 2px 6px;
-            }}
-            QPushButton:hover {{ color: {C.PRI}; }}
-        """)
-        _cam_x.clicked.connect(self.stop_camera_stream)
-        _cam_hdr.addWidget(_cam_x)
-        _cam_v.addLayout(_cam_hdr)
-        self._cam_live_lbl = QLabel()
-        self._cam_live_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._cam_live_lbl.setStyleSheet("background: transparent;")
-        self._cam_live_lbl.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        _cam_v.addWidget(self._cam_live_lbl, stretch=1)
-
         # ── Video surface ────────────────────────────────────────────────
-        # Built exactly like the camera page above and stacked beside it,
-        # because it is the same idea: something takes the centre of the HUD
-        # for a while and then gives it back. Sharing the stack rather than
-        # inventing a second mechanism means the avatar, the camera and a video
-        # can never be on screen at once.
         self._video_split = False        # is the sound a separate stream?
         self._video_auto_muted = False   # did JARVIS close the mic, or the user?
         # A plain flag rather than reading the widget. video_is_playing() is
@@ -4750,11 +4641,9 @@ class MainWindow(QMainWindow):
             _miss.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
             _vid_v.addWidget(_miss, stretch=1)
 
-        # Stack: 0 = animated HUD, 1 = live camera, 2 = video
-        self._hud_cam_stack = QStackedWidget()
-        self._hud_cam_stack.addWidget(self.hud)
-        self._hud_cam_stack.addWidget(_cam_cont)
-        self._hud_cam_stack.addWidget(self._video_cont)
+        self._hud_stack = QStackedWidget()
+        self._hud_stack.addWidget(self.hud)
+        self._hud_stack.addWidget(self._video_cont)
 
         self._center_split = QSplitter(Qt.Orientation.Vertical)
         self._center_split.setStyleSheet(f"""
@@ -4766,7 +4655,7 @@ class MainWindow(QMainWindow):
                 background: {C.PRI_DIM};
             }}
         """)
-        self._center_split.addWidget(self._hud_cam_stack)
+        self._center_split.addWidget(self._hud_stack)
         self._center_split.addWidget(self._content_panel)
         self._center_split.addWidget(self._quiz_panel)
         self._center_split.setStretchFactor(0, 3)
@@ -4804,11 +4693,8 @@ class MainWindow(QMainWindow):
         self._content_sig.connect(self._show_content)
         self._codejob_sig.connect(self._show_code_job)
         self._reconfig_sig.connect(self._show_setup)
-        self._camera_sig.connect(self._show_camera_frame)
         self._confirm_sig.connect(self._show_confirm_banner)
         self._confirm_hide_sig.connect(self._hide_confirm_banner)
-        self._cam_stream_sig.connect(self._on_cam_stream)
-        self._cam_frame_sig.connect(self._on_cam_frame)
         self._wake_btns_sig.connect(self._refresh_wake_btns)
         self._video_open_sig.connect(self._on_video_open)
         self._video_close_sig.connect(self._on_video_close)
@@ -4818,10 +4704,6 @@ class MainWindow(QMainWindow):
         self._quiz_sig.connect(self._show_quiz)
         self._quiz_hide_sig.connect(self._hide_quiz)
         self._review_sig.connect(self._show_review)
-        self._cam_stop = threading.Event()
-
-        # Camera preview overlay (child of central widget, positioned in resizeEvent)
-        self._cam_preview = _CameraPreview(self.centralWidget())
 
         # Clipboard panel (child of central widget, bottom-center)
         self._clipboard_panel = ClipboardPanel(self.centralWidget())
@@ -4840,81 +4722,6 @@ class MainWindow(QMainWindow):
         sc_intr = QShortcut(QKeySequence("Escape"), self)
         sc_intr.activated.connect(self._do_interrupt)
 
-    def _show_camera_frame(self, img_bytes: bytes):
-        """Slot — display camera preview overlay (main thread)."""
-        self._cam_preview.show_frame(img_bytes)
-        cw = self.centralWidget()
-        pw = _CameraPreview._W
-        ph = self._cam_preview.height()
-        self._cam_preview.setGeometry(
-            cw.width() - _RIGHT_W - pw - 12,
-            cw.height() - ph - 28,
-            pw, ph,
-        )
-
-    # --- Live camera stream in HUD area ------------------------------------
-    def _on_cam_stream(self, start: bool) -> None:
-        if start:
-            self._hud_cam_stack.setCurrentIndex(1)
-        else:
-            self._hud_cam_stack.setCurrentIndex(0)
-            self._cam_live_lbl.clear()
-
-    def _on_cam_frame(self, data: bytes) -> None:
-        px = QPixmap()
-        px.loadFromData(data)
-        if not px.isNull():
-            w, h = self._cam_live_lbl.width(), self._cam_live_lbl.height()
-            if w > 1 and h > 1:
-                self._cam_live_lbl.setPixmap(
-                    px.scaled(w, h,
-                              Qt.AspectRatioMode.KeepAspectRatio,
-                              Qt.TransformationMode.SmoothTransformation)
-                )
-
-    def start_camera_stream(self) -> None:
-        self._cam_stop.clear()
-        self._cam_stream_sig.emit(True)
-        t = threading.Thread(target=self._cam_loop, daemon=True, name="cam-stream")
-        t.start()
-
-    def _cam_loop(self) -> None:
-        try:
-            import cv2
-            # Reuse camera index detected by screen_processor (cached in api_keys.json)
-            cam_idx = 0
-            try:
-                import json as _j
-                cfg = _j.loads((CONFIG_DIR / "api_keys.json").read_text())
-                cam_idx = int(cfg.get("camera_index", 0))
-            except Exception:
-                pass
-            try:
-                backend = cv2.CAP_DSHOW if _OS == "Windows" else cv2.CAP_ANY
-            except AttributeError:
-                backend = 0
-            cap = cv2.VideoCapture(cam_idx, backend)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                return
-            # warm-up frames
-            for _ in range(5):
-                cap.read()
-            while not self._cam_stop.wait(0.033) and cap.isOpened():
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
-                    self._cam_frame_sig.emit(buf.tobytes())
-            cap.release()
-        except Exception as e:
-            print(f"[Camera] Stream error: {e}")
-        finally:
-            self._cam_stream_sig.emit(False)
-
-    def stop_camera_stream(self) -> None:
-        self._cam_stop.set()
-
     # --- Video in the HUD area ---------------------------------------------
     #
     # Everything below runs on the Qt thread. Plugins and the assistant reach it
@@ -4926,8 +4733,6 @@ class MainWindow(QMainWindow):
             self.write_log("SYS: Video playback is not available in this Qt "
                            "install.")
             return
-        # A video and the live camera cannot share the centre of the HUD.
-        self._cam_stop.set()
 
         self._video_title.setText(f"▶  {(title or 'VIDEO')[:44].upper()}")
         self._video_split = bool(audio_source)
@@ -4938,7 +4743,7 @@ class MainWindow(QMainWindow):
         self._video_player.setSource(url)
         if self._video_split:
             self._video_sound.setSource(QUrl(audio_source))
-        self._hud_cam_stack.setCurrentIndex(2)
+        self._hud_stack.setCurrentIndex(1)
         self._video_on = True
         # Re-run now that the video counts as playing: _set_video_muted ran
         # before this line and saw no video, so its mic check was a no-op.
@@ -4975,7 +4780,7 @@ class MainWindow(QMainWindow):
                 p.setSource(QUrl())
         self._video_split = False
         self._video_on = False
-        self._hud_cam_stack.setCurrentIndex(0)
+        self._hud_stack.setCurrentIndex(0)
         self._sync_mic_for_video()      # gives the microphone back
 
     def _set_video_muted(self, muted: bool) -> None:
@@ -5438,14 +5243,6 @@ class MainWindow(QMainWindow):
                 (cw.height() - oh) // 2,
                 ow, oh,
             )
-        # Camera preview — bottom-right corner of the center/HUD area
-        pw = _CameraPreview._W
-        ph = self._cam_preview.height() or _CameraPreview._H
-        self._cam_preview.setGeometry(
-            cw.width() - _RIGHT_W - pw - 12,
-            cw.height() - ph - 28,
-            pw, ph,
-        )
         # Clipboard panel — bottom-center
         if hasattr(self, '_clipboard_panel') and self._clipboard_panel.isVisible():
             self._position_clipboard_panel()
@@ -7740,10 +7537,6 @@ class JarvisUI:
         self._win._ready = False
         self._win._reconfig_sig.emit()
 
-    def show_camera_frame(self, img_bytes: bytes):
-        """Thread-safe: show a webcam frame in the small overlay (screen captures)."""
-        self._win._camera_sig.emit(img_bytes)
-
     def show_video(self, source: str, title: str = "", muted: bool = True,
                    audio_source: str = "") -> None:
         """Thread-safe: play a video where the avatar normally is.
@@ -7771,14 +7564,6 @@ class JarvisUI:
 
     def video_is_playing(self) -> bool:
         return bool(self._win.video_is_playing())
-
-    def start_camera_stream(self) -> None:
-        """Thread-safe: start live camera feed in the full HUD area."""
-        self._win.start_camera_stream()
-
-    def stop_camera_stream(self) -> None:
-        """Thread-safe: stop the live camera feed."""
-        self._win.stop_camera_stream()
 
     @property
     def assistant_name(self) -> str:
