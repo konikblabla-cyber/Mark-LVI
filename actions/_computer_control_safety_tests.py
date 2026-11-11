@@ -364,7 +364,7 @@ class ComputerControlSafetyTests(unittest.TestCase):
              patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
              patch("actions.ui_interaction._wait_for_expected_result", return_value=True):
             result = control._screen_click_verified_execute(
-                "gear icon", "Settings", "settings.exe",
+                "gear icon", "Settings", "settings.exe", 7, 55,
             )
         self.assertIn("status=done action=computer_control", result)
         self.assertIn("verified=true", result)
@@ -547,6 +547,24 @@ class ComputerControlSafetyTests(unittest.TestCase):
             )
         self.assertIsNone(result)
         desktop.screenshot.assert_not_called()
+
+
+    def test_visual_click_refuses_when_planned_window_handle_or_process_changed(self):
+        before = {
+            "handle": 8, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe", 7, 55,
+            )
+        self.assertIn("status=failed", result)
+        self.assertIn("exact window selected by the mission planner", result)
+        locate.assert_not_called()
+        click.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
