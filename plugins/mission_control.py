@@ -237,6 +237,7 @@ _UI_PLAN_PARAMETER_TYPES = {
     "computer_control": {
         "action": str, "description": str,
         "expected_result": str, "target_app": str,
+        "target_window_handle": int, "target_process_id": int,
     },
     "set_checkbox_state": {"checkbox_label": str, "checked": bool},
     "select_tab_item": {"tab_label": str},
@@ -268,10 +269,20 @@ def _fresh_ui_plan(goal: str, previous_result: dict | None = None) -> dict:
             if previous_tool == "computer_control" and isinstance(previous_params, dict):
                 expected_app = str(previous_params.get("target_app") or "").strip().casefold()
                 active_app = str(snapshot.get("process_name") or "").strip().casefold()
-                if not expected_app or not active_app or active_app != expected_app:
+                try:
+                    expected_handle = int(previous_params.get("target_window_handle"))
+                    expected_pid = int(previous_params.get("target_process_id"))
+                except (TypeError, ValueError, OverflowError):
+                    expected_handle = expected_pid = 0
+                if (
+                    not expected_app or not active_app or active_app != expected_app
+                    or expected_handle <= 0 or expected_pid <= 0
+                    or snapshot.get("handle") != expected_handle
+                    or snapshot.get("process_id") != expected_pid
+                ):
                     return {
                         "status": "blocked",
-                        "reason": "the foreground application changed; visual replan refused",
+                        "reason": "the original target window or process changed; visual replan refused",
                         "steps": [],
                     }
         proposed = (
@@ -316,6 +327,8 @@ def _fresh_ui_plan(goal: str, previous_result: dict | None = None) -> dict:
         value = params.get(key)
         if expected_type is bool:
             valid = isinstance(value, bool)
+        elif expected_type is int:
+            valid = isinstance(value, int) and not isinstance(value, bool) and value > 0
         else:
             valid = isinstance(value, str) and bool(value.strip()) and len(value) <= 160
         if not valid:
