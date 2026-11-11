@@ -147,7 +147,9 @@ async def _locator_is_high_impact(locator, target: object = "") -> bool:
         if metadata:
             descriptors.append(str(metadata))
     except Exception:
-        pass
+        # The sequence cannot prove the target is safe when its DOM/form
+        # metadata is unavailable. Refuse the click rather than fail open.
+        return True
     return requires_browser_confirmation("smart_click", *descriptors)
 
 
