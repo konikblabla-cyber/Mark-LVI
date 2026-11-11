@@ -582,6 +582,17 @@ def _screen_find(
 
 
 
+def _pinned_window_is_foreground(window_handle: int, process_id: int) -> bool:
+    """Confirm the exact HWND/PID is active, not merely another window in the same app."""
+    try:
+        from core.desktop_context import get_foreground_window_identity
+        return get_foreground_window_identity() == (
+            int(window_handle), int(process_id),
+        )
+    except Exception:
+        return False
+
+
 def _screen_click_verified_execute(
     description: str,
     expected_result: str,
@@ -693,6 +704,12 @@ def _screen_click_verified_execute(
     blocked = _input_window_guard(target)
     if blocked:
         return blocked
+    if not _pinned_window_is_foreground(handle, process_id):
+        return outcome.failed(
+            "computer_control",
+            "the exact planned window is no longer foreground; no visual click was sent",
+            target=target,
+        )
     try:
         current = ui._snapshot(int(handle), int(process_id))
     except Exception as exc:
@@ -710,6 +727,12 @@ def _screen_click_verified_execute(
     blocked = _input_window_guard(target)
     if blocked:
         return blocked
+    if not _pinned_window_is_foreground(handle, process_id):
+        return outcome.failed(
+            "computer_control",
+            "the exact planned window changed before the click; no input was sent",
+            target=target,
+        )
     click_result = _click(x=x, y=y)
     if "status=failed" in str(click_result).lower():
         return click_result
