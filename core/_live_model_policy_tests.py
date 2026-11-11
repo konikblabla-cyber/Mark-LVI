@@ -5,7 +5,7 @@ from core.live_model_policy import (
     LIVE_MODEL_FALLBACKS,
     PRIMARY_LIVE_MODEL,
     blocking_tool_declarations,
-    supports_live_thinking_config,
+    supports_legacy_thinking_budget,
 )
 from core import gemini
 
@@ -34,10 +34,14 @@ class LiveModelPolicyTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             blocking_tool_declarations([object()])
 
-    def test_thinking_config_is_not_sent_to_standard_38_live(self):
-        self.assertFalse(supports_live_thinking_config("models/gemini-3.8-live"))
-        self.assertTrue(supports_live_thinking_config("models/gemini-3.8-live-extended-thinking"))
-        self.assertTrue(supports_live_thinking_config("models/gemini-3.1-flash-live-preview"))
+    def test_legacy_thinking_budget_is_not_sent_to_any_gemini_38_live_model(self):
+        self.assertFalse(supports_legacy_thinking_budget("models/gemini-3.8-live"))
+        self.assertFalse(supports_legacy_thinking_budget(
+            "models/gemini-3.8-live-extended-thinking"
+        ))
+        self.assertTrue(supports_legacy_thinking_budget(
+            "models/gemini-3.1-flash-live-preview"
+        ))
 
 
 if __name__ == "__main__":
