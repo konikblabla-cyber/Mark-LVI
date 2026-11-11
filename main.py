@@ -877,7 +877,11 @@ class JarvisLive:
                 # sessions to keep privacy while a real call runs in background.
                 active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
                 active = is_communication_context(foreground_app, active_audio_apps)
-                self._communication_audio_session_active = bool(active)
+                # Only a positive WASAPI session list may authorize sending call audio.
+                # Unknown session APIs fail closed even though the privacy gate itself stays closed.
+                self._communication_audio_session_active = bool(
+                    active_audio_apps is not None and active
+                )
                 gate_active, self._communication_last_active_at = communication_gate_state(
                     active, self._communication_last_active_at, time.monotonic()
                 )
