@@ -88,6 +88,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 📋 Integrated Status Briefing | One local report combines active missions, pending reminders, monitored topics, saved workspaces and Windows health without changing anything |
 | 🧪 On-demand PC Diagnostics | Ask JARVIS for a read-only Windows health report with resource pressure, disk space, battery, uptime and top memory users; no automatic cleanup or process killing |
 | 🏠 Home Assistant | Optional HTTPS integration for explicitly mapped lights, switches, fans and climate targets; verifies reported state. No locks, doors, alarms or arbitrary services |
+| 📧 Google Workspace | Optional Gmail search/read and confirmed draft creation, plus Google Calendar event lists and confirmed event creation through local OAuth. Email is never sent by this plugin |
 | 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only; no window titles or screen capture |
 | 📁 Project Overview | On request, inspect the selected project folder's file types, entry points and Git branch; remember metadata without reading source code or storing its path |
 | ⏱️ Process Watch | Watch a named Windows process start or exit; keep the alert on disk until JARVIS can safely deliver it |
@@ -123,6 +124,8 @@ Running or building code still requires an on-screen confirmation. A process is 
 
 Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit entity map for `light.*`, `switch.*`, `fan.*` or `climate.*` under **Settings → Plugin Settings**. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint. Climate control changes the target temperature only; it does not change HVAC mode.
 Routines store only application names and Home Assistant aliases/actions. Activation uses the existing app launcher and the enabled smart-home plugin; every device action is checked against the current allowlist and read back from Home Assistant.
+
+Google Workspace is optional. In Google Cloud, enable **Gmail API** and **Google Calendar API**, configure the OAuth consent screen (add your account as a test user if the app is in testing), create an OAuth Client ID of type **Desktop app**, and download its JSON file as `config/client_secret_google_workspace.json`. This filename is ignored by Git. In MARK, say **“connect Google Workspace”** and complete the Google sign-in in the browser. The refresh token is stored per-user outside the repository (`%LOCALAPPDATA%\\MarkLVI\\token_google_workspace.json` on Windows). The requested scopes are Gmail read-only + draft creation and Calendar event access; this plugin does not have Gmail send permission. Creating a Gmail draft or adding a Calendar event waits for the exact on-screen HUD confirmation. Use **“disconnect Google Workspace”** to remove the local token; revoke the app separately in your Google Account to remove cloud authorization.
 
 Process Watch records only executable basenames and start/exit events in a local JSON file. Pending notices remain saved until delivered. It never records command lines, file contents or window text. Reminder cancellation uses the ID returned when a reminder is created or listed.
 
@@ -572,6 +575,8 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 4. On first launch, enter your Gemini API key in the setup window. The key is saved locally in `config/api_keys.json` and is not part of the download.
 
 For installation without launching, double-click `INSTALL_MARK.bat`. Later launches through `START_MARK.bat` reuse the environment and only rerun setup when `requirements.txt` or `setup.py` changes.
+
+Google Workspace is optional and needs a one-time OAuth setup; see the **Google Workspace** section below. Do not put an OAuth client secret or token in the repository or share it in chat.
 
 ### macOS / Linux
 
