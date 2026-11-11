@@ -566,5 +566,24 @@ class ComputerControlSafetyTests(unittest.TestCase):
         locate.assert_not_called()
         click.assert_not_called()
 
+
+    def test_visual_click_dispatch_forwards_exact_planned_window_identity(self):
+        parameters = {
+            "action": "screen_click_verified",
+            "description": "gear icon",
+            "expected_result": "Privacy panel",
+            "target_app": "settings.exe",
+            "target_window_handle": 7,
+            "target_process_id": 55,
+        }
+        with patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_screen_click_verified_execute",
+                          return_value="status=done action=computer_control verified=true") as execute:
+            result = control.computer_control(parameters)
+        self.assertIn("status=done", result)
+        execute.assert_called_once_with(
+            "gear icon", "Privacy panel", "settings.exe", 7, 55,
+        )
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
