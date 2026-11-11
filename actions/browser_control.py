@@ -100,6 +100,21 @@ async def _locator_ready(locator) -> bool:
         return False
 
 
+async def _locator_is_high_impact(locator, target: object = "") -> bool:
+    """Classify the actual visible control, not only the selector supplied by the model."""
+    descriptors = [str(target or "")]
+    for attribute in ("aria-label", "title", "name", "type"):
+        try:
+            descriptors.append(await locator.get_attribute(attribute) or "")
+        except Exception:
+            continue
+    try:
+        descriptors.append(await locator.inner_text() or "")
+    except Exception:
+        pass
+    return requires_browser_confirmation("smart_click", *descriptors)
+
+
 async def _read_field_value_locally(locator):
     """Read a non-sensitive field value only inside this process for comparison."""
     try:
@@ -990,7 +1005,8 @@ class _BrowserSession:
         return await self.go_to(_search_url(query, engine))
 
     async def click(self, selector: str = None, text: str = None,
-                    expected_text: str = "", expected_url: str = "") -> str:
+                    expected_text: str = "", expected_url: str = "",
+                    block_high_impact: bool = False) -> str:
         page = await self._get_page()
         expected_text, expected_url, validation_error = _validate_click_postcondition(
             expected_text, expected_url,
@@ -1008,6 +1024,12 @@ class _BrowserSession:
                     "browser_control",
                     "the target was missing, ambiguous, hidden or disabled; nothing was clicked",
                     selector=selector or text,
+                )
+            if block_high_impact and await _locator_is_high_impact(locator, text or selector):
+                return outcome.failed(
+                    "browser_control",
+                    "the visible control appears to send, submit, purchase or delete; run it separately for its own confirmation",
+                    clicked=False,
                 )
             context = getattr(page, "context", None)
             pages_before = list(getattr(context, "pages", []) or []) if context else []
@@ -1213,7 +1235,8 @@ class _BrowserSession:
 
 
     async def smart_click(self, description: str,
-                          expected_text: str = "", expected_url: str = "") -> str:
+                          expected_text: str = "", expected_url: str = "",
+                          block_high_impact: bool = False) -> str:
         page = await self._get_page()
         expected_text, expected_url, validation_error = _validate_click_postcondition(
             expected_text, expected_url,
@@ -1228,6 +1251,12 @@ class _BrowserSession:
                 continue
             if not await _locator_ready(locator):
                 continue
+            if block_high_impact and await _locator_is_high_impact(locator, description):
+                return outcome.failed(
+                    "browser_control",
+                    "the visible control appears to send, submit, purchase or delete; run it separately for its own confirmation",
+                    clicked=False,
+                )
 
             # Once a candidate is clicked, never fall through to another
             # candidate. A timeout or verification error may mean the first
@@ -1291,6 +1320,12 @@ class _BrowserSession:
         except Exception:
             locator = None
         if locator is not None and await _locator_ready(locator):
+            if block_high_impact and await _locator_is_high_impact(locator, description):
+                return outcome.failed(
+                    "browser_control",
+                    "the visible control appears to send, submit, purchase or delete; run it separately for its own confirmation",
+                    clicked=False,
+                )
             context = getattr(page, "context", None)
             pages_before = list(getattr(context, "pages", []) or []) if context else []
             try:
@@ -1706,6 +1741,8 @@ def _run_browser_sequence(parameters: dict, browser_name: str | None,
                         step.get("text") or None,
                         expected_text=step["expected_text"],
                         expected_url=step["expected_url"],
+                        block_high_impact=True,
+                        block_high_impact=True,
                     ),
                     timeout=timeout,
                 )
