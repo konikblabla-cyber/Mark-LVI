@@ -593,15 +593,12 @@ def _launch_and_verify(player, spoken: str, launcher_name: str,
             verification_name or spoken, before, timeout=_LAUNCH_TIMEOUT
         )
         if appeared is not None:
-            # A process can exist without a usable foreground window (e.g. a
-            # background updater). Do not report "opened" until the new app is
-            # foregrounded and its process is still alive.
-            focused = False
-            alive = False
+            # A process can exist before its window is ready. Wait briefly for
+            # the exact new app window, but never claim success from PID alone.
             try:
-                focused = bool(appidentity.focus(appeared))
-                alive = bool(appidentity.is_running(appeared.pid))
+                focused = _focus_launched_application(appeared)
             except Exception as verify_error:
+                focused = False
                 print(f"[open_app] foreground verification failed: {type(verify_error).__name__}")
             if focused:
                 _log(player, f"JARVIS: {appeared.label} is open and in the foreground.")
