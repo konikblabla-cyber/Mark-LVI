@@ -472,5 +472,74 @@ class MissionControlReliabilityTests(unittest.TestCase):
 
 
 
+
+    def test_failed_planned_ui_action_gets_one_fresh_alternative_then_stops(self):
+        mission_id = self._running_mission("Open Privacy tab")
+        self._plan_ui_action(mission_id, tool="select_tab_item")
+        self.assertFalse(mission_control.record_tool_result(
+            self.scope, "select_tab_item",
+            "status=failed action=select_tab_item reason=target_not_found",
+        ))
+        persisted = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(persisted["ui_last_attempt"]["status"], "failed")
+        self.assertNotIn("target_not_found", json.dumps(persisted))
+
+        alternative = {
+            "status": "planned",
+            "execution": "not_started",
+            "steps": [{
+                "tool": "select_list_item",
+                "parameters": {"item_label": "Privacy section"},
+                "risk": "low",
+                "requires_confirmation": False,
+                "reason": "Use the uniquely visible alternative entry",
+                "expected_result": "The selected list entry becomes active",
+            }],
+        }
+        with patch("plugins.mission_control._fresh_ui_plan", return_value=alternative) as replan:
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_REPLAN]", result)
+        replan.assert_called_once_with("Open Privacy tab", {
+            "status": "failed",
+            "step": {
+                "tool": "select_tab_item",
+                "parameters": {"tab_label": "Privacy"},
+            },
+        })
+        updated = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(updated["ui_action"]["tool"], "select_list_item")
+        self.assertEqual(updated["ui_replan_count"], 1)
+        self.assertEqual(updated["ui_action_history"][0]["tool"], "select_tab_item")
+        self.assertNotIn("ui_last_attempt", updated)
+
+        self.assertFalse(mission_control.record_tool_result(
+            self.scope, "select_list_item",
+            "status=failed action=select_list_item reason=alternative_not_found",
+        ))
+        with patch("plugins.mission_control._fresh_ui_plan") as second_replan:
+            stopped = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_REPLAN_LIMIT]", stopped)
+        second_replan.assert_not_called()
+
+    def test_unverified_planned_ui_action_is_recovery_not_replan(self):
+        mission_id = self._running_mission("Open Privacy tab")
+        self._plan_ui_action(mission_id, tool="select_tab_item")
+        self.assertFalse(mission_control.record_tool_result(
+            self.scope, "select_tab_item",
+            "status=unverified action=select_tab_item reason=timeout",
+        ))
+        persisted = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(persisted["ui_last_attempt"]["status"], "unverified")
+        with patch("plugins.mission_control._fresh_ui_plan") as replan:
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_RECOVERY]", result)
+        replan.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
