@@ -813,7 +813,7 @@ class JarvisLive:
         self._awake = False
         self.set_speaking(False)
         self.ui.set_state("SLEEPING")
-        self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Jarvis' to wake me.")
+        self.ui.write_log(f"SYS: Sleeping — {reason}. Say a wake phrase to wake me.")
 
     async def _run_sleep_watch(self) -> None:
         """Auto-sleep after the configured silence window (wake-word mode only)."""
@@ -895,7 +895,7 @@ class JarvisLive:
                     ready = self._ensure_wake_detector()
                     if ready:
                         self.ui.write_log(
-                            "SYS: Communication privacy gate active. Say 'Hey Jarvis' "
+                            "SYS: Communication privacy gate active. Say a wake phrase "
                             "for one request, or use Push-to-Talk."
                         )
                     else:
@@ -906,7 +906,7 @@ class JarvisLive:
                 else:
                     self.ui.write_log(
                         "SYS: Call/chat detected. Microphone stays local. Install the "
-                        "local 'Hey Jarvis' wake model or use Push-to-Talk to speak."
+                        "local wake-phrase models or use Push-to-Talk to speak."
                     )
             else:
                 self.ui.write_log(
@@ -2160,15 +2160,16 @@ class JarvisLive:
                             if full_out and len(full_out) >= _REPEAT_MIN and self._last_out_logged:
                                 if full_out in self._last_out_logged:
                                     full_out = ""
+                            if should_sleep_after_addressed_response(
+                                self._wake_enabled,
+                                self._addressed_turn_pending,
+                                bool(sc.turn_complete),
+                                bool(response.tool_call),
+                            ):
+                                # Audio-only final replies may have no transcript.
+                                self._addressed_response_complete = True
+                                self._addressed_turn_pending = False
                             if full_out:
-                                if should_sleep_after_addressed_response(
-                                    self._wake_enabled,
-                                    self._addressed_turn_pending,
-                                    full_out,
-                                    bool(response.tool_call),
-                                ):
-                                    self._addressed_response_complete = True
-                                    self._addressed_turn_pending = False
                                 self._last_out_logged = full_out
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
                                 self._session_log.append(f"{self._asst_name}: {full_out}")
@@ -2294,7 +2295,7 @@ class JarvisLive:
                         if self._addressed_response_complete and self._wake_enabled:
                             self._addressed_response_complete = False
                             if self._awake:
-                                self.sleep(reason="request finished — waiting for Hey Jarvis")
+                                self.sleep(reason="request finished — waiting for a wake phrase")
                     continue
 
                 self.set_speaking(True)

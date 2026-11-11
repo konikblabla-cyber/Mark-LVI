@@ -25,11 +25,11 @@ def go_away_time_left(response):
 
 def should_sleep_after_addressed_response(wake_word_enabled: bool,
                                           addressed_turn_pending: bool,
-                                          response_text: str,
+                                          turn_complete: bool,
                                           tool_call_pending: bool = False) -> bool:
-    """Close the cloud mic gate after a final addressed reply, never mid-tool."""
+    """Close the cloud mic gate after a final addressed turn, even without text transcription."""
     return bool(
         wake_word_enabled and addressed_turn_pending
-        and str(response_text or "").strip() and not tool_call_pending
+        and turn_complete and not tool_call_pending
     )
 

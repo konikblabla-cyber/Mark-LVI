@@ -1,5 +1,5 @@
 """
-Local wake-word detection for JARVIS ("Hey Jarvis").
+Local multi-phrase wake-word detection for JARVIS.
 
 Design goals:
   • ZERO cost when the feature is off — openwakeword is imported ONLY inside
@@ -13,7 +13,7 @@ Design goals:
     network call except the one-time model download the user triggers from the UI.
 
 openwakeword ships small ONNX models (a few MB each) and runs comfortably on a
-CPU. The pretrained wake phrase used here is "Hey Jarvis".
+CPU. Several pretrained wake phrases can be active at once.
 """
 from __future__ import annotations
 
@@ -24,8 +24,9 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-# Pretrained openwakeword model that listens for "Hey Jarvis".
-WAKE_MODEL = "hey_jarvis"
+# Pretrained phrases; generic wake words are avoided to reduce false activations.
+WAKE_MODELS = ("hey_jarvis", "hey_mycroft", "hey_rhasspy")
+WAKE_PHRASES = ("Hey Jarvis", "Hey Mycroft", "Hey Rhasspy")
 # Score in [0,1]; above this counts as a detection. Tunable per environment.
 DEFAULT_THRESHOLD = 0.5
 # Mic frames arrive at 16 kHz int16; this is just the detector's input rate.
@@ -75,8 +76,11 @@ def is_ready() -> bool:
         models_dir = Path(openwakeword.__file__).resolve().parent / "resources" / "models"
         if not models_dir.is_dir():
             return False
-        has_wake = (any(models_dir.glob(f"{WAKE_MODEL}*.onnx"))
-                    or any(models_dir.glob(f"{WAKE_MODEL}*.tflite")))
+        has_wake = all(
+            any(models_dir.glob(f"{name}*.onnx"))
+            or any(models_dir.glob(f"{name}*.tflite"))
+            for name in WAKE_MODELS
+        )
         has_mel = (any(models_dir.glob("melspectrogram*.onnx"))
                    or any(models_dir.glob("melspectrogram*.tflite")))
         has_emb = (any(models_dir.glob("embedding_model*.onnx"))
@@ -113,7 +117,7 @@ def install_and_download(logger: Callable[[str], None] = print,
         download_code = (
             "import openwakeword.utils as u\n"
             "try:\n"
-            "    u.download_models(['hey_jarvis'])\n"
+            "    u.download_models(['hey_jarvis', 'hey_mycroft', 'hey_rhasspy'])\n"
             "except TypeError:\n"
             "    u.download_models()\n"
         )
@@ -167,7 +171,7 @@ class WakeWordDetector:
             return True
         try:
             from openwakeword.model import Model
-            self._model = Model(wakeword_models=[WAKE_MODEL], inference_framework="onnx")
+            self._model = Model(wakeword_models=list(WAKE_MODELS), inference_framework="onnx")
         except Exception as e:
             self._logger(f"Wake word: could not load model — {e}")
             self._notify("Wake word unavailable — use the WAKE NOW button.")
@@ -177,7 +181,7 @@ class WakeWordDetector:
         self._ready = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="WakeWordThread")
         self._thread.start()
-        self._logger("Wake word: listening for 'Hey Jarvis'.")
+        self._logger("Wake word: listening for " + ", ".join(WAKE_PHRASES) + ".")
         return True
 
     def stop(self) -> None:
@@ -217,13 +221,9 @@ class WakeWordDetector:
                     break
                 scores = self._model.predict(np.asarray(frame, dtype=np.int16))
                 score = 0.0
-                if isinstance(scores, dict):
-                    # match the jarvis model regardless of exact key suffix
-                    for k, v in scores.items():
-                        if "jarvis" in k.lower():
-                            score = max(score, float(v))
-                    if score == 0.0 and scores:
-                        score = max(float(v) for v in scores.values())
+                if isinstance(scores, dict) and scores:
+                    # Any configured phrase may address MARK.
+                    score = max(float(v) for v in scores.values())
                 if score >= self._threshold:
                     # drain any backlog so we don't double-fire on the same utterance
                     self._drain()
