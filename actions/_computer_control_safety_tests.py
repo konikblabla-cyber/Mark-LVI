@@ -346,5 +346,99 @@ class ComputerControlSafetyTests(unittest.TestCase):
         execute.assert_not_called()
 
 
+
+    def test_verified_visual_click_pins_window_and_checks_exact_postcondition(self):
+        before = {"handle": 7, "process_id": 55, "records": []}
+        after = {"handle": 7, "process_id": 55, "records": []}
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value="") as guard, \
+             patch.object(control, "_screen_find", return_value=(20, 30)) as locate, \
+             patch.object(control, "_click", return_value="Clicked (20, 30)") as click, \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction._snapshot", side_effect=[before, after]) as snapshot, \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch("actions.ui_interaction._wait_for_expected_result", return_value=True):
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("status=done action=computer_control", result)
+        self.assertIn("verified=true", result)
+        self.assertEqual(guard.call_count, 3)
+        locate.assert_called_once_with("gear icon", "settings.exe")
+        snapshot.assert_any_call()
+        snapshot.assert_any_call(7, 55)
+        click.assert_called_once_with(x=20, y=30)
+
+    def test_verified_visual_click_never_clicks_if_expected_result_is_already_visible(self):
+        before = {"handle": 7, "process_id": 55, "records": []}
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=True), \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("status=unverified", result)
+        locate.assert_not_called()
+        click.assert_not_called()
+
+    def test_verified_visual_click_rechecks_foreground_after_slow_image_analysis(self):
+        before = {"handle": 7, "process_id": 55, "records": []}
+        blocked = "status=failed action=computer_control reason=foreground_changed"
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", side_effect=["", blocked]) as guard, \
+             patch.object(control, "_screen_find", return_value=(20, 30)), \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertEqual(result, blocked)
+        self.assertEqual(guard.call_count, 2)
+        click.assert_not_called()
+
+    def test_unverified_visual_click_is_not_retried(self):
+        before = {"handle": 7, "process_id": 55, "records": []}
+        after = {"handle": 7, "process_id": 55, "records": []}
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_screen_find", return_value=(20, 30)) as locate, \
+             patch.object(control, "_click", return_value="Clicked (20, 30)") as click, \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction._snapshot", side_effect=[before, after]), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch("actions.ui_interaction._wait_for_expected_result", return_value=False):
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("status=unverified", result)
+        self.assertIn("Do not retry automatically", result)
+        locate.assert_called_once()
+        click.assert_called_once()
+
+    def test_critical_visual_click_waits_for_real_hud_confirmation(self):
+        request = {}
+        with patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_screen_click_verified_execute") as execute:
+            result = control.computer_control({
+                "action": "screen_click_verified",
+                "description": "Delete account button",
+                "expected_result": "Account deleted",
+                "target_app": "settings.exe",
+            })
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        self.assertIn("Delete account", request["detail"])
+        execute.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
