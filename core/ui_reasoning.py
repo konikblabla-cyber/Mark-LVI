@@ -215,6 +215,94 @@ def _resolve_target(goal: str, elements: list[dict]) -> tuple[dict | None, str, 
     return earliest[0], "", first_position
 
 
+def _visual_click_target(goal: str) -> tuple[str, int] | None:
+    """Extract a plainly stated visual target and the end of its phrase."""
+    patterns = (
+        r"\b(?:click|press|tap)\s+(?:on\s+)?(?P<target>.+?)(?=\s+(?:and\s+)?(?:verify|expect|wait\s+for|until|shows?|appears?)(?:\s|$)|$)",
+        r"\b(?:kliknij|naciśnij|nacisnij|wciśnij|wcisnij)\s+(?P<target>.+?)(?=\s+(?:i\s+)?(?:sprawdź|sprawdz|oczekuj|aż\s+pojawi\s+się|az\s+pojawi\s+sie)(?:\s|$)|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, goal, re.I)
+        if not match:
+            continue
+        target = _safe_label(match.group("target"))
+        target = re.sub(r"^(?:the|a|an|on)\s+", "", target, flags=re.I).strip()
+        target = re.sub(r"^(?:przycisk|ikonę|ikone)\s+", "", target, flags=re.I).strip()
+        target = _safe_label(target)
+        if target:
+            return target, match.end("target")
+    return None
+
+
+def _plan_visual_click(goal: str, snapshot: Any,
+                       elements: list[dict]) -> dict | None:
+    """Return one bounded visual click only when its exact postcondition is explicit."""
+    if not _goal_has_any(_normalise(goal), _CLICK_WORDS):
+        return None
+    parsed = _visual_click_target(goal)
+    if parsed is None:
+        return _clarify(
+            "The visible control has no accessibility label. Describe the exact visual target and the exact accessible label that must appear after clicking.",
+            "visual_click_details_missing",
+        )
+    description, target_end = parsed
+    expected_label = _expected_result(goal, target_end, elements)
+    if not expected_label:
+        return _clarify(
+            "What exact accessible label should appear after this visual click? MARK will not invent a postcondition.",
+            "click_postcondition_missing",
+        )
+
+    metadata = snapshot if isinstance(snapshot, dict) else {}
+    target_app = str(metadata.get("process_name") or "").strip()
+    bounds = metadata.get("bounds")
+    if (not target_app or len(target_app) > 100
+            or not isinstance(bounds, (list, tuple)) or len(bounds) != 4):
+        return _clarify(
+            "I cannot securely identify and crop the active application window. Keep the window in the foreground and try again.",
+            "visual_target_identity_unavailable",
+        )
+    try:
+        left, top, right, bottom = (int(value) for value in bounds)
+    except (TypeError, ValueError, OverflowError):
+        return _clarify(
+            "The active application's window bounds are unavailable. Refresh the window and try again.",
+            "visual_target_bounds_unavailable",
+        )
+    if right <= left or bottom <= top:
+        return _clarify(
+            "The active application's visible window area could not be established.",
+            "visual_target_bounds_unavailable",
+        )
+
+    risk = _risk_for(description, expected_label)
+    step = {
+        "tool": "computer_control",
+        "parameters": {
+            "action": "screen_click_verified",
+            "description": description,
+            "expected_result": expected_label,
+            "target_app": target_app,
+        },
+        "target": {"role": "VisualTarget", "name": description},
+        "reason": (
+            "No exact accessible control label is exposed. Use one Gemini-grounded click "
+            "inside the pinned foreground window and verify the exact new accessible label."
+        ),
+        "expected_result": (
+            f"The exact accessible label '{expected_label}' must appear in the same application window."
+        ),
+        "risk": risk,
+        "requires_confirmation": risk == "high",
+    }
+    return {
+        "status": "planned",
+        "goal": goal,
+        "steps": [step],
+        "execution": "not_started",
+    }
+
+
 def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
     """Return one safe, exact next action; never execute it.
 
@@ -238,6 +326,10 @@ def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
     if target is None:
         if match_error == "duplicate_label":
             return _clarify("Which occurrence do you mean? Name its parent panel or section.", match_error)
+        if match_error == "no_exact_label":
+            visual_plan = _plan_visual_click(clean_goal, ui_snapshot, elements)
+            if visual_plan is not None:
+                return visual_plan
         return _clarify("Name the exact visible control label you want MARK to use.", match_error)
     if not target["enabled_known"]:
         return _clarify("The selected control's enabled state is unknown. Refresh the UI snapshot first.", "enabled_state_unknown")
