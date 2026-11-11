@@ -567,9 +567,11 @@ class _ReconnectSignal(Exception):
     new session must genuinely start clean (see the voice-change note in
     _on_voice_change)."""
 
-    def __init__(self, keep_context: bool = True):
+    def __init__(self, keep_context: bool = True, retry_delay: float = 0.0):
         super().__init__()
         self.keep_context = keep_context
+        # Device-level faults should not cause a tight reconnect loop.
+        self.retry_delay = max(0.0, min(float(retry_delay), 30.0))
 
 
 def _is_reconnect_signal(exc: BaseException) -> bool:
@@ -580,6 +582,21 @@ def _is_reconnect_signal(exc: BaseException) -> bool:
     if isinstance(exc, BaseExceptionGroup):
         return any(_is_reconnect_signal(sub) for sub in exc.exceptions)
     return False
+
+
+def _reconnect_delay_of(exc: BaseException) -> float:
+    """Return the bounded delay carried by a reconnect signal in a task group."""
+    if isinstance(exc, _ReconnectSignal):
+        try:
+            return max(0.0, min(float(exc.retry_delay), 30.0))
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            delay = _reconnect_delay_of(sub)
+            if delay:
+                return delay
+    return 0.0
 
 
 def _keep_context_of(exc: BaseException) -> bool:
@@ -2006,13 +2023,13 @@ class JarvisLive:
                         self.ui.write_log(
                             "SYS: Microphone stream stopped — restoring audio connection."
                         )
-                        raise _ReconnectSignal(keep_context=True)
+                        raise _ReconnectSignal(keep_context=True, retry_delay=2.0)
                     if callback_is_stalled(
                             last_input_callback[0], time.monotonic(), stall_after=5.0):
                         self.ui.write_log(
                             "SYS: Microphone stopped delivering audio — restoring connection."
                         )
-                        raise _ReconnectSignal(keep_context=True)
+                        raise _ReconnectSignal(keep_context=True, retry_delay=2.0)
         except _ReconnectSignal:
             raise
         except Exception as e:
@@ -2422,7 +2439,7 @@ class JarvisLive:
                     self.ui.write_log(
                         "SYS: Speaker write failed — restoring audio connection."
                     )
-                    raise _ReconnectSignal(keep_context=True) from e
+                    raise _ReconnectSignal(keep_context=True, retry_delay=2.0) from e
         except _ReconnectSignal:
             raise
         except Exception as e:
@@ -3186,6 +3203,12 @@ class JarvisLive:
                         # handle so the next connect really does start empty.
                         self._resume_handle = None
                     self._conn_backoff = 0
+                    _retry_delay = _reconnect_delay_of(e)
+                    if _retry_delay:
+                        self.ui.write_log(
+                            f"SYS: Audio recovery — retrying in {_retry_delay:.0f}s."
+                        )
+                        await asyncio.sleep(_retry_delay)
                     continue
 
                 # A resumption handle the server will not accept — expired, or
