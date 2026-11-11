@@ -11,6 +11,7 @@ from core.communication_context import (
     is_communication_context,
     normalize_process_name,
     should_auto_wake,
+    communication_gate_state,
     should_forward_microphone,
 )
 
@@ -243,6 +244,47 @@ class CommunicationContextTests(unittest.TestCase):
 
     def test_active_call_detection_does_not_need_chat_to_be_foreground(self):
         self.assertTrue(is_communication_context("opera.exe", {"teams"}))
+
+    def test_communication_gate_closes_immediately(self):
+        self.assertEqual(
+            communication_gate_state(True, None, 10.0),
+            (True, 10.0),
+        )
+
+    def test_brief_wasapi_session_drop_does_not_open_the_microphone(self):
+        last_active = 10.0
+        self.assertEqual(
+            communication_gate_state(False, last_active, 11.0),
+            (True, last_active),
+        )
+        self.assertEqual(
+            communication_gate_state(False, last_active, 12.99),
+            (True, last_active),
+        )
+
+    def test_gate_reopens_only_after_full_release_grace(self):
+        self.assertEqual(
+            communication_gate_state(False, 10.0, 13.0),
+            (False, 10.0),
+        )
+
+    def test_new_call_during_release_grace_restarts_the_grace_period(self):
+        gate, last_active = communication_gate_state(False, 10.0, 11.0)
+        self.assertTrue(gate)
+        self.assertEqual(
+            communication_gate_state(True, last_active, 11.5),
+            (True, 11.5),
+        )
+        self.assertEqual(
+            communication_gate_state(False, 11.5, 14.0),
+            (True, 11.5),
+        )
+
+    def test_invalid_monotonic_time_fails_closed(self):
+        self.assertEqual(
+            communication_gate_state(False, 10.0, float("nan")),
+            (True, 10.0),
+        )
 
     def test_fresh_desktop_input_auto_wakes_outside_calls(self):
         self.assertTrue(should_auto_wake(0.0, False))
