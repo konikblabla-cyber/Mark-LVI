@@ -325,6 +325,26 @@ class CommunicationContextTests(unittest.TestCase):
             True, True, True, True, phone_audio_active=True
         ))
 
+    def test_in_call_consent_configuration_defaults_to_false_and_rejects_malformed_values(self):
+        from memory import config_manager
+        with patch.object(config_manager, "load_api_keys", return_value={}):
+            self.assertFalse(config_manager.get_in_call_addressing_enabled())
+        with patch.object(config_manager, "load_api_keys", return_value={"in_call_addressing": "true"}):
+            self.assertFalse(config_manager.get_in_call_addressing_enabled())
+        with patch.object(config_manager, "load_api_keys", return_value={"in_call_addressing": 1}):
+            self.assertFalse(config_manager.get_in_call_addressing_enabled())
+        with patch.object(config_manager, "load_api_keys", return_value={"in_call_addressing": True}):
+            self.assertTrue(config_manager.get_in_call_addressing_enabled())
+
+    def test_in_call_consent_saves_only_a_boolean_value(self):
+        from memory import config_manager
+        with patch.object(config_manager, "_save_flag") as save:
+            config_manager.save_in_call_addressing_enabled(True)
+        save.assert_called_once_with("in_call_addressing", True)
+        with patch.object(config_manager, "_save_flag") as save:
+            config_manager.save_in_call_addressing_enabled(False)
+        save.assert_called_once_with("in_call_addressing", False)
+
     def test_call_audio_semantic_addressing_is_disabled_by_default(self):
         self.assertFalse(should_stream_call_audio(True, False, True, True))
 
