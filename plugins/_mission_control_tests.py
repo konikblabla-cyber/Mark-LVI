@@ -466,7 +466,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
         ) as lookup:
             result = self.start(mission_id)
         self.assertIn("[PAST_EXPERIENCE_HINTS]", result)
-        self.assertIn("Do NOT repeat side effects", result)
+        self.assertIn("Never repeat a side effect", result)
         lookup.assert_called_once()
         self.assertIn("Configure microphone privacy settings", lookup.call_args.args[0])
 
