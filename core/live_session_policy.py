@@ -33,3 +33,8 @@ def should_sleep_after_addressed_response(wake_word_enabled: bool,
         and turn_complete and not tool_call_pending
     )
 
+def should_use_local_wake_mode(local_wake_preference: bool,
+                               proactive_audio_enabled: bool) -> bool:
+    """Use local wake gating only when explicitly selected instead of semantic addressing."""
+    return bool(local_wake_preference and not proactive_audio_enabled)
+

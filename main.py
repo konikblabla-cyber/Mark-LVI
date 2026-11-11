@@ -74,7 +74,8 @@ from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
-    get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
+    get_wake_word_enabled, save_wake_word_enabled, save_proactive_audio_enabled,
+    get_input_device, get_output_device,
     get_desktop_awareness_enabled,
 )
 from core                     import gemini as _gemini
@@ -95,6 +96,7 @@ from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
 from core.live_session_policy import (
     go_away_notice, live_turn_is_active, should_sleep_after_addressed_response,
+    should_use_local_wake_mode,
 )
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
@@ -743,7 +745,11 @@ class JarvisLive:
         # ── Wake word ────────────────────────────────────────────────────────
         # _awake gates the mic (see _listen_audio) and the background speakers.
         # It is True whenever wake word is OFF, so default behaviour is unchanged.
-        self._wake_enabled     = get_wake_word_enabled()
+        # Context-aware listening is the default. The local privacy gate wins
+        # only when explicitly selected instead of semantic cloud addressing.
+        self._wake_enabled     = should_use_local_wake_mode(
+            get_wake_word_enabled(), get_proactive_audio_enabled()
+        )
         self._awake            = not self._wake_enabled
         self._wake_detector: WakeWordDetector | None = None
         self._wake_sleep_timeout = WAKE_SLEEP_TIMEOUT
@@ -921,12 +927,14 @@ class JarvisLive:
         if enable:
             if not wake_is_ready():
                 return "need_download"
+            save_proactive_audio_enabled(False)
             self._wake_enabled = True
             save_wake_word_enabled(True)
             self._ensure_wake_detector()
             self.sleep(reason="wake word enabled")
             return "enabled"
         else:
+            save_proactive_audio_enabled(True)
             self._wake_enabled = False
             save_wake_word_enabled(False)
             self.wake(reason="wake word disabled")
@@ -2295,7 +2303,7 @@ class JarvisLive:
                         if self._addressed_response_complete and self._wake_enabled:
                             self._addressed_response_complete = False
                             if self._awake:
-                                self.sleep(reason="request finished — waiting for a wake phrase")
+                                self.sleep(reason="request finished — local privacy mode waiting for a wake phrase")
                     continue
 
                 self.set_speaking(True)
@@ -3020,7 +3028,17 @@ class JarvisLive:
                     else:
                         self._awake = True
                         self.ui.set_state("LISTENING")
-                        self.ui.write_log("SYS: JARVIS online.")
+                        self.ui.write_log("SYS: JARVIS online — address-aware listening active; no wake phrase needed.")
+                        if self._enhanced_live and get_proactive_audio_enabled():
+                            self.ui.write_log(
+                                "SYS: Gemini Proactive Audio decides whether speech is directed to MARK. "
+                                "Microphone audio is streamed while this session is connected."
+                            )
+                        else:
+                            self.ui.write_log(
+                                "SYS: Contextual speech filtering is unavailable; use LOCAL PRIVACY "
+                                "mode or Push-to-Talk to avoid reacting to background speech."
+                            )
 
                     # What this machine will not permit, said once, on screen.
                     #
@@ -3159,7 +3177,8 @@ class JarvisLive:
                 ):
                     self._enhanced_live = False
                     self.ui.write_log(
-                        "SYS: Proactive audio unavailable — reconnecting without it."
+                        "SYS: Proactive Audio unavailable — address-aware filtering is off. "
+                        "Use LOCAL PRIVACY mode or Push-to-Talk to avoid background speech."
                     )
                     continue
 

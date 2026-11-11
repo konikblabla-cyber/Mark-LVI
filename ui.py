@@ -6766,8 +6766,9 @@ class MainWindow(QMainWindow):
         ready, enabled = False, False
         try:
             from core.wake_word import is_ready
-            from memory.config_manager import get_wake_word_enabled
-            ready, enabled = is_ready(), get_wake_word_enabled()
+            from memory.config_manager import get_wake_word_enabled, get_proactive_audio_enabled
+            ready = is_ready()
+            enabled = bool(get_wake_word_enabled() and not get_proactive_audio_enabled())
         except Exception:
             pass
         return {"ready": ready, "enabled": enabled, "awake": True}
@@ -6787,19 +6788,24 @@ class MainWindow(QMainWindow):
                 text-align: left; padding: 0 8px; }}
             QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}"""
         self._wake_btn.setEnabled(True)
-        if not st["ready"]:
-            self._wake_btn.setText("⬇  WAKE WORD: DOWNLOAD")
-            self._wake_btn.setStyleSheet(_off)
-            self._wake_sleep_btn.hide()
-        elif st["enabled"]:
-            self._wake_btn.setText("🎙  WAKE WORD: ON")
+        if st["enabled"]:
+            self._wake_btn.setText("🔒  LOCAL PRIVACY: ON")
             self._wake_btn.setStyleSheet(_on)
+            self._wake_btn.setToolTip(
+                "Local privacy mode: idle microphone audio stays on this PC. "
+                "Use one of the local wake phrases or Push-to-Talk to open a request."
+            )
             self._wake_sleep_btn.show()
             self._wake_sleep_btn.setText("😴  SLEEP NOW" if st["awake"] else "👂  WAKE NOW")
             self._wake_sleep_btn.setStyleSheet(_off)
         else:
-            self._wake_btn.setText("🎙  WAKE WORD: OFF")
-            self._wake_btn.setStyleSheet(_off)
+            self._wake_btn.setText("◈  ADDRESS-AWARE: ON")
+            self._wake_btn.setStyleSheet(_on)
+            self._wake_btn.setToolTip(
+                "No wake phrase required. Gemini Live receives microphone audio while connected "
+                "and Proactive Audio decides whether speech is directed to MARK. "
+                "Click to switch to local-only wake-phrase privacy mode."
+            )
             self._wake_sleep_btn.hide()
 
     def _refresh_talk_btns(self):
@@ -6958,7 +6964,7 @@ class MainWindow(QMainWindow):
         st = self._wake_state()
         if not st["ready"]:
             # First time: download openwakeword + model in a worker thread.
-            self._wake_btn.setText("⬇  DOWNLOADING… (one-time)")
+            self._wake_btn.setText("⬇  INSTALLING LOCAL PRIVACY…")
             self._wake_btn.setEnabled(False)
             def _work():
                 try:

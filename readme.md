@@ -66,7 +66,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧚 Push-to-Talk | Hold **Ctrl+Space** and the mic opens — closed the rest of the time. Truly global on Windows, window-scoped elsewhere |
 | 🔇 Self-Echo Guard | Never answers its own last sentence: the tail of its own voice is recognised and dropped without muting you |
 | 🪪 Runtime Self-Knowledge | Name, OS, abilities **and limits** are generated from the live system each session — rename it or add a plugin and it knows |
-| 🎙️ Wake Word | Local **"Hey Jarvis"** detection — one addressed request per wake phrase, then automatically returns to local-only listening; never streams audio while asleep |
+| 🧠 Address-aware listening | Gemini Proactive Audio decides whether room speech is directed to MARK — no wake phrase needed; optional local privacy mode keeps idle audio on-device |
 | ⚡ Instant Acknowledgment | Speaks a short, context-aware reply in **your language** the instant a longer task starts — no more silent waiting |
 | 🚀 Faster Live Engine | Runs on stable **Gemini 3.8 Live**, with Gemini 3.1 Live and Gemini 2.5 Native Audio retained as compatibility fallbacks |
 | 🧩 Self-Describing Skills | Every bundled skill declares its own `TOOL` dict + handler and is auto-discovered at launch — adding one is a single file |
@@ -405,7 +405,7 @@ So there are two players running together, with a timer that corrects any drift 
 The microphone is open while a video plays, so the moment you turn the sound on, JARVIS starts answering the film. The mic now mutes itself when the video's sound goes on and unmutes when it goes off — and it says so in the activity log rather than going deaf silently.
 
 #### 🎛 Two drawers instead of one
-⚙ **SETUP** holds the things you set once — remote control, desktop shortcut, auto-start and customisation. 🎛 **CONTROLS** holds the switches you flick daily — fullscreen, morning brief, wake word, sleep, push-to-talk, HUD style. Only one is open at a time, and each sits under its own header button.
+⚙ **SETUP** holds the things you set once — remote control, desktop shortcut, auto-start and customisation. 🎛 **CONTROLS** holds the switches you flick daily — fullscreen, morning brief, address-aware listening / local privacy, push-to-talk and HUD style. Only one is open at a time, and each sits under its own header button.
 
 The panel used to stutter when it opened, and the obvious explanation — too many buttons — was wrong. Measured, the **first** wake-word state check took **2.104 seconds**, because it imported `openwakeword` on the UI thread the moment the drawer was built. That import now happens off-thread at boot, and the drawer opens instantly whether it has six buttons or sixteen.
 
@@ -605,7 +605,9 @@ python3 main.py
 
 `setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. Install `libegl1` for the Qt interface. For full X11 desktop input, screenshots and clipboard, also install `gnome-screenshot`, `python3-tk` and `xclip` (Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip`). `scrot` alone is not sufficient for the current PyScreeze screenshot backend. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
 
-> ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. The optional **wake phrase** engine is *not* installed here — grab its three local phrase models in one click from **⚙ → WAKE WORD** inside the app. In wake-word mode, any of the installed local phrases — "Hey Jarvis", "Hey Mycroft" or "Hey Rhasspy" — authorizes one request; after the final answer finishes playing, MARK returns to local wake-phrase listening so nearby self-talk is not sent to Gemini. The wake detector runs locally and does not send idle microphone audio to Gemini.
+> ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. **Address-aware mode is the default** — the CONTROLS drawer shows **ADDRESS-AWARE: ON**. No wake phrase is required: Gemini 3.8 Live receives the microphone stream and its Proactive Audio feature decides whether an utterance is directed to MARK. This is the mode for natural, JARVIS-like conversation; input audio is sent to Google while the Live session is connected and may consume audio tokens even when MARK stays silent.
+
+For a local-only alternative, click **ADDRESS-AWARE: ON** to install and enable **LOCAL PRIVACY** mode. In that mode the idle microphone is processed on-device and does not go to Gemini; one of the downloaded phrases ("Hey Jarvis", "Hey Mycroft" or "Hey Rhasspy") opens one request, then MARK returns to local listening. Push-to-Talk is also available. During a detected voice/video call or communication app, the privacy guard keeps audio local until a local wake phrase or Push-to-Talk is used.
 
 ---
 
@@ -618,14 +620,14 @@ python3 main.py
 | **Linux desktop tools** | The installer requires `libegl1` for the Qt interface. On X11, install `gnome-screenshot`, `python3-tk` and `xclip` (or `xsel`) for PyAutoGUI screenshots, Tk support and clipboard. `scrot` alone is not sufficient for current PyScreeze. Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip` |
 | **macOS permissions** | Accessibility (to type and click) and Screen Recording (to see the screen), both under System Settings → Privacy & Security. Until granted, those actions silently do nothing — the OS reports success either way |
 | **Python** | 3.11, 3.12 or 3.13 |
-| **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word). Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
+| **Microphone** | Required for voice interaction. Address-aware mode streams live mic audio to the selected cloud Live provider; LOCAL PRIVACY mode uses on-device wake-phrase detection. Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
 | **Proactive check-ins** | After 15 minutes without user speech, JARVIS may speak when Windows positively confirms the desktop is idle and no fullscreen window, call or phone session is active. This can happen while the wake-word microphone remains asleep; microphone audio stays local. Without a verified idle sensor, check-ins stay silent |
 | **Speakers** | Required for voice replies |
 | **API Key** | Free Gemini API key (entered on first launch → `config/api_keys.json`). Only for the Gemini engine — a fully local setup needs no key and no account |
 | **GPU** | **Not required, anywhere.** The avatar and HUD video are rendered in software; local speech recognition and the neural voice both run on the CPU by default |
 | **YouTube on the HUD** | `yt-dlp`, installed by `setup.py`. Without it, local files and direct URLs still play and YouTube links open in the browser with an explanation |
 | **Aviation Weather** | No API key or account required. The plugin uses the existing `requests` dependency and AviationWeather.gov's public API; an internet connection is required |
-| **Wake word** *(optional)* | One-click download from ⚙ → WAKE WORD (`openwakeword`, a few MB, fully local) |
+| **Local privacy mode** *(optional)* | One-click local wake-phrase models from ⚙ → CONTROLS (`openwakeword`, fully local); address-aware mode needs no wake model |
 | **A different engine** *(optional)* | Nothing extra. ⚙ → ENGINE & PROVIDERS talks to any local or hosted model over HTTP using a library the app already has |
 | **Local speech recognition** *(optional)* | `faster-whisper`, installed from the same panel. **CPU is the default** — a GPU is an option, never a requirement |
 | **Local voice** *(optional)* | `piper-tts` for a neural voice in ~50 languages, one click from the panel — or nothing at all, and it uses the voices your OS already has |
@@ -767,7 +769,7 @@ Most data stays on your machine. There is no MARK server, no telemetry and no ac
 
 All three local files are listed in `.gitignore`, so a fork or a pull request cannot leak them by accident. **If you have already committed `config/api_keys.json` anywhere public, revoke that key** at [aistudio.google.com](https://aistudio.google.com/app/apikey) and generate a new one — removing the file in a later commit does not remove it from the history.
 
-Your voice is streamed to Google's Gemini Live API while a session is open; that is one of the few things that leaves your computer, and it stops when you mute or close the app. The Aviation Weather plugin makes a separate public-data request to AviationWeather.gov when you ask for METAR or TAF information.
+In address-aware mode, your microphone audio is streamed to Google Gemini Live while a session is open so Proactive Audio can decide whether speech is directed to MARK. Input audio may be billed even when the model stays silent. In LOCAL PRIVACY mode, idle microphone audio is analysed on-device and is not sent to Gemini until a wake phrase opens a request. Audio forwarding also stays blocked in a detected communication call until you use a local wake phrase or Push-to-Talk. The Aviation Weather plugin makes a separate public-data request to AviationWeather.gov when you ask for METAR or TAF information.
 
 **Mark LVI changes what that sentence can say about you.** Choose a local engine — Whisper on your CPU, a model served by Ollama or LM Studio, your system's own voice — and nothing leaves the machine at all: no audio, no transcript, no key, no account. Choose a hosted provider instead and your audio and text go to that vendor rather than to Google. The panel says which is which, and the assistant never quietly switches between them.
 

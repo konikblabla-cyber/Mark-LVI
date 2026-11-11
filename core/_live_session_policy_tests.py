@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from core.live_session_policy import (
     go_away_notice, go_away_time_left, live_turn_is_active,
-    should_sleep_after_addressed_response,
+    should_sleep_after_addressed_response, should_use_local_wake_mode,
 )
 
 
@@ -49,6 +49,14 @@ class GoAwayPolicyTests(unittest.TestCase):
     def test_open_mic_mode_keeps_continuous_conversation(self):
         self.assertFalse(should_sleep_after_addressed_response(False, True, True))
         self.assertFalse(should_sleep_after_addressed_response(True, False, True))
+
+    def test_contextual_addressing_takes_priority_over_a_saved_legacy_wake_flag(self):
+        self.assertFalse(should_use_local_wake_mode(True, True))
+        self.assertFalse(should_use_local_wake_mode(False, True))
+
+    def test_local_privacy_mode_requires_explicit_choice_and_disabled_proactivity(self):
+        self.assertTrue(should_use_local_wake_mode(True, False))
+        self.assertFalse(should_use_local_wake_mode(False, False))
 
     def test_missing_time_left_is_not_an_error(self):
         self.assertIsNone(go_away_time_left(SimpleNamespace(go_away=object())))
