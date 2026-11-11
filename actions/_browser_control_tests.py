@@ -114,6 +114,19 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertIn("status=failed", result)
         self.assertEqual(locator.clicked, 0)
 
+    def test_sequence_blocks_generic_link_label_when_href_logs_out(self):
+        locator = FakeLocator(attrs={"href": "/logout"})
+        page = FakePage(locator)
+        session = SimpleNamespace(_get_page=lambda: _async_value(page), _page=page)
+        result = asyncio.run(browser._BrowserSession.click(
+            session,
+            text="Continue",
+            expected_text="Signed out",
+            block_high_impact=True,
+        ))
+        self.assertIn("status=failed", result)
+        self.assertEqual(locator.clicked, 0)
+
     def test_sequence_smart_click_checks_real_control_metadata_before_clicking(self):
         locator = FakeLocator(attrs={"title": "Place order"})
         page = FakePage(locator)
