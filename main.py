@@ -1493,7 +1493,7 @@ class JarvisLive:
         # way for a future release to behave differently. Set "thinking_enabled"
         # in config/api_keys.json to true to let it reason instead.
         if (get_thinking_enabled()
-                and supports_live_thinking_config(LIVE_MODEL)):
+                and supports_legacy_thinking_budget(LIVE_MODEL)):
             out["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
 
         return out
