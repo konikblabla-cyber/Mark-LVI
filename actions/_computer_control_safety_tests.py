@@ -348,8 +348,12 @@ class ComputerControlSafetyTests(unittest.TestCase):
 
 
     def test_verified_visual_click_pins_window_and_checks_exact_postcondition(self):
-        before = {"handle": 7, "process_id": 55, "records": []}
-        after = {"handle": 7, "process_id": 55, "records": []}
+        before = {
+            "handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
+        after = {
+            "handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
         desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
         with patch.object(control.platform, "system", return_value="Windows"), \
              patch.object(control, "_input_window_guard", return_value="") as guard, \
@@ -365,7 +369,9 @@ class ComputerControlSafetyTests(unittest.TestCase):
         self.assertIn("status=done action=computer_control", result)
         self.assertIn("verified=true", result)
         self.assertEqual(guard.call_count, 3)
-        locate.assert_called_once_with("gear icon", "settings.exe")
+        locate.assert_called_once_with(
+            "gear icon", "settings.exe", (10, 20, 90, 70),
+        )
         snapshot.assert_any_call()
         snapshot.assert_any_call(7, 55)
         click.assert_called_once_with(x=20, y=30)
@@ -455,6 +461,23 @@ class ComputerControlSafetyTests(unittest.TestCase):
         snapshot.assert_not_called()
         locate.assert_not_called()
         click.assert_not_called()
+
+
+    def test_visible_window_region_is_clipped_to_primary_screen(self):
+        self.assertEqual(
+            control._visible_window_region((10, 20, 110, 120), (100, 80)),
+            (10, 20, 90, 60),
+        )
+        self.assertEqual(
+            control._visible_window_region((-20, -5, 60, 40), (100, 80)),
+            (0, 0, 60, 40),
+        )
+        self.assertIsNone(
+            control._visible_window_region((110, 0, 200, 70), (100, 80)),
+        )
+        self.assertIsNone(
+            control._visible_window_region((20, 20, 20, 60), (100, 80)),
+        )
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
