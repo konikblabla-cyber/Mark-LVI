@@ -932,7 +932,7 @@ class JarvisLive:
                 if should_stream_call_audio(
                         self._communication_audio_session_active,
                         self._in_call_addressing_enabled,
-                        self._proactive_audio_enabled,
+                        self._proactive_audio_enabled and not self._wake_enabled,
                         bool(
                             self._enhanced_live
                             and self._engine_caps is None
@@ -980,6 +980,7 @@ class JarvisLive:
         enabled = bool(enabled)
         if enabled and not (
                 self._proactive_audio_enabled
+                and not self._wake_enabled
                 and self._enhanced_live
                 and self._engine_caps is None
                 and self._engine is None):
@@ -1932,7 +1933,7 @@ class JarvisLive:
                     and not should_stream_call_audio(
                         self._communication_audio_session_active,
                         self._in_call_addressing_enabled,
-                        self._proactive_audio_enabled,
+                        self._proactive_audio_enabled and not self._wake_enabled,
                         bool(
                             self._enhanced_live
                             and self._engine_caps is None
