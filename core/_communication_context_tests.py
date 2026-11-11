@@ -13,6 +13,7 @@ from core.communication_context import (
     should_auto_wake,
     communication_gate_state,
     should_forward_microphone,
+    should_stream_call_audio,
 )
 
 
@@ -305,6 +306,22 @@ class CommunicationContextTests(unittest.TestCase):
 
     def test_push_to_talk_is_an_explicit_override(self):
         self.assertTrue(should_forward_microphone(True, False, True))
+
+
+    def test_call_audio_semantic_addressing_requires_explicit_consent_and_live_proactivity(self):
+        self.assertTrue(should_stream_call_audio(True, True, True, True))
+        self.assertFalse(should_stream_call_audio(True, False, True, True))
+        self.assertFalse(should_stream_call_audio(True, True, False, True))
+        self.assertFalse(should_stream_call_audio(True, True, True, False))
+        self.assertFalse(should_stream_call_audio(False, True, True, True))
+
+    def test_phone_audio_never_opens_the_pc_communication_audio_gate(self):
+        self.assertFalse(should_stream_call_audio(
+            True, True, True, True, phone_audio_active=True
+        ))
+
+    def test_call_audio_semantic_addressing_is_disabled_by_default(self):
+        self.assertFalse(should_stream_call_audio(True, False, True, True))
 
     def test_normal_desktop_behaviour_is_unchanged(self):
         self.assertTrue(should_forward_microphone(False, False, False))
