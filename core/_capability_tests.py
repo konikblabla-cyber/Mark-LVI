@@ -484,5 +484,41 @@ class ScreenUnderstandingTests(unittest.TestCase):
         self.assertIn("Safe", output)
 
 
+class UISequenceKeyboardStepTests(unittest.TestCase):
+    def test_key_combo_normalisation_accepts_common_navigation_and_shortcuts(self):
+        from actions.ui_sequence import _normalise_key_combo
+
+        self.assertEqual(_normalise_key_combo("Ctrl+S"), ("^s", ""))
+        self.assertEqual(_normalise_key_combo("Shift+Tab"), ("+{TAB}", ""))
+        self.assertEqual(_normalise_key_combo("Enter"), ("{ENTER}", ""))
+
+    def test_key_combo_rejects_text_injection_and_unknown_modifiers(self):
+        from actions.ui_sequence import _normalise_key_combo
+
+        for value in ("Ctrl+Alt+R;whoami", "Win+R", "Ctrl+", "", "arbitrary text"):
+            rendered, error = _normalise_key_combo(value)
+            self.assertIsNone(rendered, value)
+            self.assertTrue(error, value)
+
+    def test_sequence_validates_keyboard_step_and_requires_postcondition(self):
+        from actions.ui_sequence import _validate_steps
+
+        valid, error = _validate_steps([
+            {"action": "press_keys", "keys": "Ctrl+S", "expected_result": "Saved"},
+            {"action": "click", "button_label": "Done", "expected_result": "Complete"},
+        ])
+        self.assertIsNone(error)
+        self.assertEqual(valid[0]["keys"], "^s")
+        self.assertEqual(valid[0]["expected_result"], "Saved")
+
+        invalid, error = _validate_steps([
+            {"action": "press_keys", "keys": "Ctrl+S"},
+            {"action": "click", "button_label": "Done", "expected_result": "Complete"},
+        ])
+        self.assertIsNone(invalid)
+        self.assertIn("expected_result", error)
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
