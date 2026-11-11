@@ -258,7 +258,7 @@ def get_in_call_addressing_enabled() -> bool:
     False by default: other participants' voices can be captured by the PC
     microphone and sent to Gemini when this setting is enabled.
     """
-    return bool(load_api_keys().get("in_call_addressing", False))
+    return load_api_keys().get("in_call_addressing", False) is True
 
 
 def save_in_call_addressing_enabled(enabled: bool) -> None:
