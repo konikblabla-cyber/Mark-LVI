@@ -47,3 +47,13 @@ def supports_legacy_thinking_budget(model_name: str) -> bool:
         "gemini-3.8-live",
         "gemini-3.8-live-extended-thinking",
     }
+
+
+def supports_live_thinking_config(model_name: str) -> bool:
+    """Backward-compatible name used by main.py for legacy thinking config.
+
+    Keep the entry-point import stable while the policy uses the more explicit
+    supports_legacy_thinking_budget name. This intentionally does not enable
+    Gemini 3.8 Extended Thinking's separate async thinking-level protocol.
+    """
+    return supports_legacy_thinking_budget(model_name)
