@@ -119,6 +119,21 @@ def _has_valid_persisted_tool_evidence(step: dict) -> bool:
     return isinstance(digest, str) and bool(re.fullmatch(r"[0-9a-f]{64}", digest))
 
 
+def _experience_context(mission: dict, step: dict) -> str:
+    """Offer non-authoritative hints from related, fully verified local missions."""
+    try:
+        from memory.memory_manager import format_experience_hints
+        query = " ".join((
+            str(mission.get("title") or ""),
+            str(mission.get("goal") or ""),
+            str(step.get("title") or ""),
+        ))
+        return format_experience_hints(query, limit=2)
+    except Exception as exc:
+        print(f"[Mission] Experience lookup unavailable: {type(exc).__name__}")
+        return ""
+
+
 def _continue_instruction(mission: dict, recovery: bool = False) -> str:
     """Hand off the already-claimed step, or recover without replaying it."""
     step = _next_open_step(mission)
@@ -148,7 +163,7 @@ def _continue_instruction(mission: dict, recovery: bool = False) -> str:
             f"Step: {step['title']}. After a real tool returns matching status=done verified=true, "
             "immediately call complete_step for this mission and step. If the tool fails, "
             "is ambiguous, unverified or waits for confirmation, do not claim success; "
-            "block the step or stop at the confirmation gate.")
+            "block the step or stop at the confirmation gate." + _experience_context(mission, step))
 
 
 def startup_recovery_context() -> str:
@@ -541,6 +556,7 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                         "it returns status=done verified=true for that same tool."
                     )
                 step["status"] = "done"
+                step["verified_tool"] = str(evidence.get("tool_name") or "")[:80]
                 step["verification"] = verification_summary(evidence)
                 step["blocked_reason"] = ""
                 step["updated_at"] = _now()
@@ -560,6 +576,14 @@ def run(parameters: dict, player=None, session_memory=None) -> str:
                     next_step.pop("tool_evidence", None)
                     activate_step(session_memory, mission_id, next_step["id"])
                 _write(data)
+                if mission.get("status") == "completed":
+                    try:
+                        from memory.memory_manager import record_verified_mission
+                        record_verified_mission(mission)
+                    except Exception as experience_error:
+                        # Mission completion must not be rolled back by an optional
+                        # learning journal; the failure is visible in diagnostics.
+                        print(f"[Mission] Experience save unavailable: {type(experience_error).__name__}")
                 result = _format(mission)
                 if mission.get("execution_mode") == "autonomous":
                     result += _continue_instruction(mission)
