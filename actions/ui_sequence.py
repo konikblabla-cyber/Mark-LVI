@@ -104,7 +104,7 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             validated.append({
                 "action": "press_keys",
                 "keys": rendered,
-                "key_combo": str(raw.get("keys")).strip().lower(),
+                "key_combo": "+".join("ctrl" if part.strip().lower() == "control" else part.strip().lower() for part in str(raw.get("keys")).split("+")),
                 "expected_result": " ".join(expected.split()),
             })
             continue
