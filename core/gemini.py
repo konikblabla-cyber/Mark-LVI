@@ -214,6 +214,9 @@ _LIVE_FALLBACK = LIVE_MODEL_FALLBACKS[0]
 # after another, and the screen agent's loop is sequential.
 _LIVE_SLOTS = threading.BoundedSemaphore(3)
 _LIVE_SLOT_WAIT = 3.0
+_LIVE_CONNECT_TIMEOUT = 8.0
+_LIVE_SEND_TIMEOUT = 3.0
+_LIVE_CLOSE_TIMEOUT = 2.0
 
 _ONE_SHOT_SYSTEM = (
     "You are a data-processing function, not an assistant and not in a "
@@ -462,32 +465,49 @@ async def _live_turn(parts: list, system: str, key: str, timeout_s: float) -> st
 
     cm = cl.aio.live.connect(model=_live_model(),
                              config=gtypes.LiveConnectConfig(**kwargs))
-    session = await asyncio.wait_for(cm.__aenter__(), 30)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(10.0, float(timeout_s))
+
+    def remaining() -> float:
+        left = deadline - loop.time()
+        if left <= 0:
+            raise asyncio.TimeoutError("Gemini Live one-shot deadline expired")
+        return left
+
+    session = None
     try:
-        await session.send_client_content(
-            turns={"role": "user", "parts": parts}, turn_complete=True)
+        session = await asyncio.wait_for(
+            cm.__aenter__(),
+            timeout=min(_LIVE_CONNECT_TIMEOUT, remaining()),
+        )
+        await asyncio.wait_for(
+            session.send_client_content(
+                turns={"role": "user", "parts": parts}, turn_complete=True
+            ),
+            timeout=min(_LIVE_SEND_TIMEOUT, remaining()),
+        )
         chunks: list[str] = []
 
         async def drain():
+            # The SDK receive iterator ends at interaction/turn completion.
+            # Collect all transcript chunks from that turn and return; a second
+            # receive() would wait for a future turn and add idle latency.
             async for resp in session.receive():
                 sc = getattr(resp, "server_content", None)
                 if sc and sc.output_transcription and sc.output_transcription.text:
                     chunks.append(sc.output_transcription.text)
 
-        await asyncio.wait_for(drain(), timeout=timeout_s)
-        # The transcription can trail the audio turn by a beat; a short second
-        # drain stops a reply being cut mid-token. chat_takeover learned this
-        # the same way and for the same reason.
-        try:
-            await asyncio.wait_for(drain(), timeout=1.5)
-        except asyncio.TimeoutError:
-            pass
+        await asyncio.wait_for(drain(), timeout=remaining())
         return "".join(chunks).strip()
     finally:
-        try:
-            await cm.__aexit__(None, None, None)
-        except Exception:
-            pass
+        if session is not None:
+            try:
+                await asyncio.wait_for(
+                    cm.__aexit__(None, None, None),
+                    timeout=_LIVE_CLOSE_TIMEOUT,
+                )
+            except Exception:
+                pass
 
 
 def _live_call(contents, config, timeout_ms: int, key: str):
@@ -524,13 +544,29 @@ def _live_call(contents, config, timeout_ms: int, key: str):
                 _live_turn(parts, str(system), key, max(10.0, timeout_ms / 1000.0)))
         except BaseException as e:                     # noqa: BLE001
             box["error"] = e
+        finally:
+            # The slot belongs to the worker for the full lifetime of the
+            # network session. A caller-side join timeout must not make room
+            # for another session while this one is still running.
+            _LIVE_SLOTS.release()
 
+    th = threading.Thread(target=runner, daemon=True, name="gemini-live-oneshot")
     try:
-        th = threading.Thread(target=runner, daemon=True, name="gemini-live-oneshot")
         th.start()
-        th.join(timeout=max(15.0, timeout_ms / 1000.0 + 20.0))
-    finally:
+    except BaseException:
         _LIVE_SLOTS.release()
+        raise
+
+    join_timeout = max(
+        15.0,
+        max(10.0, timeout_ms / 1000.0) + _LIVE_CLOSE_TIMEOUT + 3.0,
+    )
+    th.join(timeout=join_timeout)
+    if th.is_alive():
+        raise TimeoutError(
+            "Gemini Live one-shot session exceeded its deadline; "
+            "its concurrency slot remains reserved until cleanup finishes."
+        )
     if "error" in box:
         raise box["error"]
     text = box.get("text")

@@ -10,10 +10,89 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from core import model_router as router
 from core import gemini
+
+
+class LiveCallLifecycleTests(unittest.TestCase):
+    def test_concurrency_slot_is_released_after_worker_finishes(self):
+        slots = gemini.threading.BoundedSemaphore(1)
+
+        class InlineThread:
+            def __init__(self, target, **_kwargs):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+            def join(self, timeout=None):
+                return None
+
+            def is_alive(self):
+                return False
+
+        with patch.object(gemini, "_LIVE_SLOTS", slots), \
+             patch.object(gemini.threading, "Thread", InlineThread), \
+             patch.object(gemini, "_live_turn", new=AsyncMock(return_value="ok")):
+            reply = gemini._live_call("hello", None, 10_000, "test-key")
+
+        self.assertEqual(reply.text, "ok")
+        self.assertTrue(slots.acquire(blocking=False))
+        slots.release()
+
+    def test_join_timeout_keeps_slot_until_background_worker_cleans_up(self):
+        slots = gemini.threading.BoundedSemaphore(1)
+        workers = []
+
+        class DeferredThread:
+            def __init__(self, target, **_kwargs):
+                self.target = target
+                self.finished = False
+                workers.append(self)
+
+            def start(self):
+                return None
+
+            def join(self, timeout=None):
+                return None
+
+            def is_alive(self):
+                return not self.finished
+
+            def finish(self):
+                self.target()
+                self.finished = True
+
+        with patch.object(gemini, "_LIVE_SLOTS", slots), \
+             patch.object(gemini.threading, "Thread", DeferredThread), \
+             patch.object(gemini, "_live_turn", new=AsyncMock(return_value="ok")):
+            with self.assertRaises(TimeoutError):
+                gemini._live_call("hello", None, 10_000, "test-key")
+
+            self.assertFalse(slots.acquire(blocking=False))
+            workers[0].finish()
+            self.assertTrue(slots.acquire(blocking=False))
+            slots.release()
+
+    def test_thread_start_failure_releases_reserved_slot(self):
+        slots = gemini.threading.BoundedSemaphore(1)
+
+        class FailedThread:
+            def __init__(self, target, **_kwargs):
+                self.target = target
+
+            def start(self):
+                raise RuntimeError("thread could not start")
+
+        with patch.object(gemini, "_LIVE_SLOTS", slots), \
+             patch.object(gemini.threading, "Thread", FailedThread):
+            with self.assertRaisesRegex(RuntimeError, "could not start"):
+                gemini._live_call("hello", None, 10_000, "test-key")
+
+        self.assertTrue(slots.acquire(blocking=False))
+        slots.release()
 
 
 class RouterClassificationTests(unittest.TestCase):
