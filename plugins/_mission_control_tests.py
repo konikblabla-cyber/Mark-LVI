@@ -616,7 +616,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
             "records": [],
             "clickables": [],
         }
-        with patch("actions.ui_interaction._snapshot", return_value=snapshot), \
+        with patch("actions.ui_interaction.focus_window_identity", return_value=snapshot), \
              patch("core.ui_reasoning.replan_ui_task") as replan:
             result = mission_control._fresh_ui_plan(
                 'Click the gear icon and verify "Privacy panel"',
@@ -661,6 +661,50 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertIn("unsupported UI action shape", result["reason"])
         self.assertEqual(result["steps"], [])
+
+
+    def test_visual_mission_replan_restores_exact_hwnd_before_using_fresh_snapshot(self):
+        previous_result = {
+            "status": "failed",
+            "step": {
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                    "target_window_handle": 7,
+                    "target_process_id": 55,
+                },
+            },
+        }
+        restored_snapshot = {
+            "handle": 7,
+            "process_id": 55,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [],
+            "clickables": [],
+        }
+        proposed = {"status": "blocked", "reason": "no alternative", "steps": []}
+        with patch(
+            "actions.ui_interaction.focus_window_identity",
+            return_value=restored_snapshot,
+        ) as restore, patch(
+            "core.ui_reasoning.replan_ui_task",
+            return_value=proposed,
+        ) as replan:
+            result = mission_control._fresh_ui_plan(
+                'Click the gear icon and verify "Privacy panel"',
+                previous_result,
+            )
+        restore.assert_called_once_with(7, 55)
+        replan.assert_called_once_with(
+            'Click the gear icon and verify "Privacy panel"',
+            restored_snapshot,
+            previous_result,
+        )
+        self.assertEqual(result, proposed)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
