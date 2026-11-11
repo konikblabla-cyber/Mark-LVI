@@ -933,7 +933,11 @@ class JarvisLive:
                         self._communication_audio_session_active,
                         self._in_call_addressing_enabled,
                         self._proactive_audio_enabled,
-                        bool(self._enhanced_live and self._engine is None),
+                        bool(
+                            self._enhanced_live
+                            and self._engine_caps is None
+                            and self._engine is None
+                        ),
                         self._phone_active,
                         self._communication_context_known,
                 ):
@@ -977,6 +981,7 @@ class JarvisLive:
         if enabled and not (
                 self._proactive_audio_enabled
                 and self._enhanced_live
+                and self._engine_caps is None
                 and self._engine is None):
             self._in_call_addressing_enabled = False
             save_in_call_addressing_enabled(False)
@@ -1928,7 +1933,11 @@ class JarvisLive:
                         self._communication_audio_session_active,
                         self._in_call_addressing_enabled,
                         self._proactive_audio_enabled,
-                        bool(self._enhanced_live and self._engine is None),
+                        bool(
+                            self._enhanced_live
+                            and self._engine_caps is None
+                            and self._engine is None
+                        ),
                         self._phone_active,
                         self._communication_context_known,
                     )):
@@ -3123,6 +3132,16 @@ class JarvisLive:
                 # install this returns None in a few microseconds and nothing
                 # below behaves any differently.
                 self._engine_caps = self._resolve_engine_caps()
+                if self._engine_caps is not None and self._in_call_addressing_enabled:
+                    # A non-Gemini pipeline cannot provide Proactive Audio.
+                    # Revoke the persisted opt-in before opening its microphone path.
+                    self._in_call_addressing_enabled = False
+                    save_in_call_addressing_enabled(False)
+                    self.ui.write_log(
+                        "SYS: In-call ADDRESS-AWARE was disabled because the selected engine "
+                        "does not support Gemini Live Proactive Audio. Call audio stays local."
+                    )
+                    self.ui.refresh_in_call_addressing_btn()
                 config = self._build_config()
 
                 # The conversation itself. `_open_session` gives back a Gemini
