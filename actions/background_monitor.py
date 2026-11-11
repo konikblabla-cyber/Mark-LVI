@@ -182,7 +182,7 @@ def check_all() -> list[str]:
                     parts.append(item["snippet"])
                 if item["source"]:
                     parts.append(f"Source: {item['source']}")
-            alerts.append("\\n".join(parts))
+            alerts.append("\n".join(parts))
             print(f"[Monitor] 🔔 {len(new_items)} new headline(s) for '{topic}'")
 
         except Exception as e:
