@@ -496,6 +496,7 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
         self.assertEqual(len(bounds), 4, snapshot)
         self.assertLess(bounds[0], bounds[2], bounds)
         self.assertLess(bounds[1], bounds[3], bounds)
+        self.assertTrue(snapshot.get("process_name"), snapshot)
 
     def test_real_native_button_without_expected_change_is_not_reported_done(self):
         snapshot = _snapshot(int(self.hwnd))
