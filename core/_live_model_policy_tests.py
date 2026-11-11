@@ -7,6 +7,8 @@ from core.live_model_policy import (
     blocking_tool_declarations,
     supports_live_thinking_config,
 )
+from core import gemini
+
 
 
 class LiveModelPolicyTests(unittest.TestCase):
@@ -14,6 +16,8 @@ class LiveModelPolicyTests(unittest.TestCase):
         self.assertEqual(PRIMARY_LIVE_MODEL, "models/gemini-3.8-live")
         self.assertEqual(LIVE_MODEL_FALLBACKS[0], PRIMARY_LIVE_MODEL)
         self.assertIn("models/gemini-3.1-flash-live-preview", LIVE_MODEL_FALLBACKS)
+        self.assertEqual(gemini.LIVE_MODELS, LIVE_MODEL_FALLBACKS)
+        self.assertIn("gemini-3.8-flash", gemini._LADDERS[gemini.SMART])
 
     def test_live_tools_are_explicitly_blocking(self):
         original = [
