@@ -577,8 +577,7 @@ def _openai_message_text(messages) -> str:
                     chunks.append(part["text"])
         elif content is not None:
             raise RouterError("Groq request contains unsupported content")
-    return "
-".join(chunks)
+    return "\n".join(chunks)
 
 
 def reserve_groq_request(messages) -> int:
