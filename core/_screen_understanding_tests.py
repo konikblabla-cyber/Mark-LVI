@@ -102,7 +102,7 @@ class ScreenUnderstandingTests(unittest.TestCase):
             max_elements=4, max_chars=4000,
         )
         self.assertLessEqual(len(result), 500)
-        self.assertIn("element limit", result)
+        self.assertIn("output truncated", result)
 
     def test_sensitive_labels_are_not_returned(self):
         result = format_accessible_elements([
