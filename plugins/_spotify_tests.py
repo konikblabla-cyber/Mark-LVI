@@ -51,13 +51,17 @@ class SpotifyPluginTests(unittest.TestCase):
             spotify._playlist_uri("https://evil.example/playlist/1234567890123456789012")
 
     def test_track_query_parser_is_bounded(self):
-        self.assertEqual(
-            spotify._search_track_uris("Artist - Song\nArtist - Another Song"),
-            (
-                ["spotify:track:1234567890123456789012", "spotify:track:abcdefghijklmnopqrstuv"],
-                ["Song — Artist", "Another Song — Artist"],
-            ),
-        )
+        with mock.patch.object(spotify, "_search", side_effect=[
+            [{"uri": "spotify:track:1234567890123456789012", "name": "Song", "artists": [{"name": "Artist"}]}],
+            [{"uri": "spotify:track:abcdefghijklmnopqrstuv", "name": "Another Song", "artists": [{"name": "Artist"}]}],
+        ]):
+            self.assertEqual(
+                spotify._search_track_uris("Artist - Song\nArtist - Another Song"),
+                (
+                    ["spotify:track:1234567890123456789012", "spotify:track:abcdefghijklmnopqrstuv"],
+                    ["Song — Artist", "Another Song — Artist"],
+                ),
+            )
         with mock.patch.object(spotify, "_search", return_value=[{"uri": "spotify:track:1234567890123456789012", "name": "Song"}]):
             with self.assertRaises(ValueError):
                 spotify._search_track_uris("\n".join(f"Song {n}" for n in range(26)))
