@@ -136,7 +136,7 @@ CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024   # speaker callback: ~42.7 ms at 24 kHz
-INPUT_AUDIO_BLOCK_SIZE = 512  # microphone callback: 32 ms at 16 kHz
+INPUT_AUDIO_BLOCK_SIZE = 640  # microphone callback: 40 ms at 16 kHz
 
 # RMS below which 16-bit PCM is treated as room silence; above _LEVEL_FULL it
 # reads as a full-height waveform. Tuned so ordinary speech lands mid-range and
@@ -1797,6 +1797,7 @@ class JarvisLive:
                 )
             finally:
                 queue.task_done()
+
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
