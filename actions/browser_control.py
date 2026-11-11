@@ -1319,6 +1319,13 @@ class _BrowserSession:
                         clicked=True,
                         target=description,
                     )
+            try:
+                verified, reason = await _verify_page_postcondition(
+                    page, expected_text, expected_url,
+                )
+            except Exception as exc:
+                verified = False
+                reason = f"the click may have happened but verification failed ({type(exc).__name__})"
             if not verified:
                 return outcome.unverified(
                     "browser_control", reason, clicked=True, target=description,
