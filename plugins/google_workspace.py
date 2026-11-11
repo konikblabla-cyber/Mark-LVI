@@ -45,9 +45,12 @@ PLUGIN_SETTINGS = {
 
 _SCOPES = (
     "https://www.googleapis.com/auth/gmail.readonly",
+    # gmail.compose includes draft management and sending; a separate gmail.send
+    # scope would be redundant for this feature set.
     "https://www.googleapis.com/auth/gmail.compose",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/calendar.events",
+    # The plugin only uses the user's primary calendar, so do not request access
+    # to every calendar that may be shared with the user.
+    "https://www.googleapis.com/auth/calendar.events.owned",
 )
 _MAX_RESULTS = 10
 _MAX_BODY_CHARS = 12_000
