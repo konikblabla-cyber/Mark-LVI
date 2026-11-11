@@ -526,6 +526,13 @@ class BrowserBehaviorSafetyTests(unittest.TestCase):
         self.assertNotIn("MUST_NOT_LEAK", result)
         self.assertNotIn("token=private", result)
 
+    def test_browser_control_label_sanitizer_strips_unicode_format_controls(self):
+        value = "Pay now" + "\u202e" + " disguised"
+        cleaned = browser._clean_control_label(value, 100)
+        self.assertNotIn("\u202e", cleaned)
+        self.assertIn("Pay now", cleaned)
+        self.assertEqual(browser._clean_control_label("x" * 40, 12), "x" * 12)
+
     def test_inspect_controls_fails_closed_when_dom_snapshot_fails(self):
         page = FakePage(FakeLocator())
         async def fail_snapshot(_script):
