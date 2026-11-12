@@ -1008,22 +1008,21 @@ def computer_control(
                 frozenset(("win", "r")),
             }
             if isinstance(keys, list) and frozenset(keys) in dangerous:
-                from core.autonomy_policy import explicitly_requested_target_action, scope_request
+                from core.autonomy_policy import scope_request
+                request = scope_request(session_memory).casefold()
                 chord = frozenset(keys)
-                action_target = (
-                    "clear browser data" if chord == frozenset(("ctrl", "shift", "delete"))
-                    else "close active window" if chord in {
-                        frozenset(("alt", "f4")), frozenset(("ctrl", "w")),
-                        frozenset(("ctrl", "q")),
-                    }
-                    else "lock Windows" if chord == frozenset(("win", "l"))
-                    else "open Windows security screen" if chord == frozenset(("ctrl", "alt", "delete"))
-                    else "open Run dialog" if chord == frozenset(("win", "r"))
-                    else "delete selected item"
-                )
-                if not explicitly_requested_target_action(
-                    scope_request(session_memory), action_target
-                ):
+                phrases = {
+                    frozenset(("alt", "f4")): r"(?:alt\s*\+\s*f4|close\s+(?:the\s+)?active\s+window|zamknij\s+aktywne\s+okno)",
+                    frozenset(("ctrl", "w")): r"(?:ctrl\s*\+\s*w|close\s+(?:the\s+)?(?:current\s+)?tab|zamknij\s+kartę|zamknij\s+karte)",
+                    frozenset(("ctrl", "q")): r"(?:ctrl\s*\+\s*q|quit\s+(?:the\s+)?app|close\s+(?:the\s+)?application|zamknij\s+program)",
+                    frozenset(("ctrl", "shift", "delete")): r"(?:ctrl\s*\+\s*shift\s*\+\s*delete|clear\s+(?:browser\s+)?(?:history|browsing\s+data)|wyczyść\s+(?:historię|dane\s+przeglądania)|wyczysc\s+(?:historie|dane\s+przegladania))",
+                    frozenset(("ctrl", "alt", "delete")): r"(?:ctrl\s*\+\s*alt\s*\+\s*delete|open\s+(?:the\s+)?(?:windows\s+)?security\s+screen|otwórz\s+ekran\s+zabezpieczeń|otworz\s+ekran\s+zabezpieczen)",
+                    frozenset(("shift", "delete")): r"(?:shift\s*\+\s*delete|permanently\s+delete\s+(?:the\s+)?selected\s+item|trwale\s+usuń\s+zaznaczony\s+element|trwale\s+usun\s+zaznaczony\s+element)",
+                    frozenset(("win", "l")): r"(?:win\s*\+\s*l|lock\s+(?:windows|the\s+pc|the\s+computer)|zablokuj\s+(?:windows|komputer))",
+                    frozenset(("win", "r")): r"(?:win\s*\+\s*r|open\s+(?:the\s+)?run\s+dialog|otwórz\s+okno\s+uruchamiania|otworz\s+okno\s+uruchamiania)",
+                }
+                explicitly_named = bool(re.search(phrases[chord], request, re.IGNORECASE))
+                if not explicitly_named:
                     return confirm.request(
                         key="computer_control.dangerous_hotkey",
                         title="Confirm potentially disruptive keyboard shortcut",
@@ -1038,10 +1037,13 @@ def computer_control(
         if action == "press":
             key = str(params.get("key", "enter") or "enter").strip().lower()
             if key == "delete":
-                from core.autonomy_policy import explicitly_requested_target_action, scope_request
-                if not explicitly_requested_target_action(
-                    scope_request(session_memory), "delete selected item"
-                ):
+                from core.autonomy_policy import scope_request
+                explicit_keypress = bool(re.search(
+                    r"\b(?:press|hit|tap)\s+(?:the\s+)?delete(?:\s+key)?\b|"
+                    r"\bnaciśnij\s+(?:klawisz\s+)?delete\b",
+                    scope_request(session_memory), re.IGNORECASE,
+                ))
+                if not explicit_keypress:
                     return confirm.request(
                         key="computer_control.delete_key",
                         title="Confirm Delete key",
