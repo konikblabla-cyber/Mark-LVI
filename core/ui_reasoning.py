@@ -39,7 +39,7 @@ _HIGH_IMPACT_WORDS = {
 
 _NEGATIVE_STATE_WORDS = (
     "turn off", "switch off", "disable", "uncheck", "untick", "deactivate",
-    "stop", "block", "mute", "silence", "prevent", "turn down",
+    "stop", "block", "mute", "silence", "prevent",
     "wyłącz", "wylacz", "odznacz", "wycisz", "zablokuj", "zatrzymaj",
     "wyłącz opcję", "wylacz opcje",
 )
@@ -65,11 +65,12 @@ _NEGATED_SELECTION_COMMANDS = (
 )
 _NEGATED_CLICK_COMMANDS = (
     "don't click", "do not click", "never click", "don't press", "do not press",
-    "don't tap", "do not tap", "nie klikaj", "nie naciskaj", "nie wciśnij",
+    "don't tap", "do not tap", "nie klikaj", "nie naciskaj", "nie wciskaj",
 )
 _SELECT_WORDS = (
-    "select", "choose", "open", "switch to", "go to", "show", "wybierz",
+    "select", "choose", "open", "switch to", "go to", "show", "set", "use", "configure", "wybierz",
     "otwórz", "otworz", "przejdź", "przejdz", "wejdź", "wejdz", "pokaż", "pokaz",
+    "ustaw", "użyj", "uzyj", "korzystaj",
 )
 _CLICK_WORDS = (
     "click", "press", "activate", "tap", "kliknij", "naciśnij", "nacisnij",
