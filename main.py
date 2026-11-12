@@ -972,7 +972,7 @@ class JarvisLive:
                     self.wake(reason="desktop activity")
                 # The local mic gate is already in its correct state; only now
                 # may the optional cloud context update run.
-                await self._refresh_live_focus_context()
+                self._schedule_live_focus_context_update()
                 continue
 
             # Close any one-shot request before publishing a new context state.
@@ -1035,7 +1035,7 @@ class JarvisLive:
 
             # Update Gemini only after the local communication gate has been
             # closed/opened for the new state, so network latency cannot delay privacy.
-            await self._refresh_live_focus_context()
+            self._schedule_live_focus_context_update()
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
