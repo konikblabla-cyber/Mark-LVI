@@ -117,6 +117,30 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             validated.append({"action": action, "radio_label": " ".join(label.split())})
             continue
 
+        if action == "select_tab_item":
+            allowed = {"action", "tab_label"}
+            label = raw.get("tab_label")
+            if set(raw) != allowed:
+                return None, f"tab step {index} must contain only action and tab_label"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong tab_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a sensitive tab"
+            validated.append({"action": action, "tab_label": " ".join(label.split())})
+            continue
+
+        if action == "select_list_item":
+            allowed = {"action", "item_label"}
+            label = raw.get("item_label")
+            if set(raw) != allowed:
+                return None, f"list selection step {index} must contain only action and item_label"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong item_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a sensitive list item"
+            validated.append({"action": action, "item_label": " ".join(label.split())})
+            continue
+
         if action == "select_dropdown_option":
             allowed = {"action", "combo_label", "option_label"}
             combo, option = raw.get("combo_label"), raw.get("option_label")
@@ -418,7 +442,10 @@ def _continue_sequence(state: dict, start_index: int) -> str:
             _ui_sequence_progress(
                 state, f"Windows workflow step {index + 1}/{len(state['steps'])}: {step['action']}."
             )
-            if step["action"] in {"set_checkbox_state", "select_radio_option", "select_dropdown_option"}:
+            if step["action"] in {
+                "set_checkbox_state", "select_radio_option", "select_dropdown_option",
+                "select_tab_item", "select_list_item",
+            }:
                 action = step["action"]
                 if action == "set_checkbox_state":
                     from actions import ui_checkbox
@@ -440,7 +467,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                     progress_label = label
                     title = f"Confirm option: {label}"
                     detail = f"MARK will select '{label}'. It will not submit or save the form."
-                else:
+                elif action == "select_dropdown_option":
                     from actions import ui_dropdown
                     combo, option = step["combo_label"], step["option_label"]
                     worker = ui_dropdown._select_worker
@@ -450,6 +477,28 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                     progress_label = f"{combo}: {option}"
                     title = f"Confirm selection: {option}"
                     detail = f"MARK will select '{option}' in '{combo}'. It will not submit or save the form."
+                else:
+                    label = (
+                        step["tab_label"] if action == "select_tab_item"
+                        else step["item_label"]
+                    )
+                    control_type = "TabItem" if action == "select_tab_item" else "ListItem"
+                    worker = ui._select_item_on_window
+                    args = (
+                        state["window_handle"], state["process_id"], label,
+                        control_type,
+                    )
+                    needs_confirmation = ui._requires_confirmation(label)
+                    success = {"selected", "already_selected"}
+                    progress_label = label
+                    title = (
+                        f"Confirm tab: {label}" if action == "select_tab_item"
+                        else f"Confirm list selection: {label}"
+                    )
+                    detail = (
+                        f"MARK will select the exact visible {control_type} '{label}'. "
+                        "It will not submit or save the form."
+                    )
                 def perform_pattern_step():
                     result = _run_pattern_step(action, worker, args, success)
                     if not result.startswith("status=done "):
@@ -743,7 +792,7 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Run verified 2–8 step Windows workflows with exact clicks, text entry, checkboxes, radio/dropdown choices, tree navigation and keyboard shortcuts.",
+    "brief": "Run verified 2–8 step Windows workflows with exact clicks, text entry, tabs, list items, checkboxes, radio/dropdown choices, tree navigation and keyboard shortcuts.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
@@ -785,14 +834,14 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered steps. Use click, fill_text, press_keys with one key/chord and expected_result, set_checkbox_state with an exact label and boolean, select_radio_option with an exact label, select_dropdown_option with exact ComboBox and visible option labels, or set_tree_item_expanded.",
+                "description": "Two to eight ordered steps. Use click, fill_text, press_keys with one key/chord and expected_result, set_checkbox_state with an exact label and boolean, select_tab_item with an exact tab label, select_list_item with an exact list label, select_radio_option with an exact label, select_dropdown_option with exact ComboBox and visible option labels, or set_tree_item_expanded.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "enum": ["click", "fill_text", "press_keys", "set_tree_item_expanded", "set_checkbox_state", "select_radio_option", "select_dropdown_option"],
-                            "description": "Use click, fill_text, press_keys, set_tree_item_expanded, set_checkbox_state, select_radio_option or select_dropdown_option with the exact fields required by that action.",
+                            "enum": ["click", "fill_text", "press_keys", "set_tree_item_expanded", "set_checkbox_state", "select_tab_item", "select_list_item", "select_radio_option", "select_dropdown_option"],
+                            "description": "Use click, fill_text, press_keys, set_tree_item_expanded, set_checkbox_state, select_tab_item, select_list_item, select_radio_option or select_dropdown_option with the exact fields required by that action.",
                         },
                         "button_label": {
                             "type": "STRING",
@@ -836,7 +885,7 @@ TOOL = {
                         },
                         "item_label": {
                             "type": "STRING",
-                            "description": "For set_tree_item_expanded: exact accessible label of one visible, enabled, non-sensitive Windows TreeItem.",
+                            "description": "For select_list_item: exact accessible label of one visible, enabled, non-sensitive ListItem. For set_tree_item_expanded: exact accessible label of one visible, enabled, non-sensitive Windows TreeItem.",
                         },
                         "expanded": {
                             "type": "BOOLEAN",
