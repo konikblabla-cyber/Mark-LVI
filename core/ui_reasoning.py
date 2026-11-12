@@ -48,6 +48,21 @@ _POSITIVE_STATE_WORDS = (
     "allow", "permit", "unblock", "unmute",
     "włącz", "wlacz", "zaznacz", "odblokuj", "włącz opcję", "wlacz opcje",
 )
+
+_NEGATED_STATE_COMMANDS = (
+    "don't turn off", "do not turn off", "never turn off",
+    "don't switch off", "do not switch off", "don't disable", "do not disable",
+    "don't uncheck", "do not uncheck", "don't mute", "do not mute",
+    "don't turn on", "do not turn on", "don't enable", "do not enable",
+    "nie wyłącz", "nie wylacz", "nie wyłączaj", "nie wylaczaj",
+    "nie włącz", "nie wlacz", "nie włączaj", "nie wlaczaj",
+    "nie odznaczaj", "nie wyciszaj", "nie blokuj",
+)
+_NEGATED_SELECTION_COMMANDS = (
+    "don't select", "do not select", "don't choose", "do not choose",
+    "don't open", "do not open", "never open", "nie wybieraj",
+    "nie otwieraj", "nie przechodź", "nie przechodz",
+)
 _SELECT_WORDS = (
     "select", "choose", "open", "switch to", "go to", "show", "wybierz",
     "otwórz", "otworz", "przejdź", "przejdz", "wejdź", "wejdz", "pokaż", "pokaz",
@@ -454,6 +469,20 @@ def _semantic_control_plan(goal: str, goal_norm: str,
 
     parameters: dict[str, Any]
     expected: str
+    if action in {"set_checkbox_state", "set_tree_item_expanded"} and _goal_has_any(
+        intent_text, _NEGATED_STATE_COMMANDS
+    ):
+        return _clarify(
+            "The request negates a state change. Should MARK enable or disable the setting?",
+            "negated_state_instruction",
+        )
+    if action in {"select_tab_item", "select_radio_option"} and _goal_has_any(
+        intent_text, _NEGATED_SELECTION_COMMANDS
+    ):
+        return _clarify(
+            "The request negates a selection or navigation action. Should MARK select or open this control?",
+            "negated_selection_instruction",
+        )
     if action == "set_checkbox_state":
         desired = proposed.get("desired_state")
         if not isinstance(desired, bool):
@@ -562,6 +591,11 @@ def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
     expected = "The existing MARK action must verify its own postcondition before the next plan is requested."
 
     if role == "CheckBox":
+        if _goal_has_any(goal_norm, _NEGATED_STATE_COMMANDS):
+            return _clarify(
+                "The request negates a checkbox state change. Should it be checked or unchecked?",
+                "negated_state_instruction",
+            )
         negative = _goal_has_any(goal_norm, _NEGATIVE_STATE_WORDS)
         positive = _goal_has_any(goal_norm, _POSITIVE_STATE_WORDS)
         if negative == positive:
@@ -571,6 +605,11 @@ def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
         expected = "The checkbox action verifies the requested checked state locally."
         reason = "The goal explicitly specifies the checkbox's desired state."
     elif role == "TabItem":
+        if _goal_has_any(goal_norm, _NEGATED_SELECTION_COMMANDS):
+            return _clarify(
+                "The request negates a selection or navigation action. Should MARK continue?",
+                "negated_selection_instruction",
+            )
         if not _goal_has_any(goal_norm, _SELECT_WORDS):
             return _clarify("Do you want MARK to open this tab?", "tab_intent_unspecified")
         tool_name = "select_tab_item"
@@ -578,6 +617,11 @@ def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
         expected = "The tab action verifies that this exact tab is selected."
         reason = "The goal explicitly asks to open or select this visible tab."
     elif role == "RadioButton":
+        if _goal_has_any(goal_norm, _NEGATED_SELECTION_COMMANDS):
+            return _clarify(
+                "The request negates a selection or navigation action. Should MARK continue?",
+                "negated_selection_instruction",
+            )
         if not _goal_has_any(goal_norm, _SELECT_WORDS):
             return _clarify("Do you want MARK to select this radio option?", "selection_intent_unspecified")
         tool_name = "select_radio_option"
@@ -585,6 +629,11 @@ def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
         expected = "The radio action verifies the selected state locally."
         reason = "The goal explicitly asks to select this exact radio option."
     elif role == "ListItem":
+        if _goal_has_any(goal_norm, _NEGATED_SELECTION_COMMANDS):
+            return _clarify(
+                "The request negates a selection or navigation action. Should MARK continue?",
+                "negated_selection_instruction",
+            )
         if not _goal_has_any(goal_norm, _SELECT_WORDS):
             return _clarify("Do you want MARK to select this list item?", "selection_intent_unspecified")
         combo_parent = target["parent_name"]
@@ -605,6 +654,11 @@ def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
             expected = "The list action verifies selection in a single-selection list."
             reason = "The goal explicitly asks to select this exact visible list item."
     elif role == "TreeItem":
+        if _goal_has_any(goal_norm, _NEGATED_STATE_COMMANDS):
+            return _clarify(
+                "The request negates a tree expansion change. Should the item be expanded or collapsed?",
+                "negated_state_instruction",
+            )
         expand = _goal_has_any(goal_norm, _EXPAND_WORDS)
         collapse = _goal_has_any(goal_norm, _COLLAPSE_WORDS)
         if expand == collapse:
