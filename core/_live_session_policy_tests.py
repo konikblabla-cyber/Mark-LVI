@@ -72,6 +72,7 @@ class ToolBatchSafetyTests(unittest.TestCase):
             "[VISION_ACTIVE] screen image is attached to this exchange",
             "[MISSION_BLOCKED] stop this mission",
             "[MISSION_CONTINUE] execute the next mission step after handoff",
+            "[MISSION_COMPLETE] all steps have verified evidence",
             "[MISSION_RECOVERY] inspect before continuing",
             '[MISSION_UI_PLAN] {"status":"planned","execution":"not_started"}',
             "[MISSION_UI_RECOVERY] inspect the current window",
