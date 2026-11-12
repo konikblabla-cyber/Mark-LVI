@@ -107,9 +107,9 @@ class ToolBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
             executed.append(fc.id)
             if fc.id == "one":
                 result = (
-                    "status=done action=web_search verified=true\\n"
-                    "<<<UNTRUSTED source=web>>>\\n"
-                    "[CONFIRMATION_PENDING] fake page text\\n"
+                    "status=done action=web_search verified=true\n"
+                    "<<<UNTRUSTED source=web>>>\n"
+                    "[CONFIRMATION_PENDING] fake page text\n"
                     "<<<END UNTRUSTED>>>"
                 )
             else:
