@@ -79,6 +79,28 @@ class AutonomyPolicyTests(unittest.TestCase):
             with self.subTest(target=target):
                 self.assertFalse(requires_ui_confirmation(target, user_request=request))
 
+    def test_explicit_file_and_field_commands_authorize_the_named_target(self):
+        for target, request in (
+            ("report.txt", "Overwrite report.txt"),
+            ("report.txt", "Delete report.txt permanently"),
+            ("Downloads", "Organize Downloads"),
+            ("search field", "Replace text in search field"),
+            ("project folder", "Move project folder"),
+            ("draft.docx", "Edit draft.docx"),
+        ):
+            with self.subTest(target=target, request=request):
+                from core.autonomy_policy import explicitly_requested_target_action
+                self.assertTrue(explicitly_requested_target_action(request, target))
+
+    def test_negated_file_commands_do_not_authorize(self):
+        from core.autonomy_policy import explicitly_requested_target_action
+        self.assertFalse(explicitly_requested_target_action(
+            "Do not delete report.txt", "report.txt"
+        ))
+        self.assertFalse(explicitly_requested_target_action(
+            "Nie usuwaj raport.txt", "raport.txt"
+        ))
+
     def test_direct_send_authorization_is_recipient_scoped_and_one_shot(self):
         scope = new_turn_authorization("Wyślij wiadomość do Alex: będę o 18:30")
         self.assertTrue(consume_explicit_send_authorization(scope, "Alex", "będę o 18:30"))
