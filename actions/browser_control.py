@@ -2261,20 +2261,19 @@ def _browser_control_execute(
                     target_info = "active form could not be inspected"
                 from core.autonomy_policy import requires_ui_confirmation, scope_request
                 needs_confirmation = (
-                    not isinstance(submit_info, dict)
-                    or (
-                        submit_info.get("risky") is not False
-                        and requires_ui_confirmation(
-                            "submit " + target_info,
-                            user_request=scope_request(session_memory),
-                        )
+                    (
+                        not isinstance(submit_info, dict)
+                        or submit_info.get("risky") is not False
                     )
-                    or (
-                        requires_browser_confirmation("smart_click", target_info)
-                        and requires_ui_confirmation(
-                            target_info,
-                            user_request=scope_request(session_memory),
-                        )
+                    and requires_ui_confirmation(
+                        "submit " + target_info,
+                        user_request=scope_request(session_memory),
+                    )
+                ) or (
+                    requires_browser_confirmation("smart_click", target_info)
+                    and requires_ui_confirmation(
+                        target_info,
+                        user_request=scope_request(session_memory),
                     )
                 )
                 if needs_confirmation:
