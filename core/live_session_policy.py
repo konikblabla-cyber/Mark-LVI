@@ -61,6 +61,7 @@ def should_halt_tool_batch(result) -> bool:
     if any(marker in control_text for marker in (
         "[CONFIRMATION_PENDING]",
         "[CONFIRMATION_BUSY]",
+        "[MISSION_PLAN_SAVED]",
         "[VISION_ACTIVE]",
         "[MISSION_BLOCKED]",
         "[MISSION_CONTINUE]",
