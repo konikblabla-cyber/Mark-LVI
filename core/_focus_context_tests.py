@@ -24,7 +24,7 @@ class FocusContextTests(unittest.TestCase):
 
     def test_session_prompt_gets_only_opt_in_safe_foreground_metadata(self):
         result = format_focus_context_for_prompt(
-            r"C:\\Users\\person\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+            r"C:\Users\person\AppData\Local\Programs\Microsoft VS Code\Code.exe"
         )
         self.assertIn("application was code", result)
         self.assertIn("programming", result)
@@ -32,7 +32,7 @@ class FocusContextTests(unittest.TestCase):
         self.assertNotIn("Users", result)
         self.assertNotIn("person", result)
         self.assertNotIn("Code.exe", result)
-        self.assertNotIn("window title", result.lower().split("no window title")[0])
+        self.assertNotIn("window title", result.lower())
 
     def test_session_prompt_is_empty_for_unknown_foreground(self):
         self.assertEqual(format_focus_context_for_prompt(""), "")
