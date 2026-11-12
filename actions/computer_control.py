@@ -962,14 +962,20 @@ def computer_control(
             text = str(params.get("text", "") or "")
             clear_first = bool(params.get("clear_first", False))
             if clear_first:
-                return confirm.request(
-                    key="computer_control.smart_type.replace_text",
-                    title="Confirm replacing active text",
-                    detail="This selects all text in the active application before typing the replacement. Confirm only if the intended field or document is active.",
-                    run=lambda: _run_confirmed_input(
-                        lambda: _smart_type(text, clear_first=True), target_app
-                    ),
-                )
+                from core.autonomy_policy import explicitly_requested_target_action, scope_request
+                target_label = "replace active text " + str(target_app or "field")
+                if not explicitly_requested_target_action(
+                    scope_request(session_memory), target_label
+                ):
+                    return confirm.request(
+                        key="computer_control.smart_type.replace_text",
+                        title="Confirm replacing active text",
+                        detail="This selects all text in the active application before typing the replacement. Confirm only if the intended field or document is active.",
+                        run=lambda: _run_confirmed_input(
+                            lambda: _smart_type(text, clear_first=True), target_app
+                        ),
+                    )
+                return _smart_type(text, clear_first=True)
             return _smart_type(text, clear_first=False)
 
         if action in ("click", "left_click"):
@@ -1093,12 +1099,17 @@ def computer_control(
             return f"Waited {secs}s"
 
         if action == "clear_field":
-            return confirm.request(
-                key="computer_control.clear_field",
-                title="Confirm clearing active text",
-                detail="This selects all text in the active application and deletes it. Confirm only if the intended field or document is active.",
-                run=lambda: _run_confirmed_input(_clear_field, target_app),
-            )
+            from core.autonomy_policy import explicitly_requested_target_action, scope_request
+            if not explicitly_requested_target_action(
+                scope_request(session_memory), "clear active field " + str(target_app or "")
+            ):
+                return confirm.request(
+                    key="computer_control.clear_field",
+                    title="Confirm clearing active text",
+                    detail="This selects all text in the active application and deletes it. Confirm only if the intended field or document is active.",
+                    run=lambda: _run_confirmed_input(_clear_field, target_app),
+                )
+            return _clear_field()
 
         if action == "focus_window":
             return _focus_window(params.get("title", ""))
