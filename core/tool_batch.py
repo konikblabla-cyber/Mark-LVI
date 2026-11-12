@@ -38,6 +38,7 @@ async def dispatch_tool_batch(
     responses = []
     halted = False
     for call in function_calls:
+        print(f"[JARVIS] 📞 {getattr(call, 'name', 'tool')}")
         if halted:
             responses.append(make_response(call, _NOT_EXECUTED))
             continue
