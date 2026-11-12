@@ -915,9 +915,15 @@ class JarvisLive:
                 )
                 # The executable is already read locally for call privacy. A
                 # stable category provides broad context, never window contents.
-                focus_change = self._focus_tracker.observe(foreground_app, time.monotonic())
-                if focus_change is not None:
-                    self._focus_context = focus_change
+                if foreground_app:
+                    focus_change = self._focus_tracker.observe(foreground_app, time.monotonic())
+                    if focus_change is not None:
+                        self._focus_context = focus_change
+                else:
+                    # A successful sensor read with no foreground identity is
+                    # not permission to keep telling Gemini the old app is active.
+                    self._focus_tracker.reset()
+                    self._focus_context = None
             except Exception as exc:
                 # A failed privacy probe is not evidence that no call is active.
                 # Close the mic gate immediately; the next successful poll may
