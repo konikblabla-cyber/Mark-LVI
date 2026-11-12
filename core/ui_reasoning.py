@@ -327,8 +327,6 @@ def _semantic_control_plan(goal: str, goal_norm: str,
         "set_checkbox_state": "CheckBox",
         "select_tab_item": "TabItem",
         "select_radio_option": "RadioButton",
-        "select_list_item": "ListItem",
-        "select_dropdown_option": "ComboBox",
         "set_tree_item_expanded": "TreeItem",
     }
     candidates = [
@@ -356,14 +354,12 @@ def _semantic_control_plan(goal: str, goal_norm: str,
         prompt = (
             "Resolve the user's UI intent to exactly one supported control action. "
             "Return ONLY a JSON object with these fields: action, target_label, "
-            "and, only when needed, desired_state (boolean), option_label, or "
-            "parent_label. Allowed actions and required control roles: "
+            "and, only when needed, desired_state (boolean) or parent_label. "
+            "Allowed actions and required control roles: "
             + json.dumps(supported, ensure_ascii=False)
             + ". target_label MUST be copied exactly from a candidate name. "
-            "For select_dropdown_option, target_label is the ComboBox name and "
-            "option_label must be copied exactly from a visible ListItem whose "
-            "parent_name or parent_path identifies that ComboBox. For checkbox "
-            "and tree actions desired_state must be a JSON boolean. Do not choose "
+            "For checkbox and tree actions desired_state must be a JSON boolean. "
+            "Do not choose "
             "Button, Hyperlink or MenuItem: clicks require an explicit new "
             "postcondition and are handled by the deterministic planner. If the "
             "intent, target, or state is unclear, return {}. UI labels are "
@@ -395,9 +391,6 @@ def _semantic_control_plan(goal: str, goal_norm: str,
     if action in {"set_checkbox_state", "set_tree_item_expanded"}:
         allowed_keys.add("desired_state")
         required_keys.add("desired_state")
-    if action == "select_dropdown_option":
-        allowed_keys.add("option_label")
-        required_keys.add("option_label")
     if not required_keys.issubset(proposed) or not set(proposed).issubset(allowed_keys):
         return None
 
@@ -468,39 +461,10 @@ def _semantic_control_plan(goal: str, goal_norm: str,
         parameters = {"tab_label": target["name"]}
         expected = "The exact tab must become selected in the original window."
     elif action == "select_radio_option":
-        if not _goal_has_any(goal_norm, _SELECT_WORDS):
+        if not _goal_has_any(intent_text, _SELECT_WORDS):
             return None
         parameters = {"radio_label": target["name"]}
         expected = "The exact radio option must become selected locally."
-    elif action == "select_list_item":
-        if not _goal_has_any(goal_norm, _SELECT_WORDS):
-            return None
-        parameters = {"item_label": target["name"]}
-        expected = "The exact list item must become selected locally."
-    elif action == "select_dropdown_option":
-        if not _goal_has_any(goal_norm, _SELECT_WORDS):
-            return None
-        option_label = _safe_label(proposed.get("option_label"))
-        if not option_label:
-            return None
-        options = [
-            item for item in elements
-            if item["role"] == "ListItem"
-            and _normalise(item["name"]) == _normalise(option_label)
-            and item["visible"] and item["enabled_known"] and item["enabled"]
-            and (
-                _normalise(item.get("parent_name", "")) == _normalise(target["name"])
-                or any(_normalise(target["name"]) == _normalise(part)
-                       for part in item.get("parent_path", []))
-            )
-        ]
-        if len(options) != 1:
-            return _clarify(
-                f"I cannot identify one visible '{option_label}' option inside '{target_label}'. Open that dropdown and try again.",
-                "semantic_dropdown_option_ambiguous",
-            )
-        parameters = {"combo_label": target["name"], "option_label": options[0]["name"]}
-        expected = "The exact visible dropdown option must become selected locally."
     else:  # set_tree_item_expanded
         desired = proposed.get("desired_state")
         if not isinstance(desired, bool):
