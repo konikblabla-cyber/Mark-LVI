@@ -2839,6 +2839,12 @@ class JarvisLive:
                 memory       = await asyncio.to_thread(load_memory)
                 monitors     = await asyncio.to_thread(list_monitors)
                 recent_turns = self._session_log[-8:] if self._session_log else []
+                mission_context = ""
+                try:
+                    from plugins.mission_control import proactive_context
+                    mission_context = await asyncio.to_thread(proactive_context)
+                except Exception as mission_context_error:
+                    print(f"[Mission] Proactive context unavailable: {type(mission_context_error).__name__}")
                 project_context = ""
                 if _desktop_opt_in:
                     selected_folder = getattr(self.ui, "current_file", None)
@@ -2856,6 +2862,7 @@ class JarvisLive:
                     desktop_context = _desktop_ctx if _desktop_opt_in else None,
                     focus_context = self._focus_context if _desktop_opt_in else None,
                     project_context = project_context,
+                    mission_context = mission_context,
                 )
                 with self._speaking_lock:
                     speaking_now = self._is_speaking
