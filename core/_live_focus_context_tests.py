@@ -93,10 +93,11 @@ class LiveFocusContextIntegrationTests(unittest.TestCase):
                 await release.wait()
 
             agent._refresh_live_focus_context = pending_update
-            agent._schedule_live_focus_context_update()
-            first = agent._focus_context_update_task
-            agent._schedule_live_focus_context_update()
-            self.assertIs(agent._focus_context_update_task, first)
+            with patch("main.get_desktop_awareness_enabled", return_value=True):
+                agent._schedule_live_focus_context_update()
+                first = agent._focus_context_update_task
+                agent._schedule_live_focus_context_update()
+                self.assertIs(agent._focus_context_update_task, first)
             release.set()
             await first
 
@@ -106,10 +107,11 @@ class LiveFocusContextIntegrationTests(unittest.TestCase):
         async def run():
             agent = _agent()
             agent._refresh_live_focus_context = AsyncMock()
-            agent._schedule_live_focus_context_update()
-            task = agent._focus_context_update_task
-            self.assertIsNotNone(task)
-            await task
+            with patch("main.get_desktop_awareness_enabled", return_value=True):
+                agent._schedule_live_focus_context_update()
+                task = agent._focus_context_update_task
+                self.assertIsNotNone(task)
+                await task
             agent._refresh_live_focus_context.assert_awaited_once()
 
         asyncio.run(run())
