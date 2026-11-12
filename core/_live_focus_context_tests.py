@@ -54,6 +54,19 @@ class LiveFocusContextIntegrationTests(unittest.TestCase):
         agent.session.send_context_update.assert_not_awaited()
         self.assertEqual(agent._last_system_instruction, agent._base_system_instruction)
 
+    def test_missing_foreground_context_removes_stale_live_hint(self):
+        agent = _agent()
+        agent._focus_context = None
+        agent._last_system_instruction = (
+            agent._base_system_instruction + "\n\n[LIVE DESKTOP CONTEXT]"
+        )
+        with patch("main.get_desktop_awareness_enabled", return_value=True):
+            asyncio.run(agent._refresh_live_focus_context())
+        agent.session.send_context_update.assert_awaited_once_with(
+            system_instruction=agent._base_system_instruction
+        )
+        self.assertEqual(agent._last_system_instruction, agent._base_system_instruction)
+
     def test_no_context_update_during_an_active_addressed_turn(self):
         agent = _agent()
         agent._addressed_turn_pending = True
