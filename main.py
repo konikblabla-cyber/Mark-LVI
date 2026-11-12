@@ -1834,7 +1834,15 @@ class JarvisLive:
                     from core.tool_result_presentation import web_search_panel_payload
                     _panel_payload = web_search_panel_payload(name, result, args)
                     if _panel_payload is not None:
-                        self.ui.show_content(*_panel_payload)
+                        try:
+                            self.ui.show_content(*_panel_payload)
+                        except Exception as _panel_error:
+                            # A HUD rendering problem must not turn a successful
+                            # search into a failed tool result for the model.
+                            print(
+                                "[WebSearch] HUD panel unavailable: "
+                                f"{type(_panel_error).__name__}"
+                            )
 
             else:
                 if self._plugin_registry.has(name):
