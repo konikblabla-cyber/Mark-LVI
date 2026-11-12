@@ -38,3 +38,26 @@ def should_use_local_wake_mode(local_wake_preference: bool,
     """Use local wake gating only when explicitly selected instead of semantic addressing."""
     return bool(local_wake_preference and not proactive_audio_enabled)
 
+
+def should_halt_tool_batch(result) -> bool:
+    """Stop precomputed sibling tool calls after a gate or uncertain outcome.
+
+    Gemini can return several function calls in one response. Once one call
+    asks for human approval, hits a blocker/recovery boundary, or cannot verify
+    its effect, later calls from that same already-generated batch must not run.
+    They are returned to the model as not executed so it can reconsider them
+    after the user resolves the first result.
+    """
+    text = str(result or "").strip()
+    if not text:
+        return False
+    if any(marker in text for marker in (
+        "[CONFIRMATION_PENDING]",
+        "[CONFIRMATION_BUSY]",
+        "[MISSION_BLOCKED]",
+        "[MISSION_RECOVERY]",
+        "[MISSION_UI_RECOVERY]",
+    )):
+        return True
+    status = text.split(None, 1)[0]
+    return status in {"status=failed", "status=unverified", "status=ask"}
