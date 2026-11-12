@@ -1826,17 +1826,15 @@ class JarvisLive:
                     result = await loop.run_in_executor(
                         None, lambda: self._action_registry.run(name, args, _ctx))
                 result = result or "Done."
-                # web_search: mirror results to the on-screen content panel
-                if (name == "web_search" and r
-                        and not r.startswith("No results")
-                        and not r.startswith("Search failed")):
-                    _mode  = args.get("mode", "search")
-                    _query = args.get("query") or ", ".join(args.get("items", []))
-                    _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
-                    # unwrap: the untrusted markers are for the MODEL. Showing
-                    # them to the person who asked for the search is the
-                    # machinery leaking into the interface.
-                    self.ui.show_content(_label, outcome.unwrap(r))
+                # Mirror the actual dispatcher result to the on-screen panel.
+                # The previous code read `r` here, but that name is only
+                # assigned in the plugin branch below; web_search is an action,
+                # so a successful search was turned into UnboundLocalError.
+                if name == "web_search":
+                    from core.tool_result_presentation import web_search_panel_payload
+                    _panel_payload = web_search_panel_payload(name, result, args)
+                    if _panel_payload is not None:
+                        self.ui.show_content(*_panel_payload)
 
             else:
                 if self._plugin_registry.has(name):
