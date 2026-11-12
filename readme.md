@@ -333,14 +333,14 @@ terminal.
 
 ### ⚡ Nothing heavy is loaded for a feature you did not use
 
-`pyautogui` is 394 ms and OpenCV is 224 ms, and both were paid at **every** launch by the folder scan that discovers actions and plugins — whether or not anyone asked for a keystroke or pointed a webcam at anything.
+`pyautogui` used to cost 394 ms at every launch, even when nobody asked for computer input. It is now imported on first use; MARK does not install or use OpenCV or webcam capture.
 
 They are imported on first use now, across twelve files, and not one of the call sites changed: `computer_settings.py` alone has eighty-six `pyautogui.` calls and every one still reads the way it did.
 
 | | before | after |
 |---|---|---|
 | discovering actions + plugins | 462 ms | **216 ms** |
-| `pyautogui` / `cv2` / `pyperclip` at startup | loaded | **never** |
+| `pyautogui` / `pyperclip` at startup | loaded | **never** |
 
 > The cost turned out to be a hot potato rather than a line item. Deferring it in `actions/` moved the whole 394 ms to `plugins/`, because whichever file imports first pays for everybody — a deferral is only a deferral when it is unanimous.
 
@@ -395,7 +395,7 @@ One new dependency for the whole release — `yt-dlp`, and only to turn a YouTub
 ### The display
 
 #### 📺 Video where the face is
-The HUD already had a surface that takes the centre of the screen and gives it back: the camera. Video shares that same stack, so the avatar, the live camera and a video can never be on screen at the same time — and a video always lands exactly where you are already looking.
+The HUD gives the centre display to video playback when requested, then restores the animated assistant. MARK has no webcam preview or live camera surface.
 
 It accepts **a local file, a direct media URL, a YouTube link, or just a description** ("play the new Dune trailer") and searches for it. It **starts muted every time**, because a soundtrack playing over the assistant is the one thing that could make JARVIS worse rather than better. You turn the sound on by asking, or from the button in the video header.
 
@@ -530,7 +530,7 @@ The token is now issued by the interface. Shutdown, restart and WiFi put a banne
 
 ### 🎧 It finally asks which microphone
 
-Both audio streams opened with no device argument at all, so they always took whatever the OS called "default" — and on Windows that **moves on its own** the moment you plug in a headset in. "JARVIS can't hear me" almost always meant "JARVIS is listening to the webcam".
+Both audio streams opened with no device argument at all, so they always took whatever the OS called "default" — and on Windows that **moves on its own** the moment you plug in a headset in. "JARVIS can't hear me" often meant it had selected the wrong audio endpoint.
 
 ⚙ → **🎧 AUDIO DEVICES** lets you pick the microphone and the speakers by name. Two things matter more than the dropdown:
 
@@ -584,7 +584,7 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 | **LVI** | Choose your engine · local & third-party models · Whisper + Piper in ~50 languages · language-following voice · ElevenLabs · tool budget for small models · verified outcomes instead of claimed ones · close an app by name · untrusted-content boundary · platform honesty on Wayland and macOS · hardened phone dashboard |
 | **LVII capability pack** | Voice interruption · opt-in local conversation history · persistent Mission Control · Obsidian-compatible local knowledge vault |
 | *shared* | The last five above also shipped to LIII, LIV and LV at the same time — moving up a Mark never loses them |
-| **LVII+** | Interrupt by voice · conversation history · full file access · security camera · Obsidian |
+| **LVII+** | Interrupt by voice · conversation history · full file access · Obsidian |
 
 ---
 
@@ -646,7 +646,7 @@ For a local-only alternative, click **ADDRESS-AWARE: ON** to install and enable 
 ```
 Mark LVI/
 ├── main.py                   # Core loop — Gemini Live session, audio I/O, viseme extraction, tool dispatch
-├── ui.py                     # PyQt6 HUD — avatar canvas, waveform, log panel, settings drawer, camera feed
+├── ui.py                     # PyQt6 HUD — avatar canvas, waveform, log panel, settings drawer
 ├── setup.py                  # OS-aware installer (skips wrong-OS dependencies, checks your Python)
 ├── .gitignore                # Keeps your API key, TLS key and memories out of the repository
 ├── providers/                # OPTIONAL — delete it and the assistant runs on Gemini,
@@ -696,13 +696,11 @@ Mark LVI/
 │   ├── water_reminder.py     # Hydration reminders with intake tracking
 │   ├── quiz.py               # Spoken quizzes
 │   ├── spaced_repetition.py  # Flashcard review
-│   ├── calorie_counter.py    # Food through the webcam
-│   └── pushup_counter.py     # Counts pushups through the webcam
 ├── actions/                  # Bundled skills — each self-describes via a TOOL dict + handler
 │                             #   Everything here drives the COMPUTER, which is what decides
 │                             #   whether a new skill belongs in this folder at all.
 │   ├── web_search.py         # Gemini + DDG parallel search (news, research, price, compare)
-│   ├── screen_processor.py   # Screen & webcam capture for vision
+│   ├── screen_processor.py   # Explicit one-shot computer display capture
 │   ├── background_monitor.py # User-configured topic watching — daily DDG check
 │   ├── proactive.py          # Proactive 2.0 — time/context/rotation-aware check-ins
 │   ├── reminder.py           # OS-native scheduled notifications
