@@ -150,7 +150,7 @@ class FocusContextTracker:
 
 
 def format_live_focus_context(snapshot: object) -> str:
-    """Format a fresh, opt-in foreground hint for an already-open Live session.
+    """Format a debounced, opt-in foreground hint for model context.
 
     Only the executable basename is accepted. Any supplied title, path, content,
     user text or extra keys are discarded and never enter the prompt.
