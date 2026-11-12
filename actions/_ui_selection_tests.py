@@ -29,7 +29,8 @@ class _Pattern:
 
 class _Control:
     def __init__(self, role, label, *, selected=False, enabled=True,
-                 offscreen=False, password=False, fail=False):
+                 offscreen=False, password=False, fail=False, parent=None):
+        self._parent = parent
         self.element_info = SimpleNamespace(
             control_type=role, name=label, is_password=password,
             is_offscreen=offscreen,
@@ -39,6 +40,7 @@ class _Control:
 
     def rectangle(self): return _Rect()
     def is_enabled(self): return self._enabled
+    def parent(self): return self._parent
 
 
 class _Window:
@@ -86,6 +88,14 @@ class UISelectionTests(unittest.TestCase):
         control = _Control("TabItem", "General", selected=True)
         self.assertEqual(self._run([control], "General", "TabItem"), ("already_selected", ""))
         self.assertEqual(control.iface_selection_item.calls, 0)
+
+    def test_list_item_inside_combo_box_is_routed_to_dropdown_tool(self):
+        combo = _Control("ComboBox", "Language")
+        option = _Control("ListItem", "Polish", parent=combo)
+        status, reason = self._run([option], "Polish", "ListItem")
+        self.assertEqual(status, "dropdown_option")
+        self.assertIn("select_dropdown_option", reason)
+        self.assertEqual(option.iface_selection_item.calls, 0)
 
     def test_duplicate_exact_labels_are_rejected_as_ambiguous(self):
         controls = [_Control("TabItem", "General"), _Control("TabItem", "General")]
