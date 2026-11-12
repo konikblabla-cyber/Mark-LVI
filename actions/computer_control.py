@@ -1008,12 +1008,29 @@ def computer_control(
                 frozenset(("win", "r")),
             }
             if isinstance(keys, list) and frozenset(keys) in dangerous:
-                return confirm.request(
-                    key="computer_control.dangerous_hotkey",
-                    title="Confirm potentially disruptive keyboard shortcut",
-                    detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
-                    run=lambda: _run_confirmed_input(lambda: _hotkey(*keys), target_app),
+                from core.autonomy_policy import explicitly_requested_target_action, scope_request
+                chord = frozenset(keys)
+                action_target = (
+                    "clear browser data" if chord == frozenset(("ctrl", "shift", "delete"))
+                    else "close active window" if chord in {
+                        frozenset(("alt", "f4")), frozenset(("ctrl", "w")),
+                        frozenset(("ctrl", "q")),
+                    }
+                    else "lock Windows" if chord == frozenset(("win", "l"))
+                    else "open Windows security screen" if chord == frozenset(("ctrl", "alt", "delete"))
+                    else "open Run dialog" if chord == frozenset(("win", "r"))
+                    else "delete selected item"
                 )
+                if not explicitly_requested_target_action(
+                    scope_request(session_memory), action_target
+                ):
+                    return confirm.request(
+                        key="computer_control.dangerous_hotkey",
+                        title="Confirm potentially disruptive keyboard shortcut",
+                        detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
+                        run=lambda: _run_confirmed_input(lambda: _hotkey(*keys), target_app),
+                    )
+                return _hotkey(*keys)
             return _hotkey(*keys) if isinstance(keys, list) else outcome.failed(
                 "computer_control", "hotkey must be supplied as a plus-separated string"
             )
@@ -1021,12 +1038,16 @@ def computer_control(
         if action == "press":
             key = str(params.get("key", "enter") or "enter").strip().lower()
             if key == "delete":
-                return confirm.request(
-                    key="computer_control.delete_key",
-                    title="Confirm Delete key",
-                    detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
-                    run=lambda: _run_confirmed_input(lambda: _press(key), target_app),
-                )
+                from core.autonomy_policy import explicitly_requested_target_action, scope_request
+                if not explicitly_requested_target_action(
+                    scope_request(session_memory), "delete selected item"
+                ):
+                    return confirm.request(
+                        key="computer_control.delete_key",
+                        title="Confirm Delete key",
+                        detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
+                        run=lambda: _run_confirmed_input(lambda: _press(key), target_app),
+                    )
             return _press(key)
 
         if action == "scroll":
