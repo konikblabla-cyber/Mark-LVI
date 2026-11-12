@@ -23,6 +23,7 @@ on:
       - "core/plugin_loader.py"
       - "core/focus_context.py"
       - "core/_focus_context_tests.py"
+      - "core/_live_focus_context_tests.py"
       - "memory/conversation_history.py"
       - "memory/_conversation_history_tests.py"
       - "core/project_context.py"
@@ -75,6 +76,8 @@ jobs:
         run: python -c "from core.desktop_context import get_desktop_context; result = get_desktop_context(); assert isinstance(result, dict); print('Desktop sensor:', result)"
       - name: Test live foreground context and privacy
         run: python -m core._focus_context_tests
+      - name: Test live session desktop context updates
+        run: python -m core._live_focus_context_tests
       - name: Test opt-in conversation memory context
         run: python -m memory._conversation_history_tests
       - name: Create and paint an offscreen Qt window
