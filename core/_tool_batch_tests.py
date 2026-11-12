@@ -62,6 +62,18 @@ class ToolBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executed, ["one"])
         self.assertIn("[NOT_EXECUTED]", results[1].response["result"])
 
+    async def test_mission_complete_handoff_stops_precomputed_followup(self):
+        calls = [call("one", "mission_control"), call("two", "open_app")]
+        executed = []
+
+        async def execute(fc):
+            executed.append(fc.id)
+            return response(fc, "[MISSION_COMPLETE] Every step has verified evidence")
+
+        results = await dispatch_tool_batch(calls, execute, response, should_halt_tool_batch)
+        self.assertEqual(executed, ["one"])
+        self.assertIn("[NOT_EXECUTED]", results[1].response["result"])
+
     async def test_pending_vision_handoff_stops_precomputed_ui_action(self):
         calls = [call("one", "screen_process"), call("two", "computer_control")]
         executed = []
