@@ -3176,8 +3176,8 @@ class JarvisLive:
                 # The conversation itself. `_open_session` gives back a Gemini
                 # Live session or a local pipeline wearing the same interface —
                 # the Live branch still builds a fresh client on every reconnect
-                # to avoid stale HTTP state, and still asks for v1alpha when
-                # proactive audio is on.
+                    # to avoid stale HTTP state, using the documented v1beta
+                    # Live endpoint for all supported models.
                 async with (
                     self._open_session(live_model, config) as session,
                     asyncio.TaskGroup() as tg,
