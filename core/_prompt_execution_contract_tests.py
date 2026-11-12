@@ -19,6 +19,11 @@ class PromptExecutionContractTests(unittest.TestCase):
         self.assertIn("matching structured status=done verified=true result", PROMPT)
         self.assertIn("continue until [MISSION_COMPLETE]", PROMPT)
 
+    def test_saved_plan_is_not_authorization_to_start_execution(self):
+        self.assertIn("[MISSION_PLAN_SAVED] means the plan is persisted but NOT authorised to run", PROMPT)
+        self.assertIn("Never call action='start' unless the user asked", PROMPT)
+        self.assertIn("never bundle start or execution tools with plan", PROMPT)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
