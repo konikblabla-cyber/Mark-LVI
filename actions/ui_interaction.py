@@ -7,6 +7,8 @@ happens to have in the foreground when the user confirms.
 """
 from __future__ import annotations
 
+import ctypes
+import ntpath
 import re
 import sys
 import threading
@@ -300,6 +302,63 @@ def _collect_accessible_controls(window, include_wrappers: bool = False):
     return records, clickables
 
 
+def _process_name_from_pid(process_id: object) -> str:
+    """Resolve a process basename, with a Win32 fallback when psutil is denied."""
+    try:
+        pid = int(process_id)
+        if pid <= 0:
+            return ""
+    except (TypeError, ValueError, OverflowError):
+        return ""
+
+    try:
+        import psutil
+        name = str(psutil.Process(pid).name() or "").strip()
+        if name:
+            return ntpath.basename(name.replace("/", "\\"))[:100]
+    except Exception:
+        pass
+
+    # PROCESS_QUERY_LIMITED_INFORMATION is sufficient for
+    # QueryFullProcessImageNameW and does not request VM/read/write rights.
+    process_handle = None
+    try:
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+
+        query_image = kernel32.QueryFullProcessImageNameW
+        query_image.argtypes = (
+            wintypes.HANDLE, wintypes.DWORD,
+            wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+        )
+        query_image.restype = wintypes.BOOL
+
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+
+        process_handle = open_process(0x1000, False, pid)
+        if not process_handle:
+            return ""
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = wintypes.DWORD(len(buffer))
+        if not query_image(process_handle, 0, buffer, ctypes.byref(length)):
+            return ""
+        return ntpath.basename(buffer.value.replace("/", "\\"))[:100]
+    except Exception:
+        return ""
+    finally:
+        if process_handle:
+            try:
+                kernel32.CloseHandle(process_handle)
+            except Exception:
+                pass
+
+
 def _read_window_snapshot(window_handle=None, expected_process_id=None) -> dict:
     """Read one specific window; None means the current active window.
 
@@ -342,11 +401,7 @@ def _read_window_snapshot(window_handle=None, expected_process_id=None) -> dict:
             bounds = None
     except Exception:
         bounds = None
-    try:
-        import psutil
-        process_name = str(psutil.Process(int(process_id)).name() or "")[:100]
-    except Exception:
-        process_name = ""
+    process_name = _process_name_from_pid(process_id)
     return {
         "handle": int(handle),
         "process_id": int(process_id),
