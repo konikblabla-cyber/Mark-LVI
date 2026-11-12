@@ -408,12 +408,27 @@ class UIReasoningTests(unittest.TestCase):
 
     def test_semantic_planner_cannot_turn_a_model_click_into_an_action(self):
         snapshot = [control("Button", "Continue")]
-        with patch("core.gemini.as_json", return_value={
-            "action": "click_and_verify",
-            "target_label": "Continue",
-            "expected_result": "Dashboard",
-        }):
+        with patch("core.gemini.as_json") as resolve:
             result = plan_ui_task("Proceed to dashboard", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+        # Buttons are intentionally excluded from semantic resolution.
+        resolve.assert_not_called()
+
+    def test_exact_accessible_label_keeps_the_deterministic_no_llm_path(self):
+        snapshot = [control("CheckBox", "Notifications")]
+        with patch("core.gemini.as_json") as resolve:
+            result = plan_ui_task("Disable Notifications", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "checkbox_label": "Notifications", "checked": False,
+        })
+        resolve.assert_not_called()
+
+    def test_semantic_resolution_failure_fails_closed_without_action(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", side_effect=TimeoutError("timeout")):
+            result = plan_ui_task("Turn off notifications", snapshot)
         self.assertEqual(result["status"], "needs_clarification")
         self.assertEqual(result["steps"], [])
 
