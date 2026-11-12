@@ -74,6 +74,18 @@ class ToolBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executed, ["one"])
         self.assertIn("[NOT_EXECUTED]", results[1].response["result"])
 
+    async def test_saved_plan_handoff_stops_precomputed_execution_call(self):
+        calls = [call("one", "mission_control"), call("two", "open_app")]
+        executed = []
+
+        async def execute(fc):
+            executed.append(fc.id)
+            return response(fc, "[MISSION_PLAN_SAVED] Plan saved only; wait for explicit start")
+
+        results = await dispatch_tool_batch(calls, execute, response, should_halt_tool_batch)
+        self.assertEqual(executed, ["one"])
+        self.assertIn("[NOT_EXECUTED]", results[1].response["result"])
+
     async def test_pending_vision_handoff_stops_precomputed_ui_action(self):
         calls = [call("one", "screen_process"), call("two", "computer_control")]
         executed = []
