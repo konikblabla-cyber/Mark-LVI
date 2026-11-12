@@ -1895,15 +1895,8 @@ class JarvisLive:
         if name in desktop_context_tools:
             try:
                 if get_desktop_awareness_enabled():
-                    fresh_context = await asyncio.to_thread(
-                        get_desktop_context, include_app=True
-                    )
-                    focus_snapshot = (
-                        {"application": fresh_context.get("foreground_app", "")}
-                        if isinstance(fresh_context, dict) else self._focus_context
-                    )
                     result = append_live_focus_context_to_tool_result(
-                        result, focus_snapshot, enabled=True,
+                        result, self._focus_context, enabled=True,
                     )
             except Exception as _focus_result_error:
                 print(
