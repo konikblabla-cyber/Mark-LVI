@@ -84,6 +84,36 @@ class LiveFocusContextIntegrationTests(unittest.TestCase):
         self.assertGreater(retry_deadline, time.monotonic())
         agent.session.send_context_update.assert_awaited_once()
 
+    def test_scheduler_deduplicates_an_update_already_in_flight(self):
+        async def run():
+            agent = _agent()
+            release = asyncio.Event()
+
+            async def pending_update():
+                await release.wait()
+
+            agent._refresh_live_focus_context = pending_update
+            agent._schedule_live_focus_context_update()
+            first = agent._focus_context_update_task
+            agent._schedule_live_focus_context_update()
+            self.assertIs(agent._focus_context_update_task, first)
+            release.set()
+            await first
+
+        asyncio.run(run())
+
+    def test_scheduler_executes_the_context_update_in_the_live_event_loop(self):
+        async def run():
+            agent = _agent()
+            agent._refresh_live_focus_context = AsyncMock()
+            agent._schedule_live_focus_context_update()
+            task = agent._focus_context_update_task
+            self.assertIsNotNone(task)
+            await task
+            agent._refresh_live_focus_context.assert_awaited_once()
+
+        asyncio.run(run())
+
     def test_non_gemini_engine_never_receives_live_context_update(self):
         agent = _agent()
         agent._engine = object()
