@@ -69,6 +69,8 @@ jobs:
         run: python -m actions._ui_selection_tests
       - name: Test multi-step tab and list workflows
         run: python -m actions._ui_sequence_tests
+      - name: Test autonomous mission and capability contracts
+        run: python -m core._capability_tests
       - name: Test remote dashboard authentication and upload limits
         run: |
           python -m core._dashboard_policy_tests
