@@ -882,7 +882,10 @@ class JarvisLive:
                 or (time.monotonic() - self._last_user_speech) < 1.5):
             return
         try:
-            await session.send_context_update(system_instruction=desired)
+            await asyncio.wait_for(
+                session.send_context_update(system_instruction=desired),
+                timeout=2.0,
+            )
         except Exception as exc:
             self._focus_context_retry_at = time.monotonic() + 10.0
             print(f"[Focus] Live context update deferred: {type(exc).__name__}")
@@ -933,7 +936,12 @@ class JarvisLive:
                 self._communication_turn_deadline = 0.0
                 self._communication_app_active = True
                 self._communication_context_known = False
+                self._focus_tracker.reset()
+                self._focus_context = None
                 print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
+                # Remove stale foreground metadata from Gemini as soon as the
+                # sensor failure is observed; never keep presenting an old app.
+                await self._refresh_live_focus_context()
                 continue
 
             await self._refresh_live_focus_context()
