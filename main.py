@@ -1674,46 +1674,54 @@ class JarvisLive:
                     self._vision_busy = True
                     self._vision_last_time = _now
                     user_text = args.get("text", "What do you see?")
-                    img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
-                    print(f"[Vision] 🖥️ Screen: {len(img_b):,} bytes")
                     try:
-                        from core import model_router
-                        _route_vision = model_router.is_enabled()
-                    except Exception as _route_error:
-                        _route_vision = None
-                        result = f"Vision routing could not be checked safely: {type(_route_error).__name__}."
-                    if _route_vision is None:
+                        img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
+                    except Exception as capture_error:
                         self._vision_busy = False
-                    elif _route_vision:
-                        try:
-                            from core import gemini
-                            from google.genai import types as gtypes
-                            _image_part = gtypes.Part.from_bytes(data=img_b, mime_type=mime_t)
-                            _vision_reply = await loop.run_in_executor(
-                                None,
-                                lambda: gemini.call(
-                                    [user_text, _image_part],
-                                    tier=gemini.SMART,
-                                    timeout_ms=60000,
-                                    task_type="vision",
-                                ),
-                            )
-                            _vision_text = (getattr(_vision_reply, "text", None) or "").strip()
-                            result = ("Gemma's image analysis: " + _vision_text
-                                      if _vision_text else
-                                      "Gemma did not return an image analysis. No other model was tried.")
-                        except Exception as _vision_error:
-                            result = (f"Gemma image analysis failed ({type(_vision_error).__name__}). "
-                                      "No fallback model was tried.")
-                        finally:
-                            self._vision_busy = False
-                    else:
-                        self._pending_vision = (img_b, mime_t, user_text)
                         result = (
-                            "[VISION_ACTIVE] Screen captured and attached to this same exchange. "
-                            "Do not acknowledge or answer before the image arrives. Reply once, "
-                            "grounded only in the captured display."
+                            f"Screen capture failed ({type(capture_error).__name__}). "
+                            "No image was sent."
                         )
+                    else:
+                        print(f"[Vision] 🖥️ Screen: {len(img_b):,} bytes")
+                        try:
+                            from core import model_router
+                            _route_vision = model_router.is_enabled()
+                        except Exception as _route_error:
+                            _route_vision = None
+                            result = f"Vision routing could not be checked safely: {type(_route_error).__name__}."
+                        if _route_vision is None:
+                            self._vision_busy = False
+                        elif _route_vision:
+                            try:
+                                from core import gemini
+                                from google.genai import types as gtypes
+                                _image_part = gtypes.Part.from_bytes(data=img_b, mime_type=mime_t)
+                                _vision_reply = await loop.run_in_executor(
+                                    None,
+                                    lambda: gemini.call(
+                                        [user_text, _image_part],
+                                        tier=gemini.SMART,
+                                        timeout_ms=60000,
+                                        task_type="vision",
+                                    ),
+                                )
+                                _vision_text = (getattr(_vision_reply, "text", None) or "").strip()
+                                result = ("Gemma's image analysis: " + _vision_text
+                                          if _vision_text else
+                                          "Gemma did not return an image analysis. No other model was tried.")
+                            except Exception as _vision_error:
+                                result = (f"Gemma image analysis failed ({type(_vision_error).__name__}). "
+                                          "No fallback model was tried.")
+                            finally:
+                                self._vision_busy = False
+                        else:
+                            self._pending_vision = (img_b, mime_t, user_text)
+                            result = (
+                                "[VISION_ACTIVE] Screen captured and attached to this same exchange. "
+                                "Do not acknowledge or answer before the image arrives. Reply once, "
+                                "grounded only in the captured display."
+                            )
 
             elif name == "system_status":
                 r = await loop.run_in_executor(None, get_system_status)
