@@ -380,13 +380,13 @@ def _semantic_control_plan(goal: str, goal_norm: str,
 
     # Keep the semantic call small. Prefer controls sharing meaningful words
     # with the user's goal, but preserve original order for equal scores.
-    goal_words = set(re.findall(r"[^\\W_]+", goal_norm))
+    goal_words = set(re.findall(r"[^\W_]+", goal_norm))
     candidates = [
         item for _, item in sorted(
             enumerate(candidates),
             key=lambda pair: (
                 -len(goal_words.intersection(set(re.findall(
-                    r"[^\\W_]+",
+                    r"[^\W_]+",
                     " ".join([pair[1]["name"], pair[1]["parent_name"], *pair[1]["parent_path"]]).casefold(),
                 )))),
                 pair[0],
