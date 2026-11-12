@@ -70,6 +70,7 @@ class ToolBatchSafetyTests(unittest.TestCase):
             "[CONFIRMATION_PENDING] waiting for HUD approval",
             "[CONFIRMATION_BUSY] another confirmation is active",
             "[MISSION_BLOCKED] stop this mission",
+            "[MISSION_CONTINUE] execute the next mission step after handoff",
             "[MISSION_RECOVERY] inspect before continuing",
             '[MISSION_UI_PLAN] {"status":"planned","execution":"not_started"}',
             "[MISSION_UI_RECOVERY] inspect the current window",
