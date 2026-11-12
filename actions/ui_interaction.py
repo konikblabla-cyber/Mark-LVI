@@ -966,6 +966,8 @@ def _select_item_on_window(
         return "changed_window", "the original window now belongs to another process"
 
     wanted = _normalise(item_label)
+    if not wanted:
+        return "missing_item", "the accessible label contains no searchable characters"
     matches = []
     try:
         descendants = window.descendants()
