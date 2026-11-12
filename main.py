@@ -91,7 +91,8 @@ from core.audio_recovery import (
     callback_is_stalled, stream_is_active, offer_latest_audio, LIVE_AUDIO_QUEUE_SIZE,
 )
 from core.focus_context import (
-    FocusContextTracker, append_focus_context_for_tool,
+    DESKTOP_CONTEXT_TOOL_NAMES, FocusContextTracker,
+    append_focus_context_for_tool,
 )
 from core.project_context import (
     inspect_project_folder, format_project_context, remember_project_snapshot,
@@ -1869,18 +1870,19 @@ class JarvisLive:
         # After a desktop action, return only the current foreground executable
         # and its broad category to Gemini. This uses a tool result (not a second
         # Live input stream), and is shared only when Desktop Awareness is on.
-        try:
-            result = append_focus_context_for_tool(
-                result,
-                name,
-                self._focus_context,
-                enabled=get_desktop_awareness_enabled(),
-            )
-        except Exception as _focus_result_error:
-            print(
-                f"[Focus] Tool-result context unavailable: "
-                f"{type(_focus_result_error).__name__}"
-            )
+        if name in DESKTOP_CONTEXT_TOOL_NAMES:
+            try:
+                result = append_focus_context_for_tool(
+                    result,
+                    name,
+                    self._focus_context,
+                    enabled=get_desktop_awareness_enabled(),
+                )
+            except Exception as _focus_result_error:
+                print(
+                    f"[Focus] Tool-result context unavailable: "
+                    f"{type(_focus_result_error).__name__}"
+                )
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
