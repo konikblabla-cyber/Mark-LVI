@@ -1536,6 +1536,16 @@ class JarvisLive:
         parts = [time_ctx, identity_ctx]
         if mem_str:
             parts.append(mem_str)
+        # Recent transcripts are local, opt-in memory. The formatter returns
+        # nothing unless the user enabled conversation-history storage.
+        try:
+            from memory.conversation_history import format_recent_context
+            recent_context = format_recent_context(limit=8, max_chars=4200)
+        except Exception as _history_import_error:
+            recent_context = ""
+            print(f"[History] Recent context unavailable: {type(_history_import_error).__name__}")
+        if recent_context:
+            parts.append(recent_context)
         if not self._startup_mission_recovery_injected:
             self._startup_mission_recovery_injected = True
             try:
