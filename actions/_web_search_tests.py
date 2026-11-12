@@ -7,8 +7,8 @@ import actions.web_search as web_search_module
 
 class WebSearchMissionEvidenceTests(unittest.TestCase):
     def test_successful_research_returns_app_receipt_and_untrusted_page_data(self):
-        with patch.object(web_search_module, "_search", return_value=(
-            "Research result\\nSource: https://example.test/article"
+        with patch.object(web_search_module, "_research", return_value=(
+            "Research result\nSource: https://example.test/article"
         )):
             result = web_search_module.web_search({
                 "query": "test research topic", "mode": "research",
