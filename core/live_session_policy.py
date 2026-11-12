@@ -56,7 +56,9 @@ def should_halt_tool_batch(result) -> bool:
         "[CONFIRMATION_BUSY]",
         "[MISSION_BLOCKED]",
         "[MISSION_RECOVERY]",
+        "[MISSION_UI_PLAN]",
         "[MISSION_UI_RECOVERY]",
+        "[MISSION_UI_RESULT_VERIFIED]",
     )):
         return True
     # Dispatcher exceptions may happen after an external action was dispatched;
