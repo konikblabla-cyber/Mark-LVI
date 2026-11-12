@@ -86,6 +86,8 @@ jobs:
         run: python -m core._live_focus_context_tests
       - name: Test opt-in conversation memory context
         run: python -m memory._conversation_history_tests
+      - name: Test local conversation recall tool
+        run: python -m actions._search_conversation_history_tests
       - name: Create and paint an offscreen Qt window
         env:
           QT_QPA_PLATFORM: offscreen
@@ -111,7 +113,7 @@ jobs:
           from core.plugin_loader import discover_plugins;
           reserved = {item['name'] for item in main.TOOL_DECLARATIONS};
           actions = discover_actions(Path('actions'), reserved_names=reserved, logger=lambda _: None);
-          required_actions = {'open_app','select_tab_item','select_list_item','desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
+          required_actions = {'open_app','select_tab_item','select_list_item','search_conversation_history','desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
           missing_actions = sorted(required_actions - actions.names());
           assert not missing_actions, f'Missing actions: {missing_actions}';
           plugins = discover_plugins(Path('plugins'), reserved | actions.names(), logger=lambda _: None);
