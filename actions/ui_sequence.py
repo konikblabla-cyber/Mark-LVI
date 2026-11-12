@@ -796,7 +796,7 @@ TOOL = {
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
-        "ordered steps. Checkbox steps set an exact visible checkbox to a requested boolean state; radio steps select one exact visible option; dropdown steps select one exact visible option from an already-open ComboBox. These use native UI Automation state patterns and verify the result. They never submit or save a form, and existing high-impact confirmation rules still apply. A press_keys step must supply one key or modifier chord and an exact visible postcondition. A set_tree_item_expanded step must supply one exact visible "
+        "ordered steps. Checkbox steps set an exact visible checkbox to a requested boolean state; tab/list/radio steps select one exact visible item through SelectionItemPattern; dropdown steps select one exact visible option from an already-open ComboBox. These use native UI Automation state patterns and verify the result. They never submit or save a form, and existing high-impact confirmation rules still apply. A press_keys step must supply one key or modifier chord and an exact visible postcondition. A set_tree_item_expanded step must supply one exact visible "
         "TreeItem label and a boolean expanded value; MARK verifies the ExpandCollapsePattern "
         "state in the original window before starting the next step. It expands or collapses "
         "only the node and never activates a child item. A press_keys step is refocused to the original "
