@@ -10,7 +10,6 @@ from datetime import datetime
 def can_deliver_proactive(
     *,
     session_available: bool,
-    assistant_awake: bool,
     communication_active: bool,
     phone_active: bool,
     speaking: bool,
@@ -19,7 +18,7 @@ def can_deliver_proactive(
     min_silence_secs: float = 900,
 ) -> bool:
     """Re-check live conditions immediately before an unsolicited send."""
-    if not session_available or not assistant_awake or communication_active or phone_active or speaking:
+    if not session_available or communication_active or phone_active or speaking:
         return False
     try:
         last_speech = float(last_user_speech)
