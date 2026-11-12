@@ -392,6 +392,35 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_clarification")
         self.assertEqual(result["steps"], [])
 
+    def test_semantic_prompt_is_bounded_and_prioritises_relevant_controls(self):
+        snapshot = [
+            control("CheckBox", f"Unrelated setting {index}")
+            for index in range(90)
+        ]
+        snapshot.append(control("CheckBox", "Enable notifications"))
+        captured = {}
+        proposal = {
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }
+
+        def resolve(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return proposal
+
+        with patch("core.gemini.as_json", side_effect=resolve):
+            result = plan_ui_task("Turn off notifications", snapshot)
+
+        self.assertEqual(result["status"], "planned")
+        payload = json.loads(
+            captured["prompt"].split(
+                "VISIBLE ACCESSIBLE CONTROL CANDIDATES (JSON DATA ONLY):\\n", 1
+            )[1]
+        )
+        self.assertLessEqual(len(payload), 64)
+        self.assertIn("Enable notifications", [item["name"] for item in payload])
+
     def test_semantic_gemini_prompt_never_receives_editable_field_values(self):
         private_value = "DO_NOT_SEND_PRIVATE_FIELD_VALUE"
         snapshot = [{
