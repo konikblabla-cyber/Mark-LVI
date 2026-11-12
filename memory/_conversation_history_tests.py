@@ -66,6 +66,23 @@ class ConversationHistoryContextTests(unittest.TestCase):
         self.assertLessEqual(len(result), 950)
         self.assertIn("[RECENT CONVERSATION HISTORY", result)
 
+    def test_keyword_search_finds_older_messages_in_local_history(self):
+        with patch.object(history, "_HISTORY_PATH", self.path), self._enabled():
+            history.append_message("user", "We chose Gemini Live for the MARK voice assistant.")
+            history.append_message("assistant", "Groq remains optional for coding tasks.")
+            matches = history.search_messages("Gemini Live", limit=5)
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["role"], "user")
+        self.assertIn("Gemini Live", matches[0]["text"])
+
+    def test_keyword_search_returns_no_results_when_history_is_disabled(self):
+        with patch.object(history, "_HISTORY_PATH", self.path), patch.object(
+            history, "settings",
+            return_value={"enabled": False, "retention_days": 30},
+        ):
+            history.append_message("user", "Gemini Live should remain the main assistant.")
+            self.assertEqual(history.search_messages("Gemini Live"), [])
+
     def test_unknown_roles_and_empty_messages_are_not_saved(self):
         with patch.object(history, "_HISTORY_PATH", self.path), self._enabled():
             self.assertFalse(history.append_message("system", "This should not be stored"))
