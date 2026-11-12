@@ -50,7 +50,7 @@ class ProactiveRetryTests(unittest.TestCase):
 
     def test_delivery_rejects_recent_or_invalid_speech_timestamps(self):
         base = dict(
-            session_available=True, communication_active=False,
+            session_available=True, assistant_awake=True, communication_active=False,
             phone_active=False, speaking=False, now=1000.0,
             min_silence_secs=900,
         )
