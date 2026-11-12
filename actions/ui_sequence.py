@@ -642,6 +642,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
         _ui_sequence_progress(state, "Windows workflow completed; all steps verified.")
         _release_sequence(state["id"])
         return outcome.done(
+            "run_ui_sequence",
             sequence_id=state["id"],
             steps_completed=state["completed"],
             total_steps=len(state["steps"]),
