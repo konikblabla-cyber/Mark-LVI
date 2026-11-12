@@ -464,8 +464,10 @@ def focus_window_identity(window_handle: int, expected_process_id: int) -> dict:
     if not completed:
         raise TimeoutError("UI Automation could not focus the original window within 4 seconds")
     if error is not None:
+        detail = " ".join(str(error or "").split())[:160]
+        suffix = f": {detail}" if detail else ""
         raise RuntimeError(
-            f"UI Automation could not focus the original window ({type(error).__name__})"
+            f"UI Automation could not focus the original window ({type(error).__name__}){suffix}"
         ) from error
     if value is not True:
         raise RuntimeError("UI Automation did not confirm focus of the original window")
