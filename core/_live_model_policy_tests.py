@@ -9,6 +9,7 @@ from core.live_model_policy import (
     supports_live_thinking_config,
     live_proactive_audio_mode,
     supports_proactive_audio,
+    live_model_candidates,
 )
 from core import gemini
 
@@ -53,6 +54,52 @@ class LiveModelPolicyTests(unittest.TestCase):
         self.assertFalse(supports_proactive_audio(
             "models/gemini-3.1-flash-live-preview", True
         ))
+
+    def test_default_address_aware_mode_excludes_models_without_proactive_audio(self):
+        self.assertEqual(
+            live_model_candidates(LIVE_MODEL_FALLBACKS),
+            (
+                "models/gemini-3.8-live",
+                "models/gemini-2.5-flash-native-audio-preview-12-2025",
+            ),
+        )
+
+    def test_address_aware_mode_never_uses_unsupported_fallback_when_audio_preference_is_off(self):
+        self.assertEqual(
+            live_model_candidates(LIVE_MODEL_FALLBACKS, proactive_audio_enabled=False),
+            ("models/gemini-3.8-live",),
+        )
+
+    def test_runtime_rejection_removes_only_that_models_proactive_fallback(self):
+        self.assertEqual(
+            live_model_candidates(
+                LIVE_MODEL_FALLBACKS,
+                runtime_disabled_models=("models/gemini-2.5-flash-native-audio-preview-12-2025",),
+            ),
+            ("models/gemini-3.8-live",),
+        )
+
+    def test_local_wake_or_push_to_talk_allows_legacy_audio_fallback(self):
+        self.assertEqual(
+            live_model_candidates(
+                LIVE_MODEL_FALLBACKS, local_microphone_gate_enabled=True
+            ),
+            LIVE_MODEL_FALLBACKS,
+        )
+
+    def test_live_model_selects_only_from_safe_candidates(self):
+        candidates = (
+            "models/gemini-2.5-flash-native-audio-preview-12-2025",
+            "models/gemini-3.1-flash-live-preview",
+        )
+        with unittest.mock.patch.object(
+            gemini, "_cooling", side_effect=lambda model: model == candidates[0]
+        ):
+            self.assertEqual(gemini.live_model(allowed_models=candidates), candidates[1])
+        with unittest.mock.patch.object(gemini, "_cooling", return_value=True):
+            self.assertEqual(gemini.live_model(allowed_models=candidates), candidates[0])
+        with self.assertRaises(RuntimeError):
+            gemini.live_model(allowed_models=())
 
     def test_live_tools_are_explicitly_blocking(self):
         original = [
