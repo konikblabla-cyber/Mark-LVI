@@ -37,12 +37,12 @@ class ProactiveRetryTests(unittest.TestCase):
     def test_delivery_rechecks_session_call_phone_and_speaking_state(self):
         common = dict(last_user_speech=0.0, now=1000.0, min_silence_secs=900)
         self.assertTrue(can_deliver_proactive(
-            session_available=True, assistant_awake=True, communication_active=False,
+            session_available=True, communication_active=False,
             phone_active=False, speaking=False, **common
         ))
-        for field in ("session_available", "assistant_awake", "communication_active", "phone_active", "speaking"):
+        for field in ("session_available", "communication_active", "phone_active", "speaking"):
             values = dict(
-                session_available=True, assistant_awake=True, communication_active=False,
+                session_available=True, communication_active=False,
                 phone_active=False, speaking=False,
             )
             values[field] = not values[field]
@@ -50,7 +50,7 @@ class ProactiveRetryTests(unittest.TestCase):
 
     def test_delivery_rejects_recent_or_invalid_speech_timestamps(self):
         base = dict(
-            session_available=True, assistant_awake=True, communication_active=False,
+            session_available=True, communication_active=False,
             phone_active=False, speaking=False, now=1000.0,
             min_silence_secs=900,
         )
