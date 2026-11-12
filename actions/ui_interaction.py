@@ -916,3 +916,100 @@ TOOL = {
     },
     "handler": click_and_verify,
 }
+
+
+def _select_item_on_window(
+    window_handle: int,
+    expected_process_id: int,
+    item_label: str,
+    control_type: str,
+    cancelled,
+) -> tuple[str, str]:
+    """Select one exact TabItem/ListItem in a pinned HWND/PID and verify SelectionItemPattern."""
+    if control_type not in {"TabItem", "ListItem"}:
+        return "unsupported", "only TabItem and ListItem controls are supported"
+    from pywinauto import Desktop
+
+    try:
+        window = Desktop(backend="uia").window(
+            handle=int(window_handle)
+        ).wrapper_object()
+    except Exception:
+        return "missing_window", "the original application window is no longer available"
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before selection"
+    if not window.is_visible():
+        return "missing_window", "the original application window is no longer visible"
+    if int(getattr(window, "handle", 0) or 0) != int(window_handle):
+        return "changed_window", "the original window handle changed"
+    actual_pid = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(actual_pid, expected_process_id):
+        return "changed_window", "the original window now belongs to another process"
+
+    wanted = _normalise(item_label)
+    matches = []
+    try:
+        descendants = window.descendants()
+    except Exception:
+        return "unavailable", "the target application does not expose its accessibility tree"
+    for index, control in enumerate(descendants):
+        if cancelled.is_set():
+            return "cancelled", "the operation expired before selection"
+        if index >= _MAX_SCANNED_CONTROLS:
+            break
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != control_type:
+                continue
+            if bool(getattr(info, "is_password", False)) or bool(getattr(info, "is_offscreen", False)):
+                continue
+            name = str(getattr(info, "name", "") or "")
+            if _is_sensitive_input_label(name) or _normalise(name) != wanted:
+                continue
+            rect = control.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0 or not control.is_enabled():
+                continue
+            matches.append(control)
+        except Exception:
+            continue
+
+    if not matches:
+        return "missing_item", f"no visible, enabled, non-sensitive {control_type} has that exact accessible label"
+    if len(matches) != 1:
+        return "ambiguous_item", f"more than one {control_type} has that exact accessible label"
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before selection"
+
+    try:
+        pattern = matches[0].iface_selection_item
+        selected = bool(pattern.CurrentIsSelected)
+    except Exception:
+        return "unsupported", f"the {control_type} does not expose a readable SelectionItemPattern state"
+    if selected:
+        return "already_selected", ""
+
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before SelectionItemPattern.Select"
+    try:
+        pattern.Select()
+    except Exception:
+        return "uncertain", "the item may have been selected but the provider raised an error"
+
+    deadline = time.monotonic() + min(1.5, _VERIFY_TIMEOUT_SECONDS)
+    while True:
+        if cancelled.is_set():
+            return "uncertain", "the operation expired after selection; inspect before retrying"
+        try:
+            if (int(getattr(window, "handle", 0) or 0) != int(window_handle)
+                    or not _valid_window_process_id(
+                        getattr(window.element_info, "process_id", 0), expected_process_id,
+                    )):
+                return "uncertain", "the original window identity changed after selection"
+            if bool(pattern.CurrentIsSelected):
+                return "selected", ""
+        except Exception:
+            return "uncertain", "the item may have been selected but its state could not be verified"
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "unverified", "the item did not report selected after the operation"
+        time.sleep(min(_VERIFY_INTERVAL, remaining))
