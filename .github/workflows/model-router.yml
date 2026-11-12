@@ -148,7 +148,7 @@ on:
       - "core/_project_plan_tests.py"
       - "core/safe_file_write.py"
       - "core/_safe_file_write_tests.py"
-      - "actions/code_helper.py"
+      - "actions/web_search.py actions/_web_search_tests.py actions/code_helper.py"
       - "core/_project_env_tests.py"
       - "core/_project_path_policy_tests.py"
       - "core/_mission_evidence_tests.py"
@@ -224,6 +224,8 @@ jobs:
         run: python -m core._capability_tests
       - name: Run web search HUD presentation regression tests
         run: python -m core._tool_result_presentation_tests
+      - name: Run web search mission-evidence tests
+        run: python -m actions._web_search_tests
       - name: Run Google Workspace security and behavior tests
         run: python -m plugins._google_workspace_tests
       - name: Run Spotify OAuth, playback and playlist safety tests
