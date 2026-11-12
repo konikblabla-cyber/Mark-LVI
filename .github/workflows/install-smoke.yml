@@ -99,7 +99,7 @@ jobs:
       - name: Import core runtime dependencies
         run: >-
           python -c "import dashboard.server, PyQt6.QtCore, sounddevice, numpy, google.genai,
-          httpx, requests, bs4, playwright, PIL, cv2, psutil, send2trash,
+          httpx, requests, bs4, playwright, PIL, psutil, send2trash,
           pptx, fastapi, uvicorn, cryptography, multipart, qrcode, ddgs,
           pdfplumber, PyPDF2, docx, pynvml, googleapiclient.discovery,
           google_auth_oauthlib.flow, tinytuya, paho.mqtt.client, openpyxl,
