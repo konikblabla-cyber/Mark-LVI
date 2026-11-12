@@ -63,6 +63,10 @@ _NEGATED_SELECTION_COMMANDS = (
     "don't open", "do not open", "never open", "nie wybieraj",
     "nie otwieraj", "nie przechodź", "nie przechodz",
 )
+_NEGATED_CLICK_COMMANDS = (
+    "don't click", "do not click", "never click", "don't press", "do not press",
+    "don't tap", "do not tap", "nie klikaj", "nie naciskaj", "nie wciśnij",
+)
 _SELECT_WORDS = (
     "select", "choose", "open", "switch to", "go to", "show", "wybierz",
     "otwórz", "otworz", "przejdź", "przejdz", "wejdź", "wejdz", "pokaż", "pokaz",
@@ -257,7 +261,13 @@ def _visual_click_target(goal: str) -> tuple[str, int] | None:
 def _plan_visual_click(goal: str, snapshot: Any,
                        elements: list[dict]) -> dict | None:
     """Return one bounded visual click only when its exact postcondition is explicit."""
-    if not _goal_has_any(_normalise(goal), _CLICK_WORDS):
+    normalised_goal = _normalise(goal)
+    if _goal_has_any(normalised_goal, _NEGATED_CLICK_COMMANDS):
+        return _clarify(
+            "The request explicitly says not to click. No visual action was planned.",
+            "negated_click_instruction",
+        )
+    if not _goal_has_any(normalised_goal, _CLICK_WORDS):
         return None
     parsed = _visual_click_target(goal)
     if parsed is None:
@@ -668,6 +678,11 @@ def plan_ui_task(goal: str, ui_snapshot: Any) -> dict:
         expected = "The tree action verifies the requested expanded or collapsed state locally."
         reason = "The goal explicitly specifies the tree item's desired expansion state."
     elif role in {"Button", "Hyperlink", "MenuItem"}:
+        if _goal_has_any(goal_norm, _NEGATED_CLICK_COMMANDS):
+            return _clarify(
+                "The request explicitly says not to click. No action was planned.",
+                "negated_click_instruction",
+            )
         if not _goal_has_any(goal_norm, _CLICK_WORDS):
             return _clarify("Do you want MARK to click this control?", "click_intent_unspecified")
         expected_label = _expected_result(clean_goal, position + len(_normalise(label)), elements)
