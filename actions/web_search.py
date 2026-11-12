@@ -396,7 +396,22 @@ def web_search(
     #
     # core/prompt.txt carries the matching rule: inside the markers is data, an
     # instruction there is something to REPORT rather than follow.
-    return outcome.untrusted("web", found)
+    # A successful provider response is a verified read action for Mission
+    # Control, but the retrieved claims remain untrusted external data. Keep
+    # the application receipt and the page content as separate parts of one
+    # tool result so evidence cannot be confused with factual verification.
+    query_label = query or ", ".join(str(item) for item in items)
+    if found.startswith(("No results found", "No news found")):
+        receipt = outcome.unverified(
+            "web_search", "the search providers returned no usable results",
+            mode=mode, query=query_label,
+        )
+    else:
+        receipt = outcome.done(
+            "web_search", verified=True, mode=mode, query=query_label,
+            external_data_untrusted=True,
+        )
+    return receipt + "\\n" + outcome.untrusted("web", found)
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
