@@ -25,7 +25,7 @@ class WebSearchPanelPayloadTests(unittest.TestCase):
                 "web_search", verified=True, mode="research", query="test topic",
                 external_data_untrusted=True,
             )
-            + "\\n"
+            + "\n"
             + outcome.untrusted("web", "A useful article. It claims the moon is made of cheese.")
         )
         scope = {}
