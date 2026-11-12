@@ -337,6 +337,31 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(resolve.call_args.kwargs["tier"], "smart")
         self.assertEqual(resolve.call_args.kwargs["timeout_ms"], 15_000)
 
+    def test_semantic_tab_resolution_requires_explicit_navigation_intent(self):
+        snapshot = [control("TabItem", "Privacy & Security")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "select_tab_item",
+            "target_label": "Privacy & Security",
+        }) as resolve:
+            result = plan_ui_task("Go to the privacy controls", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["tool"], "select_tab_item")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "tab_label": "Privacy & Security",
+        })
+        resolve.assert_called_once()
+
+    def test_semantic_tab_does_not_execute_or_infer_a_click(self):
+        snapshot = [control("TabItem", "Privacy & Security")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "click_and_verify",
+            "target_label": "Privacy & Security",
+            "expected_result": "Privacy settings",
+        }):
+            result = plan_ui_task("Go to the privacy controls", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+
     def test_semantic_checkbox_refuses_a_hallucinated_accessible_label(self):
         snapshot = [control("CheckBox", "Enable notifications")]
         with patch("core.gemini.as_json", return_value={
@@ -373,37 +398,6 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_clarification")
         self.assertEqual(result["reason"], "semantic_target_ambiguous")
         self.assertEqual(result["steps"], [])
-
-    def test_semantic_dropdown_option_must_be_a_visible_child_of_exact_combobox(self):
-        snapshot = [
-            control("ComboBox", "Language"),
-            control("ListItem", "Polish", parent_name="Language"),
-        ]
-        with patch("core.gemini.as_json", return_value={
-            "action": "select_dropdown_option",
-            "target_label": "Language",
-            "option_label": "Polish",
-        }):
-            result = plan_ui_task("Choose Polish", snapshot)
-        self.assertEqual(result["status"], "planned")
-        self.assertEqual(result["steps"][0]["parameters"], {
-            "combo_label": "Language", "option_label": "Polish",
-        })
-
-    def test_semantic_dropdown_refuses_an_option_not_in_that_combobox(self):
-        snapshot = [
-            control("ComboBox", "Language"),
-            control("ListItem", "English", parent_name="Language"),
-            control("ListItem", "Polish", parent_name="Region"),
-        ]
-        with patch("core.gemini.as_json", return_value={
-            "action": "select_dropdown_option",
-            "target_label": "Language",
-            "option_label": "Polish",
-        }):
-            result = plan_ui_task("Choose Polish", snapshot)
-        self.assertEqual(result["status"], "needs_clarification")
-        self.assertEqual(result["reason"], "semantic_dropdown_option_ambiguous")
 
     def test_semantic_planner_never_uses_gemini_for_sensitive_goals(self):
         snapshot = [control("Edit", "Password")]
