@@ -64,6 +64,7 @@ def should_halt_tool_batch(result) -> bool:
         "[VISION_ACTIVE]",
         "[MISSION_BLOCKED]",
         "[MISSION_CONTINUE]",
+        "[MISSION_COMPLETE]",
         "[MISSION_RECOVERY]",
         "[MISSION_UI_PLAN]",
         "[MISSION_UI_RECOVERY]",
