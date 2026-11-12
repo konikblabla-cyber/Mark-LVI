@@ -42,6 +42,7 @@ class UISequenceSelectionTests(unittest.TestCase):
         enum = ui_sequence.TOOL["parameters"]["properties"]["steps"]["items"]["properties"]["action"]["enum"]
         self.assertIn("select_tab_item", enum)
         self.assertIn("select_list_item", enum)
+        self.assertIn("tab_label", ui_sequence.TOOL["parameters"]["properties"]["steps"]["items"]["properties"])
 
 
 if __name__ == "__main__":
