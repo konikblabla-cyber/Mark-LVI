@@ -69,6 +69,7 @@ class ToolBatchSafetyTests(unittest.TestCase):
         for result in (
             "[CONFIRMATION_PENDING] waiting for HUD approval",
             "[CONFIRMATION_BUSY] another confirmation is active",
+            "[VISION_ACTIVE] screen image is attached to this exchange",
             "[MISSION_BLOCKED] stop this mission",
             "[MISSION_CONTINUE] execute the next mission step after handoff",
             "[MISSION_RECOVERY] inspect before continuing",
