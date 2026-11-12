@@ -384,6 +384,51 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_clarification")
         self.assertEqual(result["reason"], "semantic_checkbox_state_unclear")
 
+    def test_semantic_resolver_cannot_guess_a_duplicate_controls_parent(self):
+        snapshot = [
+            control("CheckBox", "Enable notifications", parent_name="Account"),
+            control("CheckBox", "Enable notifications", parent_name="Marketing"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "parent_label": "Account",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "semantic_target_ambiguous")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_resolver_uses_parent_only_when_user_named_it(self):
+        snapshot = [
+            control("CheckBox", "Enable notifications", parent_name="Account"),
+            control("CheckBox", "Enable notifications", parent_name="Marketing"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "parent_label": "Account",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off account notifications", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "checkbox_label": "Enable notifications", "checked": False,
+        })
+        self.assertEqual(result["steps"][0]["target"]["parent_name"], "Account")
+
+    def test_semantic_checkbox_understands_mute_as_an_explicit_disable_intent(self):
+        snapshot = [control("CheckBox", "Enable app sounds")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable app sounds",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Mute app sounds", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertFalse(result["steps"][0]["parameters"]["checked"])
+
     def test_semantic_resolver_needs_parent_for_duplicate_controls(self):
         snapshot = [
             control("CheckBox", "Enable notifications", parent_name="Account"),
