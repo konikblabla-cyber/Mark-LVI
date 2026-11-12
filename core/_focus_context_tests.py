@@ -2,7 +2,7 @@
 import unittest
 from core.focus_context import (
     FocusContextTracker, classify_application, describe_focus_context,
-    normalise_executable,
+    format_focus_context_for_prompt, normalise_executable,
 )
 
 
@@ -21,6 +21,22 @@ class FocusContextTests(unittest.TestCase):
         self.assertEqual(set(result), {"application", "category", "activity"})
         self.assertNotIn("title", result)
         self.assertEqual(result["category"], "development")
+
+    def test_session_prompt_gets_only_opt_in_safe_foreground_metadata(self):
+        result = format_focus_context_for_prompt(
+            r"C:\\Users\\person\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"
+        )
+        self.assertIn("application was code", result)
+        self.assertIn("programming", result)
+        self.assertIn("may be stale", result)
+        self.assertNotIn("Users", result)
+        self.assertNotIn("person", result)
+        self.assertNotIn("Code.exe", result)
+        self.assertNotIn("window title", result.lower().split("no window title")[0])
+
+    def test_session_prompt_is_empty_for_unknown_foreground(self):
+        self.assertEqual(format_focus_context_for_prompt(""), "")
+        self.assertEqual(format_focus_context_for_prompt(None), "")
 
     def test_tracker_ignores_short_focus_changes(self):
         tracker = FocusContextTracker(stable_seconds=8.0)
