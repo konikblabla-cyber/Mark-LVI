@@ -241,6 +241,9 @@ def proactive_context(limit: int = 2) -> str:
     """
     try:
         cap = max(1, min(int(limit), 3))
+        from memory.config_manager import get_plugin_enabled
+        if not get_plugin_enabled("mission_control"):
+            return ""
         with _LOCK:
             missions = list(_read().get("missions", []))
     except Exception as exc:
