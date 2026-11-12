@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 from core.live_session_policy import (
     go_away_notice, go_away_time_left, live_turn_is_active,
-    should_sleep_after_addressed_response, should_use_local_wake_mode,
+    should_halt_tool_batch, should_sleep_after_addressed_response,
+    should_use_local_wake_mode,
 )
 
 
@@ -60,6 +61,39 @@ class GoAwayPolicyTests(unittest.TestCase):
 
     def test_missing_time_left_is_not_an_error(self):
         self.assertIsNone(go_away_time_left(SimpleNamespace(go_away=object())))
+
+
+
+class ToolBatchSafetyTests(unittest.TestCase):
+    def test_confirmation_and_mission_boundaries_halt_remaining_tool_calls(self):
+        for result in (
+            "[CONFIRMATION_PENDING] waiting for HUD approval",
+            "[CONFIRMATION_BUSY] another confirmation is active",
+            "[MISSION_BLOCKED] stop this mission",
+            "[MISSION_RECOVERY] inspect before continuing",
+            "[MISSION_UI_RECOVERY] inspect the current window",
+        ):
+            with self.subTest(result=result):
+                self.assertTrue(should_halt_tool_batch(result))
+
+    def test_failed_unverified_and_ask_outcomes_halt_remaining_tool_calls(self):
+        for result in (
+            "status=failed action=open_app reason=not_found",
+            "status=unverified action=click reason=timeout",
+            "status=ask action=select_list_item question=ambiguous",
+        ):
+            with self.subTest(result=result):
+                self.assertTrue(should_halt_tool_batch(result))
+
+    def test_verified_and_in_progress_results_allow_next_tool_call(self):
+        for result in (
+            "status=done action=open_app verified=true",
+            "status=started action=process_watch",
+            "Opened the requested local application.",
+            "",
+        ):
+            with self.subTest(result=result):
+                self.assertFalse(should_halt_tool_batch(result))
 
 
 if __name__ == "__main__":
