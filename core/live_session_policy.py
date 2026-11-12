@@ -59,5 +59,9 @@ def should_halt_tool_batch(result) -> bool:
         "[MISSION_UI_RECOVERY]",
     )):
         return True
+    # Dispatcher exceptions may happen after an external action was dispatched;
+    # their effects are uncertain, so do not run sibling calls from this batch.
+    if text.startswith("Tool '") and " failed:" in text:
+        return True
     status = text.split(None, 1)[0]
     return status in {"status=failed", "status=unverified", "status=ask"}
