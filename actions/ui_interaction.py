@@ -918,6 +918,25 @@ TOOL = {
 }
 
 
+def _has_combo_ancestor(control, max_depth: int = 6) -> bool:
+    """Distinguish standalone ListItems from options owned by a ComboBox."""
+    current = control
+    for _ in range(max(1, min(int(max_depth), 10))):
+        try:
+            parent = current.parent()
+            if parent is None:
+                return False
+            info = parent.element_info
+            if str(getattr(info, "control_type", "") or "") == "ComboBox":
+                return True
+            if str(getattr(info, "control_type", "") or "") == "Window":
+                return False
+            current = parent
+        except Exception:
+            return False
+    return False
+
+
 def _select_item_on_window(
     window_handle: int,
     expected_process_id: int,
@@ -977,6 +996,11 @@ def _select_item_on_window(
         return "missing_item", f"no visible, enabled, non-sensitive {control_type} has that exact accessible label"
     if len(matches) != 1:
         return "ambiguous_item", f"more than one {control_type} has that exact accessible label"
+    if control_type == "ListItem" and _has_combo_ancestor(matches[0]):
+        return "dropdown_option", (
+            "this ListItem belongs to a ComboBox; use select_dropdown_option with "
+            "the exact ComboBox label and visible option label"
+        )
     if cancelled.is_set():
         return "cancelled", "the operation expired before selection"
 
