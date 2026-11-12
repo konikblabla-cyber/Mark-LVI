@@ -91,8 +91,7 @@ from core.audio_recovery import (
     callback_is_stalled, stream_is_active, offer_latest_audio, LIVE_AUDIO_QUEUE_SIZE,
 )
 from core.focus_context import (
-    FocusContextTracker, format_focus_context_for_prompt,
-    append_live_focus_context_to_tool_result,
+    FocusContextTracker, append_live_focus_context_to_tool_result,
 )
 from core.project_context import (
     inspect_project_folder, format_project_context, remember_project_snapshot,
@@ -1517,20 +1516,6 @@ class JarvisLive:
         })
 
         parts = [time_ctx, identity_ctx]
-        # Broad foreground metadata is included only when the user has
-        # explicitly enabled Desktop Awareness. No window title, document,
-        # screenshot, clipboard or keystrokes are read.
-        if get_desktop_awareness_enabled():
-            try:
-                desktop_at_connect = get_desktop_context(include_app=True)
-                focus_hint = format_focus_context_for_prompt(
-                    desktop_at_connect.get("foreground_app", "")
-                    if isinstance(desktop_at_connect, dict) else ""
-                )
-                if focus_hint:
-                    parts.append(focus_hint)
-            except Exception as focus_error:
-                print(f"[Focus] Session-start context unavailable: {type(focus_error).__name__}")
         if mem_str:
             parts.append(mem_str)
         # Recent transcripts are local, opt-in memory. The formatter returns
