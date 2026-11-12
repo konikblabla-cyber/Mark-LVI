@@ -1,5 +1,6 @@
 """Offline compatibility tests for the Gemini Live model migration."""
 import unittest
+from unittest.mock import patch
 
 from core.live_model_policy import (
     LIVE_MODEL_FALLBACKS,
@@ -92,11 +93,11 @@ class LiveModelPolicyTests(unittest.TestCase):
             "models/gemini-2.5-flash-native-audio-preview-12-2025",
             "models/gemini-3.1-flash-live-preview",
         )
-        with unittest.mock.patch.object(
+        with patch.object(
             gemini, "_cooling", side_effect=lambda model: model == candidates[0]
         ):
             self.assertEqual(gemini.live_model(allowed_models=candidates), candidates[1])
-        with unittest.mock.patch.object(gemini, "_cooling", return_value=True):
+        with patch.object(gemini, "_cooling", return_value=True):
             self.assertEqual(gemini.live_model(allowed_models=candidates), candidates[0])
         with self.assertRaises(RuntimeError):
             gemini.live_model(allowed_models=())
