@@ -33,6 +33,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
             "steps": steps,
         })
         data = mission_control._read()
+        self.assertIn("[MISSION_PLAN_SAVED]", result)
         self.assertEqual(len(data["missions"]), 1, result)
         return data["missions"][0]["id"]
 
