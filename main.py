@@ -90,7 +90,10 @@ from core                      import audio_devices
 from core.audio_recovery import (
     callback_is_stalled, stream_is_active, offer_latest_audio, LIVE_AUDIO_QUEUE_SIZE,
 )
-from core.focus_context import FocusContextTracker, compose_live_system_instruction
+from core.focus_context import (
+    FocusContextTracker, format_focus_context_for_prompt,
+    append_live_focus_context_to_tool_result,
+)
 from core.project_context import (
     inspect_project_folder, format_project_context, remember_project_snapshot,
 )
@@ -630,11 +633,6 @@ class JarvisLive:
         # document names, screenshots, clipboard contents or keystrokes.
         self._focus_tracker = FocusContextTracker(stable_seconds=2.5)
         self._focus_context = None
-        self._base_system_instruction = ""
-        self._last_system_instruction = ""
-        self._focus_context_retry_at = 0.0
-        self._focus_context_update_task = None
-        self._focus_context_check_at = 0.0
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
         self._communication_audio_session_active = False  # actual WASAPI signal, not release grace
@@ -857,71 +855,6 @@ class JarvisLive:
             if (time.monotonic() - self._last_user_speech) > self._wake_sleep_timeout:
                 self.sleep(reason="no speech for 2 minutes")
 
-    def _schedule_live_focus_context_update(self) -> None:
-        """Schedule a model-context refresh without blocking local privacy polling."""
-        task = self._focus_context_update_task
-        if task is not None and not task.done():
-            return
-        now = time.monotonic()
-        if now < self._focus_context_check_at:
-            return
-        self._focus_context_check_at = now + 1.0
-        try:
-            enabled = get_desktop_awareness_enabled()
-        except Exception:
-            enabled = False
-        desired = compose_live_system_instruction(
-            self._base_system_instruction, self._focus_context, enabled=enabled,
-        )
-        if not desired or desired == self._last_system_instruction:
-            return
-        try:
-            loop = asyncio.get_running_loop()
-            self._focus_context_update_task = loop.create_task(
-                self._refresh_live_focus_context()
-            )
-        except RuntimeError:
-            return
-
-    async def _refresh_live_focus_context(self) -> None:
-        """Update Gemini's live system context after a stable, user-opted-in app switch."""
-        session = self.session
-        base = self._base_system_instruction
-        if (session is None or not base or self._engine is not None
-                or self._engine_caps is not None):
-            return
-        try:
-            enabled = get_desktop_awareness_enabled()
-        except Exception:
-            enabled = False
-        desired = compose_live_system_instruction(
-            base, self._focus_context, enabled=enabled,
-        )
-        if not desired or desired == self._last_system_instruction:
-            return
-        if time.monotonic() < self._focus_context_retry_at:
-            return
-        # Do not rewrite the session preamble while a response is playing or
-        # immediately after user speech. The pending context is retried on the
-        # next local guard tick, without creating an unsolicited model turn.
-        with self._speaking_lock:
-            speaking = self._is_speaking
-        if (speaking or getattr(self, "_addressed_turn_pending", False)
-                or (time.monotonic() - self._last_user_speech) < 1.5):
-            return
-        try:
-            await asyncio.wait_for(
-                session.send_context_update(system_instruction=desired),
-                timeout=2.0,
-            )
-        except Exception as exc:
-            self._focus_context_retry_at = time.monotonic() + 10.0
-            print(f"[Focus] Live context update deferred: {type(exc).__name__}")
-            return
-        if self.session is session:
-            self._last_system_instruction = desired
-            self._focus_context_retry_at = 0.0
-
     async def _run_communication_guard(self) -> None:
         """Keep mic audio local in known call/chat apps unless explicitly addressed."""
         while True:
@@ -969,7 +902,6 @@ class JarvisLive:
                 print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
                 # Remove stale foreground metadata from Gemini as soon as the
                 # sensor failure is observed; never keep presenting an old app.
-                self._schedule_live_focus_context_update()
                 continue
 
             if communication_context_unchanged(
@@ -986,7 +918,6 @@ class JarvisLive:
                     self.wake(reason="desktop activity")
                 # The local mic gate is already in its correct state; only now
                 # may the optional cloud context update run.
-                self._schedule_live_focus_context_update()
                 continue
 
             # Close any one-shot request before publishing a new context state.
@@ -1049,7 +980,6 @@ class JarvisLive:
 
             # Update Gemini only after the local communication gate has been
             # closed/opened for the new state, so network latency cannot delay privacy.
-            self._schedule_live_focus_context_update()
 
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
@@ -1587,6 +1517,20 @@ class JarvisLive:
         })
 
         parts = [time_ctx, identity_ctx]
+        # Broad foreground metadata is included only when the user has
+        # explicitly enabled Desktop Awareness. No window title, document,
+        # screenshot, clipboard or keystrokes are read.
+        if get_desktop_awareness_enabled():
+            try:
+                desktop_at_connect = get_desktop_context(include_app=True)
+                focus_hint = format_focus_context_for_prompt(
+                    desktop_at_connect.get("foreground_app", "")
+                    if isinstance(desktop_at_connect, dict) else ""
+                )
+                if focus_hint:
+                    parts.append(focus_hint)
+            except Exception as focus_error:
+                print(f"[Focus] Session-start context unavailable: {type(focus_error).__name__}")
         if mem_str:
             parts.append(mem_str)
         # Recent transcripts are local, opt-in memory. The formatter returns
@@ -1609,16 +1553,12 @@ class JarvisLive:
             except Exception as recovery_error:
                 print(f"[Mission] Startup recovery check unavailable: {type(recovery_error).__name__}")
         parts.append(sys_prompt)
-        # Keep a stable base preamble. Foreground metadata is refreshed later
-        # with send_context_update(), only when desktop awareness is enabled.
-        self._base_system_instruction = "\n".join(parts)
-        self._last_system_instruction = self._base_system_instruction
 
         cfg = dict(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
-            system_instruction=self._base_system_instruction,
+            system_instruction="\n".join(parts),
             # strip_meta drops this project's own `tier` / `brief` keys, which
             # exist for the local-engine tool budget and are not part of the
             # Gemini function-declaration schema — an unknown field there is a
@@ -1940,6 +1880,36 @@ class JarvisLive:
                 record_tool_result(self._turn_authorization, name, result)
             except Exception as _mission_evidence_error:
                 print(f"[Mission] Evidence recording failed closed: {_mission_evidence_error}")
+
+        # After a desktop action, return only the current foreground executable
+        # and its broad category to Gemini. This uses a tool result (not a second
+        # Live input stream), and is shared only when Desktop Awareness is on.
+        desktop_context_tools = {
+            "open_app", "run_ui_sequence", "click_and_verify", "fill_text",
+            "press_keys", "set_checkbox_state", "select_radio_option",
+            "select_dropdown_option", "select_tab_item", "select_list_item",
+            "set_tree_item_expanded", "computer_control", "browser_control",
+            "inspect_active_window", "desktop_awareness", "mission_control",
+            "screen_process",
+        }
+        if name in desktop_context_tools:
+            try:
+                if get_desktop_awareness_enabled():
+                    fresh_context = await asyncio.to_thread(
+                        get_desktop_context, include_app=True
+                    )
+                    focus_snapshot = (
+                        {"application": fresh_context.get("foreground_app", "")}
+                        if isinstance(fresh_context, dict) else self._focus_context
+                    )
+                    result = append_live_focus_context_to_tool_result(
+                        result, focus_snapshot, enabled=True,
+                    )
+            except Exception as _focus_result_error:
+                print(
+                    f"[Focus] Tool-result context unavailable: "
+                    f"{type(_focus_result_error).__name__}"
+                )
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
