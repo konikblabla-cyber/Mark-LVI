@@ -2353,42 +2353,19 @@ class JarvisLive:
                             out_buf = []
 
                     if response.tool_call:
-                        fn_responses = []
-                        halt_remaining = False
-                        for fc in response.tool_call.function_calls:
-                            print(f"[JARVIS] 📞 {fc.name}")
-                            if halt_remaining:
-                                # Gemini may return several calls in one batch.
-                                # Never execute precomputed siblings after an
-                                # approval gate or uncertain result; return a
-                                # truthful receipt for every function-call ID.
-                                fr = types.FunctionResponse(
-                                    id=fc.id,
-                                    name=fc.name,
-                                    response={
-                                        "result": (
-                                            "[NOT_EXECUTED] This tool call was not run because "
-                                            "an earlier call in the same batch reached a "
-                                            "confirmation or verification boundary. Re-evaluate "
-                                            "it only after that result has been resolved; do not "
-                                            "treat this call as executed."
-                                        )
-                                    },
-                                )
-                            else:
-                                fr = await self._execute_tool(fc)
-                                payload = getattr(fr, "response", None)
-                                tool_result = (
-                                    payload.get("result", "")
-                                    if isinstance(payload, dict) else ""
-                                )
-                                if should_halt_tool_batch(tool_result):
-                                    halt_remaining = True
-                                    self.ui.write_log(
-                                        "SYS: Remaining calls in this tool batch were stopped "
-                                        "at a confirmation or verification boundary."
-                                    )
-                            fn_responses.append(fr)
+                        from core.tool_batch import dispatch_tool_batch
+                        fn_responses = await dispatch_tool_batch(
+                            response.tool_call.function_calls,
+                            self._execute_tool,
+                            lambda fc, result: types.FunctionResponse(
+                                id=fc.id, name=fc.name, response={"result": result},
+                            ),
+                            should_halt_tool_batch,
+                            lambda: self.ui.write_log(
+                                "SYS: Remaining calls in this tool batch were stopped "
+                                "at a confirmation or verification boundary."
+                            ),
+                        )
                         await self.session.send_tool_response(
                             function_responses=fn_responses
                         )
