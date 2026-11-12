@@ -175,17 +175,15 @@ def format_live_focus_context(snapshot: object) -> str:
     )
 
 
-def compose_live_system_instruction(
-    base_instruction: str,
+def append_live_focus_context_to_tool_result(
+    result: object,
     focus_snapshot: object = None,
     *,
     enabled: bool = False,
 ) -> str:
-    """Add or remove the live focus hint without changing the base prompt."""
-    base = str(base_instruction or "")
-    if not enabled:
-        return base
-    hint = format_live_focus_context(focus_snapshot)
+    """Attach safe foreground metadata to a desktop tool result, never to microphone input."""
+    rendered = str(result or "")
+    hint = format_live_focus_context(focus_snapshot) if enabled else ""
     if not hint:
-        return base
-    return base + "\n\n" + hint
+        return rendered
+    return f"{rendered}\n\n{hint}" if rendered else hint
