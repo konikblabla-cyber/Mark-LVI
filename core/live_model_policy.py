@@ -90,3 +90,26 @@ def supports_proactive_audio(model_name: str, preference: bool = True,
     if mode == "always_on":
         return True
     return bool(mode == "configurable" and preference and not runtime_disabled)
+
+
+
+def live_model_candidates(models, proactive_audio_enabled: bool = True,
+                          runtime_disabled_models=(),
+                          local_microphone_gate_enabled: bool = False) -> tuple[str, ...]:
+    """Choose fallbacks without silently streaming room audio to an incapable model.
+
+    A model without Proactive Audio is eligible only when the user has selected
+    a local microphone gate (wake word or push-to-talk). In the default
+    address-aware mode, unsupported endpoints are excluded rather than
+    degrading privacy behind the user's back.
+    """
+    candidates = tuple(str(model) for model in (models or ()) if str(model).strip())
+    if local_microphone_gate_enabled:
+        return candidates
+    disabled = {str(model) for model in (runtime_disabled_models or ())}
+    return tuple(
+        model for model in candidates
+        if supports_proactive_audio(
+            model, proactive_audio_enabled, model in disabled
+        )
+    )
