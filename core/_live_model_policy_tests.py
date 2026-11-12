@@ -7,6 +7,8 @@ from core.live_model_policy import (
     blocking_tool_declarations,
     supports_legacy_thinking_budget,
     supports_live_thinking_config,
+    live_proactive_audio_mode,
+    supports_proactive_audio,
 )
 from core import gemini
 
@@ -18,6 +20,39 @@ class LiveModelPolicyTests(unittest.TestCase):
         self.assertIn("models/gemini-3.1-flash-live-preview", LIVE_MODEL_FALLBACKS)
         self.assertEqual(gemini.LIVE_MODELS, LIVE_MODEL_FALLBACKS)
         self.assertIn("gemini-3.8-flash", gemini._LADDERS[gemini.SMART])
+
+    def test_live_fallback_order_preserves_proactive_audio_before_3_1(self):
+        self.assertEqual(
+            LIVE_MODEL_FALLBACKS[1],
+            "models/gemini-2.5-flash-native-audio-preview-12-2025",
+        )
+        self.assertEqual(
+            LIVE_MODEL_FALLBACKS[2], "models/gemini-3.1-flash-live-preview"
+        )
+
+    def test_proactive_audio_capabilities_are_model_specific(self):
+        self.assertEqual(live_proactive_audio_mode("models/gemini-3.8-live"), "always_on")
+        self.assertEqual(
+            live_proactive_audio_mode("models/gemini-2.5-flash-native-audio-preview-12-2025"),
+            "configurable",
+        )
+        self.assertEqual(
+            live_proactive_audio_mode("models/gemini-3.1-flash-live-preview"),
+            "unsupported",
+        )
+        self.assertTrue(supports_proactive_audio("models/gemini-3.8-live", False))
+        self.assertTrue(supports_proactive_audio(
+            "models/gemini-2.5-flash-native-audio-preview-12-2025", True
+        ))
+        self.assertFalse(supports_proactive_audio(
+            "models/gemini-2.5-flash-native-audio-preview-12-2025", False
+        ))
+        self.assertFalse(supports_proactive_audio(
+            "models/gemini-2.5-flash-native-audio-preview-12-2025", True, True
+        ))
+        self.assertFalse(supports_proactive_audio(
+            "models/gemini-3.1-flash-live-preview", True
+        ))
 
     def test_live_tools_are_explicitly_blocking(self):
         original = [
