@@ -132,6 +132,21 @@ class ToolBatchDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executed, ["one", "two"])
         self.assertEqual(len(results), 2)
 
+    async def test_unexpected_dispatch_exception_is_returned_and_stops_siblings(self):
+        calls = [call("one", "browser_control"), call("two", "send_message")]
+        executed = []
+
+        async def execute(fc):
+            executed.append(fc.id)
+            if fc.id == "one":
+                raise RuntimeError("automation backend crashed")
+            return response(fc, "status=done action=send_message verified=true")
+
+        results = await dispatch_tool_batch(calls, execute, response, should_halt_tool_batch)
+        self.assertEqual(executed, ["one"])
+        self.assertIn("Tool 'browser_control' failed: RuntimeError", results[0].response["result"])
+        self.assertIn("[NOT_EXECUTED]", results[1].response["result"])
+
     async def test_notification_failure_does_not_resume_batch(self):
         calls = [call("one"), call("two")]
         executed = []
