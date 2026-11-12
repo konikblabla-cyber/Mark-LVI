@@ -1,7 +1,9 @@
-"""Deterministic, read-only planner for MARK's verified Windows UI actions.
+"""Read-only planner for MARK's verified Windows UI actions.
 
-The planner never controls the desktop. It resolves one exact, visible control
-from a sanitized UI snapshot and returns at most one existing action to perform.
+Exact-label resolution stays deterministic. When natural wording does not name
+the accessible label, Gemini may map the goal to one candidate from a sanitized
+local snapshot; every proposed target and state is validated again here. The
+planner never controls the desktop and returns at most one existing action.
 A fresh snapshot is required after every action.
 """
 from __future__ import annotations
@@ -431,14 +433,28 @@ def _semantic_control_plan(goal: str, goal_norm: str,
     if not target["enabled"]:
         return _blocked("the exact target control is disabled")
 
+    # Exclude words that belong to UI labels/containers from intent detection.
+    # A checkbox named "Enable notifications" must not make "turn off Enable
+    # notifications" look like a contradictory request to enable it.
+    intent_text = goal_norm
+    for phrase in (target_label, parent_label, str(proposed.get("option_label") or "")):
+        normalised = _normalise(phrase) if isinstance(phrase, str) else ""
+        if normalised:
+            intent_text = re.sub(
+                r"(?<!\w)" + re.escape(normalised) + r"(?!\w)",
+                " ",
+                intent_text,
+            )
+    intent_text = " ".join(intent_text.split())
+
     parameters: dict[str, Any]
     expected: str
     if action == "set_checkbox_state":
         desired = proposed.get("desired_state")
         if not isinstance(desired, bool):
             return None
-        negative = _goal_has_any(goal_norm, _NEGATIVE_STATE_WORDS)
-        positive = _goal_has_any(goal_norm, _POSITIVE_STATE_WORDS)
+        negative = _goal_has_any(intent_text, _NEGATIVE_STATE_WORDS)
+        positive = _goal_has_any(intent_text, _POSITIVE_STATE_WORDS)
         if negative == positive or desired != positive:
             return _clarify(
                 f"Should '{target_label}' be enabled or disabled?",
@@ -447,7 +463,7 @@ def _semantic_control_plan(goal: str, goal_norm: str,
         parameters = {"checkbox_label": target["name"], "checked": desired}
         expected = "The requested checkbox state must be read back locally."
     elif action == "select_tab_item":
-        if not _goal_has_any(goal_norm, _SELECT_WORDS):
+        if not _goal_has_any(intent_text, _SELECT_WORDS):
             return None
         parameters = {"tab_label": target["name"]}
         expected = "The exact tab must become selected in the original window."
@@ -489,8 +505,8 @@ def _semantic_control_plan(goal: str, goal_norm: str,
         desired = proposed.get("desired_state")
         if not isinstance(desired, bool):
             return None
-        expand = _goal_has_any(goal_norm, _EXPAND_WORDS)
-        collapse = _goal_has_any(goal_norm, _COLLAPSE_WORDS)
+        expand = _goal_has_any(intent_text, _EXPAND_WORDS)
+        collapse = _goal_has_any(intent_text, _COLLAPSE_WORDS)
         if expand == collapse or desired != expand:
             return _clarify(
                 f"Should '{target_label}' be expanded or collapsed?",
