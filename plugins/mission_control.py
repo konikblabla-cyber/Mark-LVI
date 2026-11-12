@@ -176,6 +176,9 @@ def startup_recovery_context() -> str:
     an action whose outcome may already have happened.
     """
     try:
+        from memory.config_manager import get_plugin_enabled
+        if not get_plugin_enabled("mission_control"):
+            return ""
         with _LOCK:
             missions = list(_read().get("missions", []))
         candidates = [
