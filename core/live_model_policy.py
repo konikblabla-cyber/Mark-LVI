@@ -11,8 +11,10 @@ PRIMARY_LIVE_MODEL = "models/gemini-3.8-live"
 # low-latency voice agents.
 LIVE_MODEL_FALLBACKS = (
     PRIMARY_LIVE_MODEL,
-    "models/gemini-3.1-flash-live-preview",
+    # Preserve context-aware listening on quota fallback: 2.5 Native Audio
+    # supports configurable Proactive Audio; 3.1 Live does not.
     "models/gemini-2.5-flash-native-audio-preview-12-2025",
+    "models/gemini-3.1-flash-live-preview",
 )
 
 
@@ -57,3 +59,34 @@ def supports_live_thinking_config(model_name: str) -> bool:
     Gemini 3.8 Extended Thinking's separate async thinking-level protocol.
     """
     return supports_legacy_thinking_budget(model_name)
+
+
+
+def live_proactive_audio_mode(model_name: str) -> str:
+    """Return the Live model's Proactive Audio contract.
+
+    Gemini 3.8 has Proactive Audio permanently enabled; Gemini 2.5 Native
+    Audio supports an explicit config flag; Gemini 3.1 Live does not support it.
+    Unknown endpoints fail closed rather than being assumed context-aware.
+    """
+    name = str(model_name or "").strip().lower().rsplit("/", 1)[-1]
+    if name in {
+        "gemini-3.8-live",
+        "gemini-3.8-live-extended-thinking",
+    }:
+        return "always_on"
+    if name in {
+        "gemini-2.5-flash-native-audio-preview-12-2025",
+        "gemini-2.5-flash-native-audio-latest",
+    }:
+        return "configurable"
+    return "unsupported"
+
+
+def supports_proactive_audio(model_name: str, preference: bool = True,
+                             runtime_disabled: bool = False) -> bool:
+    """Whether the active Live model will actually filter unaddressed speech."""
+    mode = live_proactive_audio_mode(model_name)
+    if mode == "always_on":
+        return True
+    return bool(mode == "configurable" and preference and not runtime_disabled)
