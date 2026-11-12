@@ -487,7 +487,7 @@ Storage and prompt budget are now separate problems:
 * **The prompt carries a core, not a dump.** Identity in full, then the most recently updated facts, budgeted — measured at **971 characters on a memory holding 62 stored facts.** That is *smaller* than the old whole-store cap, so sessions now connect with fewer tokens than before.
 * **The rest is fetched on demand.** A `recall_memory` tool searches the full store locally — no network, no second model, well under a millisecond.
 
-* **Recent conversation continuity is optional.** When the Conversation History plugin is enabled, the last eight text turns may be added to the next session's prompt (max 4,200 characters). The history block is labelled as historical context—not current permission—and is redacted, local-only, and never includes audio or screenshots.
+* **Recent conversation continuity is optional.** When the Conversation History plugin is enabled, the last eight text messages may be added to the next session's prompt (max 4,200 characters). The history block is labelled as historical context—not current permission—and is redacted, local-only, and never includes audio or screenshots.
 
 The part that is easy to get wrong: **a model cannot look something up if it doesn't know the thing exists.** So the prompt also carries an **index of the keys** it had no room for. Without that, "who is Ayşe?" gets "I don't know" while `ayse_sister` sits on disk unread. This index interleaves categories rather than sorting by recency — sorting like the core, a memory with forty preferences pushed the one entry the index existed for off the end.
 
