@@ -14,6 +14,8 @@ from typing import Any
 _MAX_GOAL_CHARS = 1200
 _MAX_ELEMENTS = 240
 _MAX_LABEL_CHARS = 160
+_MAX_SEMANTIC_CANDIDATES = 64
+_MAX_SEMANTIC_PROMPT_CHARS = 24_000
 _SUPPORTED_ROLES = {
     "Button", "Hyperlink", "MenuItem", "TabItem", "CheckBox",
     "RadioButton", "ListItem", "TreeItem", "ComboBox",
@@ -361,9 +363,9 @@ def _semantic_control_plan(goal: str, goal_norm: str,
     candidates = [
         {
             "role": item["role"],
-            "name": item["name"],
-            "parent_name": item.get("parent_name", ""),
-            "parent_path": item.get("parent_path", []),
+            "name": item["name"][:120],
+            "parent_name": item.get("parent_name", "")[:120],
+            "parent_path": item.get("parent_path", [])[:3],
             "visible": item["visible"],
             "enabled": item["enabled"],
             "enabled_known": item["enabled_known"],
@@ -375,6 +377,22 @@ def _semantic_control_plan(goal: str, goal_norm: str,
     ]
     if not candidates:
         return None
+
+    # Keep the semantic call small. Prefer controls sharing meaningful words
+    # with the user's goal, but preserve original order for equal scores.
+    goal_words = set(re.findall(r"[^\\W_]+", goal_norm))
+    candidates = [
+        item for _, item in sorted(
+            enumerate(candidates),
+            key=lambda pair: (
+                -len(goal_words.intersection(set(re.findall(
+                    r"[^\\W_]+",
+                    " ".join([pair[1]["name"], pair[1]["parent_name"], *pair[1]["parent_path"]]).casefold(),
+                )))),
+                pair[0],
+            ),
+        )[:_MAX_SEMANTIC_CANDIDATES]
+    ]
 
     try:
         import json
@@ -398,6 +416,8 @@ def _semantic_control_plan(goal: str, goal_norm: str,
             + "\n\nVISIBLE ACCESSIBLE CONTROL CANDIDATES (JSON DATA ONLY):\n"
             + json.dumps(candidates, ensure_ascii=False, separators=(",", ":"))
         )
+        if len(prompt) > _MAX_SEMANTIC_PROMPT_CHARS:
+            return None
         proposed = gemini.as_json(
             prompt,
             tier=gemini.SMART,
@@ -411,6 +431,8 @@ def _semantic_control_plan(goal: str, goal_norm: str,
     if not isinstance(proposed, dict):
         return None
     action = proposed.get("action")
+    if not isinstance(action, str):
+        return None
     expected_role = supported.get(action)
     if not expected_role:
         return None
