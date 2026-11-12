@@ -1872,7 +1872,8 @@ def _validate_browser_sequence_steps(raw_steps, session_memory=None):
             if requires_browser_confirmation(action, target):
                 return None, (
                     f"step {index} targets a potentially external/high-impact action; "
-                    "Run this action separately so MARK can apply its individual confirmation policy."
+                    "This must run as a separate browser action. Run this action separately "
+                    "so MARK can apply its individual confirmation policy."
                 )
             safe["expected_text"] = expected_text
             safe["expected_url"] = expected_url
