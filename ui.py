@@ -2048,8 +2048,8 @@ class AudioDeviceOverlay(_HudOverlay):
 
     Both audio streams used to open with no `device=` at all, so they always
     took the OS default — which on Windows moves by itself the moment a headset
-    is plugged in. 'JARVIS can't hear me' is usually 'JARVIS is listening to the
-    webcam'."""
+    is plugged in. 'JARVIS can't hear me' is usually a wrong or disconnected
+    default audio endpoint."""
 
     picked = pyqtSignal()      # emitted after Apply, when something changed
 
