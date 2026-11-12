@@ -1,6 +1,7 @@
 """Offline tests for exact Windows SelectionItemPattern operations."""
 import sys
 import threading
+import types
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -63,7 +64,8 @@ class UISelectionTests(unittest.TestCase):
     def _run(self, controls, label, role, *, handle=55, expected_pid=777,
              window=None, cancelled=None):
         window = window or _Window(controls, handle=handle)
-        fake = SimpleNamespace(Desktop=lambda backend: _Desktop(window))
+        fake = types.ModuleType("pywinauto")
+        fake.Desktop = lambda backend: _Desktop(window)
         with patch.dict(sys.modules, {"pywinauto": fake}):
             return ui._select_item_on_window(
                 handle, expected_pid, label, role,
