@@ -51,10 +51,14 @@ def should_halt_tool_batch(result) -> bool:
     text = str(result or "").strip()
     if not text:
         return False
-    # Page/document text is explicitly wrapped as untrusted content. Never let
-    # a marker copied from a web page masquerade as an application control signal.
-    is_untrusted_content = text.startswith("<<<UNTRUSTED source=")
-    if not is_untrusted_content and any(marker in text for marker in (
+    # Page/document text is explicitly wrapped as untrusted content. When a
+    # tool also supplies an app-owned receipt, inspect only the prefix before
+    # that wrapper so page text cannot forge a control marker.
+    untrusted_at = text.find("<<<UNTRUSTED source=")
+    control_text = text[:untrusted_at].strip() if untrusted_at >= 0 else text
+    if not control_text:
+        return False
+    if any(marker in control_text for marker in (
         "[CONFIRMATION_PENDING]",
         "[CONFIRMATION_BUSY]",
         "[MISSION_BLOCKED]",
@@ -66,7 +70,7 @@ def should_halt_tool_batch(result) -> bool:
         return True
     # Dispatcher exceptions may happen after an external action was dispatched;
     # their effects are uncertain, so do not run sibling calls from this batch.
-    if not is_untrusted_content and text.startswith("Tool '") and " failed:" in text:
+    if control_text.startswith("Tool '") and " failed:" in control_text:
         return True
-    status = text.split(None, 1)[0]
+    status = control_text.split(None, 1)[0]
     return status in {"status=failed", "status=unverified", "status=ask"}
