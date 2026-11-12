@@ -33,9 +33,13 @@ TOOL = {
     "brief": "Read the active window's safe accessible labels and plan exactly one next verified UI action; never execute it.",
     "description": (
         "Planning only. Use for an explicitly requested multi-step UI task when you need to map the user's "
-        "goal to an exact visible control. This performs one bounded local UI Automation snapshot using "
-        "MARK's existing privacy-filtered reader; it does not read edit values, click, type, take a screenshot, "
-        "poll in the background, use a network, or call an LLM. If no exact accessibility label exists, "
+        "goal to one visible control. This performs one bounded local UI Automation snapshot using "
+        "MARK's privacy-filtered reader; editable values are omitted. If exact-label matching cannot "
+        "resolve the user's natural wording, it may make one bounded Gemini request with the goal and "
+        "sanitized visible control roles, labels and parent metadata only. Gemini cannot invent a target: "
+        "the selected control, role, uniqueness, visibility and enabled state are revalidated locally. "
+        "This tool never clicks, types, changes a control, takes a screenshot or executes an action. "
+        "If no exact accessibility label exists, "
         "a clearly described visual target with an exact quoted postcondition may produce one computer_control "
         "screen_click_verified action; that separate action sends only the cropped target window to Gemini. "
         "It returns at most ONE next action using an existing MARK tool and exact parameters. Only use that action if it directly matches the user's "
