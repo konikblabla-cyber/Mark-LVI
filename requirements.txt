@@ -43,7 +43,6 @@ pyperclip
 
 # ── Vision & media ────────────────────────────────────────────────────────────
 pillow>=10,<13
-opencv-python-headless>=4.8,<5  # cv2 used by screen/media processing and Windows runtime smoke checks
 mss>=9,<11
 
 # ── System, files & documents ─────────────────────────────────────────────────
