@@ -12,7 +12,7 @@ class WebSearchReceiptTests(unittest.TestCase):
         result = web_search.web_search({"query": "a current topic", "mode": "search"})
         self.assertTrue(result.startswith("status=done action=web_search verified=true"))
         self.assertIn("external_data_untrusted=true", result)
-        self.assertIn("<<<UNTRUSTED source=web>>>\\nGrounded search content\\n<<<END UNTRUSTED>>>", result)
+        self.assertIn("<<<UNTRUSTED source=web>>>\nGrounded search content\n<<<END UNTRUSTED>>>", result)
         self.assertEqual(outcome.unwrap(result), "Grounded search content")
         _search.assert_called_once_with("a current topic")
 
