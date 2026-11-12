@@ -3,7 +3,7 @@ import unittest
 from core.focus_context import (
     FocusContextTracker, classify_application, describe_focus_context,
     format_focus_context_for_prompt, normalise_executable,
-    format_live_focus_context, compose_live_system_instruction,
+    format_live_focus_context, append_live_focus_context_to_tool_result,
 )
 
 
@@ -86,22 +86,31 @@ class FocusContextTests(unittest.TestCase):
         self.assertEqual(format_live_focus_context({"application": ""}), "")
         self.assertEqual(format_live_focus_context({"application": "unknown-app"}), "")
 
-    def test_live_system_instruction_adds_focus_only_after_opt_in(self):
-        base = "Base JARVIS instructions."
+    def test_live_tool_result_gets_focus_only_after_desktop_opt_in(self):
+        base = "status=done app=Discord"
         snapshot = {"application": "Discord.exe"}
-        self.assertEqual(compose_live_system_instruction(base, snapshot), base)
-        result = compose_live_system_instruction(base, snapshot, enabled=True)
+        self.assertEqual(
+            append_live_focus_context_to_tool_result(base, snapshot, enabled=False),
+            base,
+        )
+        result = append_live_focus_context_to_tool_result(base, snapshot, enabled=True)
         self.assertTrue(result.startswith(base))
+        self.assertIn("[LIVE DESKTOP CONTEXT", result)
         self.assertIn("discord", result)
         self.assertIn("communication", result)
 
-    def test_live_system_instruction_can_remove_previous_focus_context(self):
-        base = "Base instructions."
-        enriched = compose_live_system_instruction(
-            base, {"application": "Code.exe"}, enabled=True,
+    def test_live_tool_result_omits_unknown_or_missing_focus_context(self):
+        base = "status=done"
+        self.assertEqual(
+            append_live_focus_context_to_tool_result(base, None, enabled=True),
+            base,
         )
-        self.assertIn("code", enriched)
-        self.assertEqual(compose_live_system_instruction(base, enabled=False), base)
+        self.assertEqual(
+            append_live_focus_context_to_tool_result(
+                base, {"application": "unknown-app"}, enabled=True,
+            ),
+            base,
+        )
 
     def test_live_context_does_not_accept_untrusted_title_or_content_fields(self):
         result = format_live_focus_context({
