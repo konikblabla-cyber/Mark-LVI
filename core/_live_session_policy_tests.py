@@ -81,6 +81,7 @@ class ToolBatchSafetyTests(unittest.TestCase):
             "status=failed action=open_app reason=not_found",
             "status=unverified action=click reason=timeout",
             "status=ask action=select_list_item question=ambiguous",
+            "Tool 'browser_control' failed: page changed before verification",
         ):
             with self.subTest(result=result):
                 self.assertTrue(should_halt_tool_batch(result))
