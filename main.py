@@ -632,7 +632,7 @@ class JarvisLive:
         self._communication_audio_session_active = False  # actual WASAPI signal, not release grace
         self._in_call_addressing_enabled = get_in_call_addressing_enabled()
         self._proactive_audio_enabled = get_proactive_audio_enabled()
-        self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
+        self._pending_vision       = None    # (screen_bytes, mime_type, question) to inject after tool response
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
@@ -1708,7 +1708,7 @@ class JarvisLive:
                         finally:
                             self._vision_busy = False
                     else:
-                        self._pending_vision = (img_b, mime_t, user_text, "screen")
+                        self._pending_vision = (img_b, mime_t, user_text)
                         result = (
                             "[VISION_ACTIVE] Screen captured and attached to this same exchange. "
                             "Do not acknowledge or answer before the image arrives. Reply once, "
@@ -2033,7 +2033,7 @@ class JarvisLive:
                 _mic_stream = _open_mic(_mic_dev)
             except Exception as _e:
                 # A device the picker listed but the driver will not open right
-                # now — exclusive mode, a webcam already in use, a virtual mic
+                # now — exclusive mode, another application already using it, a virtual mic
                 # whose source went away. Chosen hardware failing must never
                 # mean the assistant cannot hear at all.
                 if _mic_dev is None:
@@ -2080,10 +2080,10 @@ class JarvisLive:
             return False
 
         import base64 as _b64
-        img_b, mime_t, question, angle = self._pending_vision
+        img_b, mime_t, question = self._pending_vision
         self._pending_vision = None
         b64 = _b64.b64encode(img_b).decode("ascii")
-        print(f"[Vision] 📤 {len(img_b):,} bytes (angle={angle}) → main session")
+        print(f"[Vision] 📤 {len(img_b):,} screen bytes → main session")
 
         # Label the source. Without it the image arrives carrying nothing but
         # the user's own sentence, and a screenshot of this app — which has a
