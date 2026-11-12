@@ -281,14 +281,20 @@ def is_gone_error(err: str) -> bool:
             or "permission" in low or "403" in err)
 
 
-def live_model() -> str:
-    """The Live model to open the conversation with: the first rung that is not
-    resting. If every one is resting the ladder is used from the top anyway —
-    refusing to connect at all is never the better answer."""
-    for m in LIVE_MODELS:
+def live_model(allowed_models=None) -> str:
+    """Choose the first usable Live endpoint from the caller's safe candidates.
+
+    The default keeps the full legacy ladder for non-microphone one-shot uses.
+    The always-on voice session passes a capability-filtered list so a model
+    without Proactive Audio cannot receive room speech unless local gating is on.
+    """
+    candidates = tuple(allowed_models) if allowed_models is not None else LIVE_MODELS
+    if not candidates:
+        raise RuntimeError("no Live model is safe for the current microphone mode")
+    for m in candidates:
         if not _cooling(m):
             return m
-    return LIVE_MODELS[0]
+    return candidates[0]
 
 
 def note_live_failure(model: str, err: str) -> bool:
