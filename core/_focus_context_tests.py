@@ -38,6 +38,14 @@ class FocusContextTests(unittest.TestCase):
         self.assertEqual(format_focus_context_for_prompt(""), "")
         self.assertEqual(format_focus_context_for_prompt(None), "")
 
+    def test_desktop_awareness_is_opt_in_by_default(self):
+        from memory import config_manager
+        from unittest.mock import patch
+        with patch.object(config_manager, "load_api_keys", return_value={}):
+            self.assertFalse(config_manager.get_desktop_awareness_enabled())
+        with patch.object(config_manager, "load_api_keys", return_value={"desktop_awareness_enabled": True}):
+            self.assertTrue(config_manager.get_desktop_awareness_enabled())
+
     def test_tracker_ignores_short_focus_changes(self):
         tracker = FocusContextTracker(stable_seconds=8.0)
         self.assertIsNone(tracker.observe("Code.exe", 0.0))
