@@ -314,7 +314,9 @@ def _plan_visual_click(goal: str, snapshot: Any,
             "visual_target_bounds_unavailable",
         )
 
-    risk = _risk_for(description, expected_label)
+    # The postcondition describes what must appear, not what will be changed.
+    # Risk is based on the control the user asked MARK to activate.
+    risk = _risk_for(description)
     step = {
         "tool": "computer_control",
         "parameters": {
