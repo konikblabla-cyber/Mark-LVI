@@ -500,6 +500,25 @@ class UIReasoningTests(unittest.TestCase):
         })
         resolve.assert_not_called()
 
+    def test_negated_checkbox_command_is_not_mistaken_for_disable(self):
+        snapshot = [control("CheckBox", "Notifications")]
+        result = plan_ui_task("Don't turn off Notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "negated_state_instruction")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_negated_checkbox_command_fails_closed(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Do not disable notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "negated_state_instruction")
+        self.assertEqual(result["steps"], [])
+
     def test_semantic_resolution_failure_fails_closed_without_action(self):
         snapshot = [control("CheckBox", "Enable notifications")]
         with patch("core.gemini.as_json", side_effect=TimeoutError("timeout")):
