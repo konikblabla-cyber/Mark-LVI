@@ -2259,10 +2259,23 @@ def _browser_control_execute(
                     target_info = str(submit_info.get("target") or "active form")[:160]
                 else:
                     target_info = "active form could not be inspected"
+                from core.autonomy_policy import requires_ui_confirmation, scope_request
                 needs_confirmation = (
                     not isinstance(submit_info, dict)
-                    or submit_info.get("risky") is not False
-                    or requires_browser_confirmation("smart_click", target_info)
+                    or (
+                        submit_info.get("risky") is not False
+                        and requires_ui_confirmation(
+                            "submit " + target_info,
+                            user_request=scope_request(session_memory),
+                        )
+                    )
+                    or (
+                        requires_browser_confirmation("smart_click", target_info)
+                        and requires_ui_confirmation(
+                            target_info,
+                            user_request=scope_request(session_memory),
+                        )
+                    )
                 )
                 if needs_confirmation:
                     result = confirm.request(
@@ -2316,24 +2329,29 @@ def browser_control(
     params = parameters or {}
     action = str(params.get("action") or "").strip().lower()
     target = params.get("text") or params.get("description") or params.get("selector") or ""
+    from core.autonomy_policy import (
+        explicitly_requested_target_action, requires_ui_confirmation, scope_request,
+    )
+    request = scope_request(session_memory)
     if action in {"type", "smart_type"} and bool(params.get("clear_first", False)):
         confirmed_params = dict(params)
-        return confirm.request(
-            key="browser_control.replace_text",
-            title="Confirm replacing browser field text",
-            detail=(
-                f"Browser action: {action}\nTarget: {str(target)[:180]}\n\n"
-                "This clears the current contents of the selected browser field before typing. "
-                "Confirm only if replacing that existing text is intended."
-            )[:1800],
-            run=lambda: _browser_control_execute(
-                confirmed_params, response=response, player=player,
-                session_memory=session_memory,
-            ),
-        )
-    from core.autonomy_policy import requires_ui_confirmation, scope_request
+        replace_target = "replace " + str(target or "active field")
+        if not explicitly_requested_target_action(request, replace_target):
+            return confirm.request(
+                key="browser_control.replace_text",
+                title="Confirm replacing browser field text",
+                detail=(
+                    f"Browser action: {action}\nTarget: {str(target)[:180]}\n\n"
+                    "This clears the current contents of the selected browser field. "
+                    "Confirm only if replacing that text is intended."
+                )[:1800],
+                run=lambda: _browser_control_execute(
+                    confirmed_params, response=response, player=player,
+                    session_memory=session_memory,
+                ),
+            )
     if (requires_browser_confirmation(action, target)
-            and requires_ui_confirmation(target, user_request=scope_request(session_memory))):
+            and requires_ui_confirmation(target, user_request=request)):
         title = f"Confirm browser action: {str(target)[:80]}"
         detail = (
             f"Browser action: {action}\n"
