@@ -51,7 +51,10 @@ def should_halt_tool_batch(result) -> bool:
     text = str(result or "").strip()
     if not text:
         return False
-    if any(marker in text for marker in (
+    # Page/document text is explicitly wrapped as untrusted content. Never let
+    # a marker copied from a web page masquerade as an application control signal.
+    is_untrusted_content = text.startswith("<<<UNTRUSTED source=")
+    if not is_untrusted_content and any(marker in text for marker in (
         "[CONFIRMATION_PENDING]",
         "[CONFIRMATION_BUSY]",
         "[MISSION_BLOCKED]",
@@ -63,7 +66,7 @@ def should_halt_tool_batch(result) -> bool:
         return True
     # Dispatcher exceptions may happen after an external action was dispatched;
     # their effects are uncertain, so do not run sibling calls from this batch.
-    if text.startswith("Tool '") and " failed:" in text:
+    if not is_untrusted_content and text.startswith("Tool '") and " failed:" in text:
         return True
     status = text.split(None, 1)[0]
     return status in {"status=failed", "status=unverified", "status=ask"}
