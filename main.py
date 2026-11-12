@@ -634,6 +634,7 @@ class JarvisLive:
         self._last_system_instruction = ""
         self._focus_context_retry_at = 0.0
         self._focus_context_update_task = None
+        self._focus_context_check_at = 0.0
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
         self._communication_audio_session_active = False  # actual WASAPI signal, not release grace
@@ -860,6 +861,19 @@ class JarvisLive:
         """Schedule a model-context refresh without blocking local privacy polling."""
         task = self._focus_context_update_task
         if task is not None and not task.done():
+            return
+        now = time.monotonic()
+        if now < self._focus_context_check_at:
+            return
+        self._focus_context_check_at = now + 1.0
+        try:
+            enabled = get_desktop_awareness_enabled()
+        except Exception:
+            enabled = False
+        desired = compose_live_system_instruction(
+            self._base_system_instruction, self._focus_context, enabled=enabled,
+        )
+        if not desired or desired == self._last_system_instruction:
             return
         try:
             loop = asyncio.get_running_loop()
