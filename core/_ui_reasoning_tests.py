@@ -368,6 +368,19 @@ class UIReasoningTests(unittest.TestCase):
         })
         resolve.assert_called_once()
 
+    def test_semantic_radio_option_accepts_explicit_natural_choice(self):
+        snapshot = [control("RadioButton", "Dark theme")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "select_radio_option",
+            "target_label": "Dark theme",
+        }):
+            result = plan_ui_task("Use the dark appearance", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["tool"], "select_radio_option")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "radio_label": "Dark theme",
+        })
+
     def test_semantic_tab_does_not_execute_or_infer_a_click(self):
         snapshot = [control("TabItem", "Privacy & Security")]
         with patch("core.gemini.as_json", return_value={
