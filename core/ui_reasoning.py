@@ -39,11 +39,14 @@ _HIGH_IMPACT_WORDS = {
 
 _NEGATIVE_STATE_WORDS = (
     "turn off", "switch off", "disable", "uncheck", "untick", "deactivate",
-    "wyłącz", "wylacz", "odznacz", "wyłącz opcję", "wylacz opcje",
+    "stop", "block", "mute", "silence", "prevent", "turn down",
+    "wyłącz", "wylacz", "odznacz", "wycisz", "zablokuj", "zatrzymaj",
+    "wyłącz opcję", "wylacz opcje",
 )
 _POSITIVE_STATE_WORDS = (
     "turn on", "switch on", "enable", "check", "tick", "activate",
-    "włącz", "wlacz", "zaznacz", "włącz opcję", "wlacz opcje",
+    "allow", "permit", "unblock", "unmute",
+    "włącz", "wlacz", "zaznacz", "odblokuj", "włącz opcję", "wlacz opcje",
 )
 _SELECT_WORDS = (
     "select", "choose", "open", "switch to", "go to", "show", "wybierz",
@@ -397,12 +400,21 @@ def _semantic_control_plan(goal: str, goal_norm: str,
     target_label = _safe_label(proposed.get("target_label"))
     if not target_label:
         return None
-    matches = [
+    all_matches = [
         item for item in elements
         if item["role"] == expected_role
         and _normalise(item["name"]) == _normalise(target_label)
     ]
     parent_label = _safe_label(proposed.get("parent_label", ""))
+    if len(all_matches) > 1:
+        # A model must not choose between duplicate controls on the user's
+        # behalf. Parent context is usable only when the user named it.
+        if not parent_label or not _contains_phrase(goal_norm, _normalise(parent_label)):
+            return _clarify(
+                f"There is more than one visible '{target_label}' control. Specify its section or parent.",
+                "semantic_target_ambiguous",
+            )
+    matches = all_matches
     if parent_label:
         matches = [
             item for item in matches
