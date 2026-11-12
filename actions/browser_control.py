@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import unicodedata
 import webbrowser
 from pathlib import Path
