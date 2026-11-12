@@ -71,7 +71,9 @@ class ToolBatchSafetyTests(unittest.TestCase):
             "[CONFIRMATION_BUSY] another confirmation is active",
             "[MISSION_BLOCKED] stop this mission",
             "[MISSION_RECOVERY] inspect before continuing",
+            '[MISSION_UI_PLAN] {"status":"planned","execution":"not_started"}',
             "[MISSION_UI_RECOVERY] inspect the current window",
+            "[MISSION_UI_RESULT_VERIFIED] complete this exact step now",
         ):
             with self.subTest(result=result):
                 self.assertTrue(should_halt_tool_batch(result))
