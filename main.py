@@ -81,7 +81,8 @@ from memory.config_manager     import (
 from core                     import gemini as _gemini
 from core.live_model_policy import (
     PRIMARY_LIVE_MODEL, blocking_tool_declarations,
-    supports_legacy_thinking_budget,
+    supports_legacy_thinking_budget, live_proactive_audio_mode,
+    supports_proactive_audio,
 )
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
@@ -733,7 +734,7 @@ class JarvisLive:
             return _record_confirmed_result
         confirm_gate.set_result_observer_factory(_mission_confirmation_result)
 
-        self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
+        self._proactive_audio_runtime_disabled = False  # per-session fallback if 2.5 rejects its flag
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
 
         _base_dir = Path(__file__).resolve().parent
@@ -938,7 +939,10 @@ class JarvisLive:
                         self._in_call_addressing_enabled,
                         self._proactive_audio_enabled and not self._wake_enabled,
                         bool(
-                            self._enhanced_live
+                            supports_proactive_audio(
+                                LIVE_MODEL, self._proactive_audio_enabled,
+                                self._proactive_audio_runtime_disabled,
+                            )
                             and self._engine_caps is None
                             and self._engine is None
                             and self.session is not None
@@ -989,7 +993,10 @@ class JarvisLive:
         if enabled and not (
                 self._proactive_audio_enabled
                 and not self._wake_enabled
-                and self._enhanced_live
+                and supports_proactive_audio(
+                    LIVE_MODEL, self._proactive_audio_enabled,
+                    self._proactive_audio_runtime_disabled,
+                )
                 and self._engine_caps is None
                 and self._engine is None):
             self._in_call_addressing_enabled = False
@@ -1576,15 +1583,14 @@ class JarvisLive:
                 )
             ),
         )
-        if self._enhanced_live:
-            # Proactive audio: JARVIS stays silent when speech isn't addressed
-            # to it (background chatter, talking to someone else in the room).
-            # (Affective dialog was dropped: gemini-3.1-flash-live does not
-            #  support it, and it never reliably detected tone in practice.
-            #  To restore it on a 2.5 native-audio model, add back:
-            #  cfg["enable_affective_dialog"] = True )
-            if get_proactive_audio_enabled():
-                cfg["proactivity"] = types.ProactivityConfig(proactive_audio=True)
+        # Proactive Audio is model-specific: Gemini 3.8 has it permanently on,
+        # Gemini 2.5 Native Audio requires this flag, and Gemini 3.1 Live does
+        # not support it. Never send an unsupported field to the 3.1 endpoint.
+        _proactive_mode = live_proactive_audio_mode(LIVE_MODEL)
+        if (_proactive_mode == "configurable"
+                and get_proactive_audio_enabled()
+                and not self._proactive_audio_runtime_disabled):
+            cfg["proactivity"] = types.ProactivityConfig(proactive_audio=True)
 
         if self._tuned_live:
             cfg.update(self._tuning_config())
@@ -3044,8 +3050,9 @@ class JarvisLive:
         if self._engine_caps is None:
             client = genai.Client(
                 api_key=_get_api_key(),
-                http_options={"api_version":
-                              "v1alpha" if self._enhanced_live else "v1beta"},
+                # Current Live API docs specify v1beta for Gemini 3.8, Proactive
+                # Audio, session tools and realtime audio configuration.
+                http_options={"api_version": "v1beta"},
             )
             try:
                 async with client.aio.live.connect(
@@ -3219,8 +3226,10 @@ class JarvisLive:
                         self._awake = True
                         self.ui.set_state("LISTENING")
                         self.ui.write_log("SYS: JARVIS online — address-aware listening active; no wake phrase needed.")
-                        if (self._engine_caps is None and self._enhanced_live
-                                and get_proactive_audio_enabled()):
+                        if (self._engine_caps is None and supports_proactive_audio(
+                                LIVE_MODEL, self._proactive_audio_enabled,
+                                self._proactive_audio_runtime_disabled,
+                        )):
                             self.ui.write_log(
                                 "SYS: Gemini Proactive Audio decides whether speech is directed to MARK. "
                                 "Microphone audio is streamed while this session is connected."
