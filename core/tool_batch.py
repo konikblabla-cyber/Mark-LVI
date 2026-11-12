@@ -43,7 +43,17 @@ async def dispatch_tool_batch(
             responses.append(make_response(call, _NOT_EXECUTED))
             continue
 
-        response = await execute(call)
+        try:
+            response = await execute(call)
+        except Exception as exc:
+            # Keep an unexpected dispatcher exception inside the function-call
+            # protocol. The explicit failure receipt halts siblings and lets the
+            # model recover without tearing down the Live receive loop.
+            tool_name = str(getattr(call, "name", "tool") or "tool")
+            response = make_response(
+                call,
+                f"Tool '{tool_name}' failed: {type(exc).__name__}: {exc}",
+            )
         responses.append(response)
         if should_halt(_result_text(response)):
             halted = True
