@@ -411,7 +411,7 @@ def web_search(
             "web_search", verified=True, mode=mode, query=query_label,
             external_data_untrusted=True,
         )
-    return receipt + "\\n" + outcome.untrusted("web", found)
+    return receipt + "\n" + outcome.untrusted("web", found)
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
