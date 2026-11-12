@@ -174,20 +174,16 @@ _LADDERS = {
              "gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"),
 }
 
-# The conversation's own model, and ONE careful fallback behind it.
+# A short, capability-aware ladder for the one user-facing conversation.
 #
-# Deliberately not a long ladder. The Live quota is not the one that runs out —
-# the text models are — and Live models are not interchangeable the way text
-# models are: they differ in which config fields they accept and in what they
-# can do, so falling through a list of them risks connecting to something that
-# behaves like a different assistant. The key also offers transcribe-live,
-# live-translate and a robotics streaming model, none of which are assistants
-# at all.
-#
-# So there are two: the current one, and the native-audio model this assistant
-# used before it, which is known to work here. A mismatch in config is already
-# survivable — the connect loop drops the tuning and proactive-audio fields and
-# reconnects when the server rejects them.
+# Live models are not interchangeable: they differ in tool calling, turn-taking
+# and Proactive Audio. The order therefore preserves the feature the assistant
+# relies on most: 3.8 is first (Proactive Audio is built in), 2.5 Native Audio is
+# the first fallback (it supports configurable Proactive Audio), and 3.1 Live is
+# last (it has synchronous tools but no Proactive Audio). That keeps MARK's
+# address-aware listening alive for as long as a supported endpoint is usable.
+# The key also exposes transcription, translation and robotics models, none of
+# which are suitable replacements for the user-facing assistant.
 LIVE_MODELS = LIVE_MODEL_FALLBACKS
 
 # The Live model to use for one-shot calls. main.py owns the real one; this is
