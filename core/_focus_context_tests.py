@@ -113,6 +113,15 @@ class FocusContextTests(unittest.TestCase):
         self.assertNotIn("12345", result)
         self.assertNotIn("send credentials", result)
 
+    def test_tracker_reset_discards_stale_foreground_context(self):
+        tracker = FocusContextTracker(stable_seconds=1.0)
+        tracker.observe("Code.exe", 0.0)
+        self.assertEqual(tracker.observe("Code.exe", 1.0)["application"], "code")
+        tracker.reset()
+        self.assertIsNone(tracker.current)
+        self.assertIsNone(tracker.observe("chrome.exe", 1.5))
+        self.assertEqual(tracker.observe("chrome.exe", 2.5)["application"], "chrome")
+
     def test_invalid_or_backwards_timestamps_are_ignored(self):
         tracker = FocusContextTracker()
         self.assertIsNone(tracker.observe("Code.exe", "bad"))
