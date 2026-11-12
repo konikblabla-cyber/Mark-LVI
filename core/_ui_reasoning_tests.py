@@ -316,5 +316,112 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["reason"], "visual_target_identity_unavailable")
         self.assertEqual(result["steps"], [])
 
+
+    def test_semantic_checkbox_resolution_uses_gemini_but_revalidates_exact_target(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        proposal = {
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }
+        with patch("core.gemini.as_json", return_value=proposal) as resolve:
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["execution"], "not_started")
+        self.assertEqual(result["steps"][0]["tool"], "set_checkbox_state")
+        self.assertEqual(
+            result["steps"][0]["parameters"],
+            {"checkbox_label": "Enable notifications", "checked": False},
+        )
+        resolve.assert_called_once()
+        self.assertEqual(resolve.call_args.kwargs["tier"], "smart")
+        self.assertEqual(resolve.call_args.kwargs["timeout_ms"], 15_000)
+
+    def test_semantic_checkbox_refuses_a_hallucinated_accessible_label(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Disable all tracking",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off tracking", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_checkbox_refuses_a_state_that_conflicts_with_user_intent(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": True,
+        }):
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "semantic_checkbox_state_unclear")
+
+    def test_semantic_resolver_needs_parent_for_duplicate_controls(self):
+        snapshot = [
+            control("CheckBox", "Enable notifications", parent_name="Account"),
+            control("CheckBox", "Enable notifications", parent_name="Marketing"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "semantic_target_ambiguous")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_dropdown_option_must_be_a_visible_child_of_exact_combobox(self):
+        snapshot = [
+            control("ComboBox", "Language"),
+            control("ListItem", "Polish", parent_name="Language"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "select_dropdown_option",
+            "target_label": "Language",
+            "option_label": "Polish",
+        }):
+            result = plan_ui_task("Choose Polish", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "combo_label": "Language", "option_label": "Polish",
+        })
+
+    def test_semantic_dropdown_refuses_an_option_not_in_that_combobox(self):
+        snapshot = [
+            control("ComboBox", "Language"),
+            control("ListItem", "English", parent_name="Language"),
+            control("ListItem", "Polish", parent_name="Region"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "select_dropdown_option",
+            "target_label": "Language",
+            "option_label": "Polish",
+        }):
+            result = plan_ui_task("Choose Polish", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "semantic_dropdown_option_ambiguous")
+
+    def test_semantic_planner_never_uses_gemini_for_sensitive_goals(self):
+        snapshot = [control("Edit", "Password")]
+        with patch("core.gemini.as_json") as resolve:
+            result = plan_ui_task("Enter my password", snapshot)
+        self.assertEqual(result["status"], "blocked")
+        resolve.assert_not_called()
+
+    def test_semantic_planner_cannot_turn_a_model_click_into_an_action(self):
+        snapshot = [control("Button", "Continue")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "click_and_verify",
+            "target_label": "Continue",
+            "expected_result": "Dashboard",
+        }):
+            result = plan_ui_task("Proceed to dashboard", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
