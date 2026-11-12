@@ -381,12 +381,14 @@ def _fresh_ui_plan(goal: str, previous_result: dict | None = None) -> dict:
 
     status = proposed.get("status")
     if status in {"needs_clarification", "blocked"}:
-        return {
+        result = {
             "status": status,
             "reason": str(proposed.get("reason") or "")[:160],
-            "question": str(proposed.get("question") or "")[:320],
             "steps": [],
         }
+        if "question" in proposed:
+            result["question"] = str(proposed.get("question") or "")[:320]
+        return result
     if status != "planned":
         return {"status": "blocked", "reason": "planner returned an unsupported status", "steps": []}
 
