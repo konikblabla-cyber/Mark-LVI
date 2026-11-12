@@ -146,10 +146,10 @@ def explicitly_requested_target_action(user_request: str, target: str) -> bool:
         return False
     has_action_verb = bool(re.search(
         r"\b(?:click|press|select|choose|submit|send|publish|share|upload|delete|remove|erase|sign|"
-        r"write|overwrite|replace|edit|move|copy|rename|create|organize|organise|clear|"
+        r"write|overwrite|replace|edit|move|copy|rename|create|organize|organise|clear|close|lock|open|"
         r"wybierz|kliknij|naciśnij|nacisnij|zatwierdź|zatwierdz|usuń|usun|kasuj|"
         r"wyślij|wyslij|opublikuj|udostępnij|udostepnij|zapisz|nadpisz|zastąp|zastap|"
-        r"edytuj|przenieś|przenies|skopiuj|zmień|zmien|utwórz|utworz|uporządkuj|uporzadkuj|wyczyść|wyczysc)\b",
+        r"edytuj|przenieś|przenies|skopiuj|zmień|zmien|utwórz|utworz|uporządkuj|uporzadkuj|wyczyść|wyczysc|zamknij|otwórz|otworz|zablokuj)\b",
         request, re.IGNORECASE,
     ))
     return has_action_verb and _target_mentioned(request, target)
