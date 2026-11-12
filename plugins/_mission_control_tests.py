@@ -706,5 +706,59 @@ class MissionControlReliabilityTests(unittest.TestCase):
         )
         self.assertEqual(result, proposed)
 
+
+class MissionControlProactiveContextTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.store = Path(self.temp_dir.name) / "missions.json"
+        self.path_patch = patch.object(mission_control, "_DATA_PATH", self.store)
+        self.path_patch.start()
+
+    def tearDown(self):
+        self.path_patch.stop()
+        self.temp_dir.cleanup()
+
+    def _plan(self, title, step):
+        result = mission_control.run({
+            "action": "plan",
+            "title": title,
+            "goal": "Complete the requested local task",
+            "steps": step,
+        })
+        return result.split("MISSION ", 1)[1].split(":", 1)[0]
+
+    def test_context_includes_only_authorized_active_mission_and_does_not_mutate_it(self):
+        planned_id = self._plan("Plan only", "Do not run this step")
+        self.assertEqual(mission_control.proactive_context(), "")
+
+        active_id = self._plan("Desktop assistant", "Open the project dashboard")
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Run the desktop assistant mission")
+        started = mission_control.run({
+            "action": "start", "mission_id": active_id,
+        }, session_memory=scope)
+        self.assertIn("[MISSION_CONTINUE]", started)
+
+        before = mission_control._read()
+        context = mission_control.proactive_context()
+        after = mission_control._read()
+
+        self.assertIn("Desktop assistant", context)
+        self.assertIn("Open the project dashboard", context)
+        self.assertIn(active_id, context)
+        self.assertNotIn(planned_id, context)
+        self.assertIn("UNTRUSTED LOCAL DATA", context)
+        self.assertEqual(before, after, "proactive context must be read-only")
+
+    def test_paused_and_completed_missions_are_not_in_proactive_context(self):
+        mission_id = self._plan("Paused mission", "Continue later")
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Run the mission")
+        mission_control.run({
+            "action": "start", "mission_id": mission_id,
+        }, session_memory=scope)
+        mission_control.run({"action": "pause", "mission_id": mission_id})
+        self.assertEqual(mission_control.proactive_context(), "")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
