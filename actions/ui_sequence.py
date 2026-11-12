@@ -871,6 +871,10 @@ TOOL = {
                             "type": "BOOLEAN",
                             "description": "For set_checkbox_state: true to check it, false to uncheck it.",
                         },
+                        "tab_label": {
+                            "type": "STRING",
+                            "description": "For select_tab_item: exact accessible label of one visible, enabled, non-sensitive TabItem.",
+                        },
                         "radio_label": {
                             "type": "STRING",
                             "description": "For select_radio_option: exact accessible label of one visible non-sensitive RadioButton.",
