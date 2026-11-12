@@ -941,7 +941,7 @@ class JarvisLive:
                         bool(
                             supports_proactive_audio(
                                 LIVE_MODEL, self._proactive_audio_enabled,
-                                self._proactive_audio_runtime_disabled,
+                                self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
                             )
                             and self._engine_caps is None
                             and self._engine is None
