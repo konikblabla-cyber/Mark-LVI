@@ -632,6 +632,7 @@ class JarvisLive:
         self._focus_context = None
         self._base_system_instruction = ""
         self._last_system_instruction = ""
+        self._focus_context_retry_at = 0.0
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
         self._communication_audio_session_active = False  # actual WASAPI signal, not release grace
@@ -870,20 +871,25 @@ class JarvisLive:
         )
         if not desired or desired == self._last_system_instruction:
             return
+        if time.monotonic() < self._focus_context_retry_at:
+            return
         # Do not rewrite the session preamble while a response is playing or
         # immediately after user speech. The pending context is retried on the
         # next local guard tick, without creating an unsolicited model turn.
         with self._speaking_lock:
             speaking = self._is_speaking
-        if speaking or (time.monotonic() - self._last_user_speech) < 1.5:
+        if (speaking or getattr(self, "_addressed_turn_pending", False)
+                or (time.monotonic() - self._last_user_speech) < 1.5):
             return
         try:
             await session.send_context_update(system_instruction=desired)
         except Exception as exc:
+            self._focus_context_retry_at = time.monotonic() + 10.0
             print(f"[Focus] Live context update deferred: {type(exc).__name__}")
             return
         if self.session is session:
             self._last_system_instruction = desired
+            self._focus_context_retry_at = 0.0
 
     async def _run_communication_guard(self) -> None:
         """Keep mic audio local in known call/chat apps unless explicitly addressed."""
