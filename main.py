@@ -633,6 +633,7 @@ class JarvisLive:
         self._base_system_instruction = ""
         self._last_system_instruction = ""
         self._focus_context_retry_at = 0.0
+        self._focus_context_update_task = None
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
         self._communication_audio_session_active = False  # actual WASAPI signal, not release grace
@@ -855,6 +856,19 @@ class JarvisLive:
             if (time.monotonic() - self._last_user_speech) > self._wake_sleep_timeout:
                 self.sleep(reason="no speech for 2 minutes")
 
+    def _schedule_live_focus_context_update(self) -> None:
+        """Schedule a model-context refresh without blocking local privacy polling."""
+        task = self._focus_context_update_task
+        if task is not None and not task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            self._focus_context_update_task = loop.create_task(
+                self._refresh_live_focus_context()
+            )
+        except RuntimeError:
+            return
+
     async def _refresh_live_focus_context(self) -> None:
         """Update Gemini's live system context after a stable, user-opted-in app switch."""
         session = self.session
@@ -941,7 +955,7 @@ class JarvisLive:
                 print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
                 # Remove stale foreground metadata from Gemini as soon as the
                 # sensor failure is observed; never keep presenting an old app.
-                await self._refresh_live_focus_context()
+                self._schedule_live_focus_context_update()
                 continue
 
             if communication_context_unchanged(
