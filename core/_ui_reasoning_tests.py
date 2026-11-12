@@ -362,6 +362,36 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_clarification")
         self.assertEqual(result["steps"], [])
 
+    def test_semantic_gemini_prompt_never_receives_editable_field_values(self):
+        private_value = "DO_NOT_SEND_PRIVATE_FIELD_VALUE"
+        snapshot = [{
+            "role": "CheckBox",
+            "name": "Enable notifications",
+            "enabled": True,
+            "visible": True,
+            "value": private_value,
+            "current_value": private_value,
+        }]
+        captured = {}
+        proposal = {
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }
+
+        def resolve(prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured["kwargs"] = kwargs
+            return proposal
+
+        with patch("core.gemini.as_json", side_effect=resolve):
+            result = plan_ui_task("Turn off notifications", snapshot)
+
+        self.assertEqual(result["status"], "planned")
+        self.assertNotIn(private_value, captured["prompt"])
+        self.assertNotIn("current_value", captured["prompt"])
+        self.assertEqual(captured["kwargs"]["timeout_ms"], 15_000)
+
     def test_semantic_checkbox_refuses_a_hallucinated_accessible_label(self):
         snapshot = [control("CheckBox", "Enable notifications")]
         with patch("core.gemini.as_json", return_value={
