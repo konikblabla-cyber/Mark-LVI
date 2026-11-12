@@ -91,7 +91,7 @@ from core.audio_recovery import (
     callback_is_stalled, stream_is_active, offer_latest_audio, LIVE_AUDIO_QUEUE_SIZE,
 )
 from core.focus_context import (
-    FocusContextTracker, append_live_focus_context_to_tool_result,
+    FocusContextTracker, append_focus_context_for_tool,
 )
 from core.project_context import (
     inspect_project_folder, format_project_context, remember_project_snapshot,
@@ -1869,23 +1869,18 @@ class JarvisLive:
         # After a desktop action, return only the current foreground executable
         # and its broad category to Gemini. This uses a tool result (not a second
         # Live input stream), and is shared only when Desktop Awareness is on.
-        desktop_context_tools = {
-            "run_ui_sequence", "click_and_verify", "fill_text", "press_keys",
-            "set_checkbox_state", "select_radio_option", "select_dropdown_option",
-            "select_tab_item", "select_list_item", "set_tree_item_expanded",
-            "computer_control", "browser_control", "mission_control",
-        }
-        if name in desktop_context_tools:
-            try:
-                if get_desktop_awareness_enabled():
-                    result = append_live_focus_context_to_tool_result(
-                        result, self._focus_context, enabled=True,
-                    )
-            except Exception as _focus_result_error:
-                print(
-                    f"[Focus] Tool-result context unavailable: "
-                    f"{type(_focus_result_error).__name__}"
-                )
+        try:
+            result = append_focus_context_for_tool(
+                result,
+                name,
+                self._focus_context,
+                enabled=get_desktop_awareness_enabled(),
+            )
+        except Exception as _focus_result_error:
+            print(
+                f"[Focus] Tool-result context unavailable: "
+                f"{type(_focus_result_error).__name__}"
+            )
 
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
