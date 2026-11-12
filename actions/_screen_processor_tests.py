@@ -39,6 +39,8 @@ class ScreenProcessorPolicyTests(unittest.TestCase):
         main_source = (root / "main.py").read_text(encoding="utf-8")
         ui_source = (root / "ui.py").read_text(encoding="utf-8")
         processor_source = Path(screen_processor.__file__).read_text(encoding="utf-8")
+        requirements = (root / "requirements.txt").read_text(encoding="utf-8").lower()
+        self.assertNotIn("opencv", requirements)
         for forbidden in ("_capture_camera", "close_camera", "start_camera_stream", "stop_camera_stream"):
             self.assertNotIn(forbidden, main_source)
         for forbidden in ("_CameraPreview", "_cam_loop", "start_camera_stream", "stop_camera_stream"):
