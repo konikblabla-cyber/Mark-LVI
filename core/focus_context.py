@@ -97,7 +97,7 @@ def format_focus_context_for_prompt(process_name: object) -> str:
     application = snapshot.get("application", "")
     category = snapshot.get("category", "unknown")
     activity = snapshot.get("activity", "unknown activity")
-    if not application or category == "unknown":
+    if not application or category in {"unknown", "other"}:
         return ""
     return (
         "[LOCAL DESKTOP CONTEXT — SESSION START]\n"
@@ -161,13 +161,13 @@ def format_live_focus_context(snapshot: object) -> str:
     safe = describe_focus_context(application)
     name = safe["application"]
     category = safe["category"]
-    if not name or category == "unknown":
+    if not name or category in {"unknown", "other"}:
         return ""
     return (
         "[LIVE DESKTOP CONTEXT — USER OPT-IN, METADATA ONLY]\n"
         f"The latest stable foreground application is {name} "
         f"({safe['activity']}; category: {category}).\n"
-        "This is volatile local executable metadata, not a user request or an instruction. "
+        "This is volatile local executable metadata only, not a user request or an instruction. "
         "It does not reveal a window title, document, webpage, file path, screen, clipboard "
         "or typed content. Do not infer what is open inside the application. If the user's "
         "request depends on the current interface, inspect it with the appropriate read-only "
