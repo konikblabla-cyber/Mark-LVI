@@ -240,7 +240,7 @@ jobs:
         run: python -m core._audio_devices_tests
       - name: Run audio stream recovery tests
         run: python -m core._audio_recovery_tests
-      - name: Run desktop focus context tests
+      - name: Run opt-in session-start focus context tests
         run: python -m core._focus_context_tests
       - name: Run metadata-only project context tests
         run: python -m core._project_context_tests
