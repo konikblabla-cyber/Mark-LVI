@@ -415,7 +415,7 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["status"], "planned")
         payload = json.loads(
             captured["prompt"].split(
-                "VISIBLE ACCESSIBLE CONTROL CANDIDATES (JSON DATA ONLY):\\n", 1
+                "VISIBLE ACCESSIBLE CONTROL CANDIDATES (JSON DATA ONLY):\n", 1
             )[1]
         )
         self.assertLessEqual(len(payload), 64)
