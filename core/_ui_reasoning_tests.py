@@ -289,6 +289,23 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(step["risk"], "high")
         self.assertTrue(step["requires_confirmation"])
 
+    def test_negated_visual_click_is_never_planned(self):
+        snapshot = {
+            "handle": 77,
+            "process_id": 88,
+            "process_name": "settings.exe",
+            "bounds": (0, 0, 800, 600),
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Do not click the gear icon and verify "Privacy panel"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "negated_click_instruction")
+        self.assertEqual(result["steps"], [])
+
     def test_visual_click_fallback_requires_an_exact_new_accessible_postcondition(self):
         snapshot = {
             "handle": 77,
