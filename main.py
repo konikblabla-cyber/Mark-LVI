@@ -90,7 +90,7 @@ from core                      import audio_devices
 from core.audio_recovery import (
     callback_is_stalled, stream_is_active, offer_latest_audio, LIVE_AUDIO_QUEUE_SIZE,
 )
-from core.focus_context import FocusContextTracker
+from core.focus_context import FocusContextTracker, format_focus_context_for_prompt
 from core.project_context import (
     inspect_project_folder, format_project_context, remember_project_snapshot,
 )
@@ -1496,6 +1496,20 @@ class JarvisLive:
         })
 
         parts = [time_ctx, identity_ctx]
+        # A user-enabled, metadata-only foreground hint helps the first turn
+        # start with the same broad desktop context the proactive engine sees.
+        # No title, document content, screenshot, clipboard or keystrokes are read.
+        if get_desktop_awareness_enabled():
+            try:
+                _desktop_at_connect = get_desktop_context(include_app=True)
+                _focus_hint = format_focus_context_for_prompt(
+                    _desktop_at_connect.get("foreground_app", "")
+                    if isinstance(_desktop_at_connect, dict) else ""
+                )
+                if _focus_hint:
+                    parts.append(_focus_hint)
+            except Exception as _focus_error:
+                print(f"[Focus] Session-start context unavailable: {type(_focus_error).__name__}")
         if mem_str:
             parts.append(mem_str)
         if not self._startup_mission_recovery_injected:
