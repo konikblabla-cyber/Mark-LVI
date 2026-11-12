@@ -95,7 +95,7 @@ It's not just an assistant — it's an extension of your digital life.
 | ⚠️ Real Confirmation | Shutdown, restart and WiFi wait for a button **you** press — the model cannot confirm its own irreversible actions |
 | 🎧 Audio Device Picker | Choose the microphone and speakers by name, filtered to the short list your OS shows — and measured, so every entry actually works |
 | 🩺 Audio Self-Recovery | Detect a stopped speaker stream or a microphone callback stalled for 5 seconds; reconnect the voice session while preserving conversation context |
-| 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. When desktop awareness is enabled, the safe app/category hint is also given to Gemini at session start and to proactive check-ins; no window titles or screen contents |
+| 🧭 Live Focus Awareness | After 2.5 seconds of stable focus, update the existing Gemini Live system context with the foreground executable and broad activity category. This works during an open conversation without starting an extra model turn. It requires desktop-awareness opt-in and never reads titles, documents, screenshots or clipboard contents |
 | 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
 | 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
 | 🧰 Windows Workspace Profiles | Save named app groups (work, study, gaming, etc.), list/delete them and launch a whole setup through the existing verified app launcher |
@@ -107,7 +107,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 📧 Google Workspace | Optional Gmail search/read, confirmed drafts and HUD-confirmed sending, plus Google Calendar event lists and confirmed event creation through local OAuth |
 | 🎧 Spotify Connect | Optional PKCE integration: search/play, pause/resume, skip, volume, device selection, queue and confirmed private/public playlist creation or additions. Audio stays in Spotify's app; catalog metadata stays in MARK's HUD |
 | 📨 Microsoft 365 / Outlook | Optional Outlook mail search/read and HUD-confirmed sending, plus Outlook Calendar lists and confirmed event creation through delegated OAuth PKCE |
-| 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only. With opt-in enabled, a metadata-only foreground hint is included when a Live session connects; no window titles or screen capture |
+| 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only. With opt-in enabled, Gemini's Live context follows stable foreground-app changes while the session is open; no window titles or screen capture |
 | 📁 Project Overview | On request, inspect the selected project folder's file types, entry points and Git branch; remember metadata without reading source code or storing its path |
 | ⏱️ Process Watch | Watch a named Windows process start or exit; keep the alert on disk until JARVIS can safely deliver it |
 | ⏰ Reminder Management | Set, list and cancel scheduled Windows reminders by their exact ID |
@@ -486,6 +486,8 @@ Storage and prompt budget are now separate problems:
 * **Nothing is deleted.** The cap is a runaway guard normal use never approaches, and if it is ever hit it says so in the activity log instead of on stdout.
 * **The prompt carries a core, not a dump.** Identity in full, then the most recently updated facts, budgeted — measured at **971 characters on a memory holding 62 stored facts.** That is *smaller* than the old whole-store cap, so sessions now connect with fewer tokens than before.
 * **The rest is fetched on demand.** A `recall_memory` tool searches the full store locally — no network, no second model, well under a millisecond.
+
+* **Recent conversation continuity is optional.** When the Conversation History plugin is enabled, the last eight text turns may be added to the next session's prompt (max 4,200 characters). The history block is labelled as historical context—not current permission—and is redacted, local-only, and never includes audio or screenshots.
 
 The part that is easy to get wrong: **a model cannot look something up if it doesn't know the thing exists.** So the prompt also carries an **index of the keys** it had no room for. Without that, "who is Ayşe?" gets "I don't know" while `ayse_sister` sits on disk unread. This index interleaves categories rather than sorting by recency — sorting like the core, a memory with forty preferences pushed the one entry the index existed for off the end.
 
