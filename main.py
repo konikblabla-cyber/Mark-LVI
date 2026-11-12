@@ -82,7 +82,7 @@ from core                     import gemini as _gemini
 from core.live_model_policy import (
     PRIMARY_LIVE_MODEL, blocking_tool_declarations,
     supports_legacy_thinking_budget, live_proactive_audio_mode,
-    supports_proactive_audio,
+    supports_proactive_audio, live_model_candidates,
 )
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
@@ -3150,7 +3150,14 @@ class JarvisLive:
                 # off a quota limit is skipped; the name is published back to
                 # LIVE_MODEL so plugins follow whatever is actually in use.
                 global LIVE_MODEL
-                LIVE_MODEL = _gemini.live_model()
+                _safe_models = live_model_candidates(
+                    _gemini.LIVE_MODELS,
+                    self._proactive_audio_enabled,
+                    (self._proactive_audio_runtime_disabled_model,)
+                    if self._proactive_audio_runtime_disabled_model else (),
+                    local_microphone_gate_enabled=(self._wake_enabled or self._ptt_enabled),
+                )
+                LIVE_MODEL = _gemini.live_model(allowed_models=_safe_models)
                 live_model = LIVE_MODEL
                 print(f"[JARVIS] Live model: {live_model}")
 
@@ -3349,7 +3356,14 @@ class JarvisLive:
                 # not start today": one model means one daily limit, and the
                 # limit always arrives mid-conversation.
                 if _gemini.note_live_failure(live_model, err_str):
-                    nxt = _gemini.live_model()
+                    _safe_models = live_model_candidates(
+                        _gemini.LIVE_MODELS,
+                        self._proactive_audio_enabled,
+                        (self._proactive_audio_runtime_disabled_model,)
+                        if self._proactive_audio_runtime_disabled_model else (),
+                        local_microphone_gate_enabled=(self._wake_enabled or self._ptt_enabled),
+                    )
+                    nxt = _gemini.live_model(allowed_models=_safe_models)
                     self.ui.write_log(
                         f"SYS: Switching to {nxt.split('/')[-1]} — the previous "
                         f"model is out of quota."
