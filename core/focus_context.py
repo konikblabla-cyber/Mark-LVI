@@ -175,6 +175,14 @@ def format_live_focus_context(snapshot: object) -> str:
     )
 
 
+DESKTOP_CONTEXT_TOOL_NAMES = frozenset({
+    "run_ui_sequence", "click_and_verify", "fill_text", "press_keys",
+    "set_checkbox_state", "select_radio_option", "select_dropdown_option",
+    "select_tab_item", "select_list_item", "set_tree_item_expanded",
+    "computer_control", "browser_control", "mission_control",
+})
+
+
 def append_live_focus_context_to_tool_result(
     result: object,
     focus_snapshot: object = None,
@@ -187,3 +195,19 @@ def append_live_focus_context_to_tool_result(
     if not hint:
         return rendered
     return f"{rendered}\n\n{hint}" if rendered else hint
+
+
+
+def append_focus_context_for_tool(
+    result: object,
+    tool_name: object,
+    focus_snapshot: object = None,
+    *,
+    enabled: bool = False,
+) -> str:
+    """Attach foreground metadata only to desktop actions and only after opt-in."""
+    if str(tool_name or "") not in DESKTOP_CONTEXT_TOOL_NAMES:
+        return str(result or "")
+    return append_live_focus_context_to_tool_result(
+        result, focus_snapshot, enabled=enabled,
+    )
