@@ -119,6 +119,12 @@ class FocusContextTracker:
     _candidate: str = ""
     _candidate_since: float = 0.0
 
+    def reset(self) -> None:
+        """Forget the last foreground app after the desktop sensor loses visibility."""
+        self.current = None
+        self._candidate = ""
+        self._candidate_since = 0.0
+
     def observe(self, process_name: object, now: float) -> Optional[dict]:
         name = normalise_executable(process_name)
         if not name:
