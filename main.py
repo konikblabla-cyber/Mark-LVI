@@ -734,7 +734,7 @@ class JarvisLive:
             return _record_confirmed_result
         confirm_gate.set_result_observer_factory(_mission_confirmation_result)
 
-        self._proactive_audio_runtime_disabled = False  # per-session fallback if 2.5 rejects its flag
+        self._proactive_audio_runtime_disabled_model = None  # endpoint-specific fallback if 2.5 rejects its flag
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
 
         _base_dir = Path(__file__).resolve().parent
@@ -995,7 +995,7 @@ class JarvisLive:
                 and not self._wake_enabled
                 and supports_proactive_audio(
                     LIVE_MODEL, self._proactive_audio_enabled,
-                    self._proactive_audio_runtime_disabled,
+                    self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
                 )
                 and self._engine_caps is None
                 and self._engine is None):
@@ -1589,7 +1589,7 @@ class JarvisLive:
         _proactive_mode = live_proactive_audio_mode(LIVE_MODEL)
         if (_proactive_mode == "configurable"
                 and get_proactive_audio_enabled()
-                and not self._proactive_audio_runtime_disabled):
+                and self._proactive_audio_runtime_disabled_model != LIVE_MODEL):
             cfg["proactivity"] = types.ProactivityConfig(proactive_audio=True)
 
         if self._tuned_live:
@@ -1959,7 +1959,10 @@ class JarvisLive:
                         self._in_call_addressing_enabled,
                         self._proactive_audio_enabled and not self._wake_enabled,
                         bool(
-                            self._enhanced_live
+                            supports_proactive_audio(
+                                LIVE_MODEL, self._proactive_audio_enabled,
+                                self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
+                            )
                             and self._engine_caps is None
                             and self._engine is None
                             and self.session is not None
@@ -3228,7 +3231,7 @@ class JarvisLive:
                         self.ui.write_log("SYS: JARVIS online — address-aware listening active; no wake phrase needed.")
                         if (self._engine_caps is None and supports_proactive_audio(
                                 LIVE_MODEL, self._proactive_audio_enabled,
-                                self._proactive_audio_runtime_disabled,
+                                self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
                         )):
                             self.ui.write_log(
                                 "SYS: Gemini Proactive Audio decides whether speech is directed to MARK. "
@@ -3375,13 +3378,10 @@ class JarvisLive:
 
                 # Proactive audio rejected by the server (preview API drift) —
                 # drop it and reconnect with the plain config.
-                if self._enhanced_live and (
-                    "INVALID_ARGUMENT" in err_str
-                    or "proactiv" in err_str.lower()
-                    or "Unknown name" in err_str
-                    or "unexpected keyword" in err_str
-                ):
-                    self._enhanced_live = False
+                if (live_proactive_audio_mode(live_model) == "configurable"
+                        and self._proactive_audio_runtime_disabled_model != live_model
+                        and "proactiv" in err_str.lower()):
+                    self._proactive_audio_runtime_disabled_model = live_model
                     if self._in_call_addressing_enabled:
                         self._in_call_addressing_enabled = False
                         save_in_call_addressing_enabled(False)
