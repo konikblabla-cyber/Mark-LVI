@@ -999,9 +999,8 @@ def _file_confirmation(parameters: dict, session_memory=None, player=None):
             target = target / name
         try:
             target = target.resolve(strict=False)
-            from core.autonomy_policy import explicitly_requested_target_action
             explicit_overwrite = bool(
-                name and explicitly_requested_target_action(request, name)
+                name and _delete_target_was_explicitly_requested(request, path, name)
             )
             if (_is_safe_path(target) and target.is_file()
                     and target.stat().st_size > _UNDO_CONTENT_LIMIT
