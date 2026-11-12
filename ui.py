@@ -4240,7 +4240,7 @@ class RemoteKeyOverlay(QWidget):
 
         self._update_qr(auto_login_url)
 
-        lay.addWidget(_lbl("Scan with phone camera to connect instantly", 8, color=C.TEXT_DIM))
+        lay.addWidget(_lbl("Open this QR code on your phone to connect instantly", 8, color=C.TEXT_DIM))
 
         # THE ONE FAILURE THAT LOOKS LIKE THE SERVER BEING OFF.
         #
