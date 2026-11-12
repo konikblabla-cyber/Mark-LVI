@@ -2363,7 +2363,7 @@ class JarvisLive:
                             should_halt_tool_batch,
                             lambda: self.ui.write_log(
                                 "SYS: Remaining calls in this tool batch were stopped "
-                                "at a confirmation or verification boundary."
+                                "at a control handoff or verification boundary."
                             ),
                         )
                         await self.session.send_tool_response(
