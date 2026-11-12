@@ -11,7 +11,7 @@ class PromptExecutionContractTests(unittest.TestCase):
         execution = PROMPT.split("[EXECUTION]", 1)[1].split("[AUTONOMY", 1)[0]
         self.assertIn("Execute each individual tool call once.", execution)
         self.assertIn("NOT a ban on a later, distinct invocation of the same tool", execution)
-        self.assertIn("previous step's real tool result", execution)
+        self.assertIn("step's real tool result and application hand-off", execution)
         self.assertIn("Never pre-execute or batch", execution)
 
     def test_mission_control_still_requires_verified_step_completion(self):
