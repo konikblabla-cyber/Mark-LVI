@@ -165,6 +165,12 @@ def requires_ui_confirmation(target: str, user_request: str = "") -> bool:
     """
     target = str(target or "")
     request = str(user_request or "")
+    # A generic UI label (for example, "Submit") must not inherit
+    # authorization for a high-impact operation named elsewhere in the
+    # request (for example, "Submit payment"). The target itself must carry
+    # the critical scope before a direct command can authorize it.
+    if _CRITICAL_ACTION.search(request) and not _CRITICAL_ACTION.search(target):
+        return True
     if explicitly_requested_target_action(request, target):
         return False
     if (_CRITICAL_ACTION.search(target)
