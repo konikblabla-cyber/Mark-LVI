@@ -2810,7 +2810,8 @@ class JarvisLive:
         while True:
             await asyncio.sleep(60)   # evaluate once per minute
 
-            if (not self.session or self._communication_app_active or self._phone_active):
+            if (not self.session or not self._awake
+                    or self._communication_app_active or self._phone_active):
                 continue
 
             with self._speaking_lock:
@@ -2871,6 +2872,7 @@ class JarvisLive:
                         proactive_session is not None
                         and self.session is proactive_session
                     ),
+                    assistant_awake=self._awake,
                     communication_active=self._communication_app_active,
                     phone_active=self._phone_active,
                     speaking=speaking_now,
