@@ -534,6 +534,31 @@ class UISequenceFormStepTests(unittest.TestCase):
         self.assertEqual(steps[1]["radio_label"], "Dark mode")
         self.assertEqual(steps[2]["option_label"], "Polish")
 
+    def test_validates_tab_and_non_dropdown_list_selection_steps(self):
+        from actions.ui_sequence import _validate_steps
+
+        steps, error = _validate_steps([
+            {"action": "select_tab_item", "tab_label": "Privacy"},
+            {"action": "select_list_item", "item_label": "Downloads"},
+        ])
+        self.assertEqual(error, "")
+        self.assertEqual(steps[0]["tab_label"], "Privacy")
+        self.assertEqual(steps[1]["item_label"], "Downloads")
+
+    def test_rejects_sensitive_tab_and_list_selection_targets(self):
+        from actions.ui_sequence import _validate_steps
+
+        for action, field in (
+            ("select_tab_item", "tab_label"),
+            ("select_list_item", "item_label"),
+        ):
+            steps, error = _validate_steps([
+                {"action": action, field: "Password"},
+                {"action": "click", "button_label": "Done", "expected_result": "Complete"},
+            ])
+            self.assertIsNone(steps)
+            self.assertIn("sensitive", error)
+
     def test_rejects_sensitive_and_ambiguous_form_step_arguments(self):
         from actions.ui_sequence import _validate_steps
 
