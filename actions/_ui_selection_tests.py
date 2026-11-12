@@ -130,6 +130,11 @@ class UISelectionTests(unittest.TestCase):
         self.assertEqual(status, "cancelled")
         self.assertEqual(control.iface_selection_item.calls, 0)
 
+    def test_punctuation_only_labels_do_not_match_blank_controls(self):
+        blank = _Control("TabItem", "")
+        self.assertEqual(self._run([blank], "!!!", "TabItem")[0], "missing_item")
+        self.assertEqual(blank.iface_selection_item.calls, 0)
+
     def test_unknown_control_type_is_rejected(self):
         self.assertEqual(self._run([], "Privacy", "Button")[0], "unsupported")
 
