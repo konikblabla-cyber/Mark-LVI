@@ -1885,12 +1885,10 @@ class JarvisLive:
         # and its broad category to Gemini. This uses a tool result (not a second
         # Live input stream), and is shared only when Desktop Awareness is on.
         desktop_context_tools = {
-            "open_app", "run_ui_sequence", "click_and_verify", "fill_text",
-            "press_keys", "set_checkbox_state", "select_radio_option",
-            "select_dropdown_option", "select_tab_item", "select_list_item",
-            "set_tree_item_expanded", "computer_control", "browser_control",
-            "inspect_active_window", "desktop_awareness", "mission_control",
-            "screen_process",
+            "run_ui_sequence", "click_and_verify", "fill_text", "press_keys",
+            "set_checkbox_state", "select_radio_option", "select_dropdown_option",
+            "select_tab_item", "select_list_item", "set_tree_item_expanded",
+            "computer_control", "browser_control", "mission_control",
         }
         if name in desktop_context_tools:
             try:
