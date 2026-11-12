@@ -760,5 +760,15 @@ class MissionControlProactiveContextTests(unittest.TestCase):
         mission_control.run({"action": "pause", "mission_id": mission_id})
         self.assertEqual(mission_control.proactive_context(), "")
 
+    def test_disabled_plugin_does_not_publish_its_mission_context(self):
+        mission_id = self._plan("Private mission", "Review the local project")
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Run the mission")
+        mission_control.run({
+            "action": "start", "mission_id": mission_id,
+        }, session_memory=scope)
+        with patch("memory.config_manager.get_plugin_enabled", return_value=False):
+            self.assertEqual(mission_control.proactive_context(), "")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
