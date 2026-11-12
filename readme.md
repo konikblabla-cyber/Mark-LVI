@@ -94,7 +94,7 @@ It's not just an assistant — it's an extension of your digital life.
 | ⚠️ Real Confirmation | Shutdown, restart and WiFi wait for a button **you** press — the model cannot confirm its own irreversible actions |
 | 🎧 Audio Device Picker | Choose the microphone and speakers by name, filtered to the short list your OS shows — and measured, so every entry actually works |
 | 🩺 Audio Self-Recovery | Detect a stopped speaker stream or a microphone callback stalled for 5 seconds; reconnect the voice session while preserving conversation context |
-| 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. Shared with check-ins only when desktop awareness is enabled; no window titles or screen contents |
+| 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. When desktop awareness is enabled, the safe app/category hint is also given to Gemini at session start and to proactive check-ins; no window titles or screen contents |
 | 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
 | 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
 | 🧰 Windows Workspace Profiles | Save named app groups (work, study, gaming, etc.), list/delete them and launch a whole setup through the existing verified app launcher |
@@ -106,7 +106,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 📧 Google Workspace | Optional Gmail search/read, confirmed drafts and HUD-confirmed sending, plus Google Calendar event lists and confirmed event creation through local OAuth |
 | 🎧 Spotify Connect | Optional PKCE integration: search/play, pause/resume, skip, volume, device selection, queue and confirmed private/public playlist creation or additions. Audio stays in Spotify's app; catalog metadata stays in MARK's HUD |
 | 📨 Microsoft 365 / Outlook | Optional Outlook mail search/read and HUD-confirmed sending, plus Outlook Calendar lists and confirmed event creation through delegated OAuth PKCE |
-| 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only; no window titles or screen capture |
+| 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only. With opt-in enabled, a metadata-only foreground hint is included when a Live session connects; no window titles or screen capture |
 | 📁 Project Overview | On request, inspect the selected project folder's file types, entry points and Git branch; remember metadata without reading source code or storing its path |
 | ⏱️ Process Watch | Watch a named Windows process start or exit; keep the alert on disk until JARVIS can safely deliver it |
 | ⏰ Reminder Management | Set, list and cancel scheduled Windows reminders by their exact ID |
