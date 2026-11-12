@@ -54,6 +54,23 @@ class LiveFocusContextIntegrationTests(unittest.TestCase):
         agent.session.send_context_update.assert_not_awaited()
         self.assertEqual(agent._last_system_instruction, agent._base_system_instruction)
 
+    def test_no_context_update_during_an_active_addressed_turn(self):
+        agent = _agent()
+        agent._addressed_turn_pending = True
+        with patch("main.get_desktop_awareness_enabled", return_value=True):
+            asyncio.run(agent._refresh_live_focus_context())
+        agent.session.send_context_update.assert_not_awaited()
+
+    def test_failed_context_update_is_throttled(self):
+        agent = _agent()
+        agent.session.send_context_update.side_effect = RuntimeError("temporary disconnect")
+        with patch("main.get_desktop_awareness_enabled", return_value=True):
+            asyncio.run(agent._refresh_live_focus_context())
+            retry_deadline = agent._focus_context_retry_at
+            asyncio.run(agent._refresh_live_focus_context())
+        self.assertGreater(retry_deadline, time.monotonic())
+        agent.session.send_context_update.assert_awaited_once()
+
     def test_non_gemini_engine_never_receives_live_context_update(self):
         agent = _agent()
         agent._engine = object()
