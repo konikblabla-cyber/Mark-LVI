@@ -42,6 +42,43 @@ class UISequenceTests(unittest.TestCase):
             }],
         }
 
+    def test_verified_step_progress_increments_counter_and_logs_only_counts(self):
+        messages = []
+
+        class FakePlayer:
+            def write_log(self, message):
+                messages.append(message)
+
+        state = {
+            "completed": 1,
+            "steps": [{"action": "click"}, {"action": "fill_text"}, {"action": "click"}],
+            "player": FakePlayer(),
+        }
+        ui_sequence._mark_ui_step_done(state)
+        self.assertEqual(state["completed"], 2)
+        self.assertEqual(
+            messages,
+            ["SYS: Windows workflow verified step 2/3."],
+        )
+        self.assertNotIn("field", messages[0].lower())
+
+    def test_ui_progress_is_bounded_and_never_raises_on_logging_errors(self):
+        messages = []
+
+        class FakePlayer:
+            def write_log(self, message):
+                messages.append(message)
+
+        state = {"player": FakePlayer()}
+        ui_sequence._ui_sequence_progress(state, "X" * 400)
+        self.assertLessEqual(len(messages[0]), 225)
+        ui_sequence._ui_sequence_progress(
+            {"player": type("Broken", (), {
+                "write_log": lambda self, _message: (_ for _ in ()).throw(RuntimeError("offline"))
+            })()},
+            "progress",
+        )
+
     def test_action_is_discoverable_by_real_loader(self):
         record = _validate(ui_sequence, "ui_sequence.py")
         self.assertTrue(record.valid, record.error)

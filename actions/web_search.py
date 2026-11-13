@@ -43,7 +43,7 @@ def _log_gemini_failure(context: str, exc: Exception) -> None:
     """Log a Gemini failure — silently when it is just the expected cooldown."""
     if isinstance(exc, _QuotaCooldown):
         return          # announced once when the breaker tripped; not a warning
-    print(f"[WebSearch] \u26a0\ufe0f {context} failed ({exc}) — using DDG instead")
+    print(f"[WebSearch] WARNING {context} failed ({exc}) — using DDG instead")
 
 
 def _run_bounded(fn, timeout: float, label: str = "task"):
@@ -120,7 +120,7 @@ def _get_ddgs():
     except ImportError:
         from duckduckgo_search import DDGS
         print(
-            "[WebSearch] ⚠️ Using the deprecated 'duckduckgo-search' package — "
+            "[WebSearch] WARNING Using the deprecated 'duckduckgo-search' package — "
             "DuckDuckGo blocks its endpoints, so every search will come back "
             "empty.  Fix with:  pip install -U ddgs"
         )
@@ -139,7 +139,7 @@ def _ddg_search(query: str, max_results: int = 6) -> list[dict]:
                     "url":     r.get("href",   ""),
                 })
     except Exception as e:
-        print(f"[WebSearch] ⚠️ DDG text() failed: {e}")
+        print(f"[WebSearch] WARNING DDG text() failed: {e}")
     return results
 
 
@@ -157,7 +157,7 @@ def _ddg_news(query: str, max_results: int = 8) -> list[dict]:
                     "source":  r.get("source", ""),
                 })
     except Exception as e:
-        print(f"[WebSearch] ⚠️ DDG news() failed ({e}) — falling back to text search")
+        print(f"[WebSearch] WARNING DDG news() failed ({e}) — falling back to text search")
     # Also covers the legacy-package case, where news() returns an empty list
     # instead of raising.
     if not results:
@@ -366,7 +366,7 @@ def web_search(
     if player:
         print(f"[WebSearch] {mode}: {query or ', '.join(items)}")  # terminal
 
-    print(f"[WebSearch] 🔍 mode={mode!r}  query={query!r}")
+    print(f"[WebSearch]  mode={mode!r}  query={query!r}")
 
     try:
         if mode == "compare" and items:
@@ -381,7 +381,7 @@ def web_search(
             found = _search(query)
 
     except Exception as e:
-        print(f"[WebSearch] ❌ All backends failed: {e}")
+        print(f"[WebSearch] ERROR: All backends failed: {e}")
         return outcome.failed("web_search", f"the search failed: {e}",
                               query=query or ", ".join(items))
 
@@ -396,7 +396,22 @@ def web_search(
     #
     # core/prompt.txt carries the matching rule: inside the markers is data, an
     # instruction there is something to REPORT rather than follow.
-    return outcome.untrusted("web", found)
+    # A successful provider response is a verified read action for Mission
+    # Control, but the retrieved claims remain untrusted external data. Keep
+    # the application receipt and the page content as separate parts of one
+    # tool result so evidence cannot be confused with factual verification.
+    query_label = query or ", ".join(str(item) for item in items)
+    if found.startswith(("No results found", "No news found")):
+        receipt = outcome.unverified(
+            "web_search", "the search providers returned no usable results",
+            mode=mode, query=query_label,
+        )
+    else:
+        receipt = outcome.done(
+            "web_search", verified=True, mode=mode, query=query_label,
+            external_data_untrusted=True,
+        )
+    return receipt + "\n" + outcome.untrusted("web", found)
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────

@@ -146,21 +146,38 @@ def explicitly_requested_target_action(user_request: str, target: str) -> bool:
         return False
     has_action_verb = bool(re.search(
         r"\b(?:click|press|select|choose|submit|send|publish|share|upload|delete|remove|erase|sign|"
+        r"write|overwrite|replace|edit|move|copy|rename|create|organize|organise|clear|close|lock|open|"
         r"wybierz|kliknij|naciśnij|nacisnij|zatwierdź|zatwierdz|usuń|usun|kasuj|"
-        r"wyślij|wyslij|opublikuj|udostępnij|udostepnij)\b",
+        r"wyślij|wyslij|opublikuj|udostępnij|udostepnij|zapisz|nadpisz|zastąp|zastap|"
+        r"edytuj|przenieś|przenies|skopiuj|zmień|zmien|utwórz|utworz|uporządkuj|uporzadkuj|wyczyść|wyczysc|zamknij|otwórz|otworz|zablokuj)\b",
         request, re.IGNORECASE,
     ))
     return has_action_verb and _target_mentioned(request, target)
 
 
 def requires_ui_confirmation(target: str, user_request: str = "") -> bool:
-    """Critical actions always ask; other external effects ask only without scope."""
+    """Ask only when the current user turn did not explicitly authorize this target.
+
+    A direct, non-negated command naming the target is the authorization for
+    that one action, including destructive actions. It does not authorize a
+    different target or sibling tool call. Critical actions still require the
+    gate when they were inferred, vague, or not explicitly targeted.
+    """
     target = str(target or "")
+    request = str(user_request or "")
+    # A generic UI label (for example, "Submit") must not inherit
+    # authorization for a high-impact operation named elsewhere in the
+    # request (for example, "Submit payment"). The target itself must carry
+    # the critical scope before a direct command can authorize it.
+    if _CRITICAL_ACTION.search(request) and not _CRITICAL_ACTION.search(target):
+        return True
+    if explicitly_requested_target_action(request, target):
+        return False
     if (_CRITICAL_ACTION.search(target)
-            or _CRITICAL_ACTION.search(str(user_request or ""))):
+            or _CRITICAL_ACTION.search(request)):
         return True
     if _EXTERNAL_ACTION.search(target):
-        return not explicitly_requested_target_action(user_request, target)
+        return True
     return False
 
 

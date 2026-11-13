@@ -11,7 +11,9 @@ from core.communication_context import (
     is_communication_context,
     normalize_process_name,
     should_auto_wake,
+    communication_gate_state,
     should_forward_microphone,
+    should_stream_call_audio,
 )
 
 
@@ -48,6 +50,30 @@ class CommunicationContextTests(unittest.TestCase):
         self.assertFalse(is_communication_app("notepad.exe"))
         self.assertFalse(is_communication_app("chrome.exe"))
         self.assertFalse(is_communication_app(""))
+
+    def test_browser_is_only_a_protected_app_when_microphone_capture_is_active(self):
+        from core.communication_context import BROWSER_CAPTURE_APP_NAMES
+        class Process:
+            def __init__(self, name):
+                self._name = name
+            def name(self):
+                return self._name
+        class Session:
+            def __init__(self, state, name):
+                self.State = state
+                self.Process = Process(name)
+
+        browser_audio = [Session(1, "chrome.exe")]
+        self.assertEqual(communication_apps_from_sessions(browser_audio), set())
+        self.assertEqual(
+            communication_apps_from_sessions(
+                browser_audio, include_browser_capture=True
+            ),
+            {"chrome"},
+        )
+        self.assertIn("opera", BROWSER_CAPTURE_APP_NAMES)
+        self.assertFalse(is_communication_app("chrome.exe"))
+        self.assertTrue(is_communication_context("game.exe", {"chrome"}))
 
     def test_only_active_audio_sessions_count_as_background_calls(self):
         class Process:
@@ -95,6 +121,7 @@ class CommunicationContextTests(unittest.TestCase):
         render_session = types.SimpleNamespace(State=1, Process=render_process)
 
         capture_process = types.SimpleNamespace(name=lambda: "Teams.exe")
+        browser_capture_process = types.SimpleNamespace(name=lambda: "chrome.exe")
         class CaptureControl:
             State = 1
             Process = capture_process
@@ -103,12 +130,18 @@ class CommunicationContextTests(unittest.TestCase):
                 return self
 
         control = CaptureControl()
+        class BrowserCaptureControl:
+            State = 1
+            Process = browser_capture_process
+            def QueryInterface(self, interface):
+                return self
+        browser_control = BrowserCaptureControl()
         class SessionEnumerator:
             def GetCount(self):
-                return 1
+                return 2
             def GetSession(self, index):
                 self.assert_index = index
-                return control
+                return (control, browser_control)[index]
 
         manager = types.SimpleNamespace(
             GetSessionEnumerator=lambda: SessionEnumerator()
@@ -154,7 +187,7 @@ class CommunicationContextTests(unittest.TestCase):
         }):
             result = get_active_communication_apps()
 
-        self.assertEqual(result, {"discord", "teams"})
+        self.assertEqual(result, {"discord", "teams", "chrome"})
         audio.GetAllDevices.assert_called_once_with(
             data_flow=1, device_state=1
         )
@@ -213,6 +246,49 @@ class CommunicationContextTests(unittest.TestCase):
     def test_active_call_detection_does_not_need_chat_to_be_foreground(self):
         self.assertTrue(is_communication_context("opera.exe", {"teams"}))
 
+    def test_communication_gate_closes_immediately(self):
+        self.assertEqual(
+            communication_gate_state(True, None, 10.0),
+            (True, 10.0),
+        )
+
+    def test_brief_wasapi_session_drop_does_not_open_the_microphone(self):
+        last_active = 10.0
+        self.assertEqual(
+            communication_gate_state(False, last_active, 11.0),
+            (True, last_active),
+        )
+        self.assertEqual(
+            communication_gate_state(False, last_active, 12.99),
+            (True, last_active),
+        )
+
+    def test_gate_reopens_only_after_full_release_grace(self):
+        self.assertEqual(
+            communication_gate_state(False, 10.0, 13.0),
+            (False, 10.0),
+        )
+
+    def test_new_call_during_release_grace_restarts_the_grace_period(self):
+        gate, last_active = communication_gate_state(False, 10.0, 11.0)
+        self.assertTrue(gate)
+        self.assertEqual(
+            communication_gate_state(True, last_active, 11.5),
+            (True, 11.5),
+        )
+        self.assertEqual(
+            communication_gate_state(False, 11.5, 14.0),
+            (True, 11.5),
+        )
+
+    def test_invalid_monotonic_time_fails_closed(self):
+        for invalid_time in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(invalid_time=invalid_time):
+                self.assertEqual(
+                    communication_gate_state(False, 10.0, invalid_time),
+                    (True, 10.0),
+                )
+
     def test_fresh_desktop_input_auto_wakes_outside_calls(self):
         self.assertTrue(should_auto_wake(0.0, False))
         self.assertTrue(should_auto_wake(12.5, False))
@@ -230,6 +306,48 @@ class CommunicationContextTests(unittest.TestCase):
 
     def test_push_to_talk_is_an_explicit_override(self):
         self.assertTrue(should_forward_microphone(True, False, True))
+
+
+    def test_call_audio_semantic_addressing_requires_explicit_consent_and_live_proactivity(self):
+        self.assertTrue(should_stream_call_audio(True, True, True, True, context_known=True))
+        self.assertFalse(should_stream_call_audio(True, False, True, True, context_known=True))
+        self.assertFalse(should_stream_call_audio(True, True, False, True, context_known=True))
+        self.assertFalse(should_stream_call_audio(True, True, True, False, context_known=True))
+        self.assertFalse(should_stream_call_audio(False, True, True, True, context_known=True))
+        self.assertFalse(should_stream_call_audio(True, True, True, True))
+
+    def test_unknown_communication_context_keeps_audio_local(self):
+        self.assertFalse(should_stream_call_audio(
+            True, True, True, True, context_known=False
+        ))
+
+    def test_phone_audio_never_opens_the_pc_communication_audio_gate(self):
+        self.assertFalse(should_stream_call_audio(
+            True, True, True, True, phone_audio_active=True, context_known=True
+        ))
+
+    def test_in_call_consent_configuration_defaults_to_false_and_rejects_malformed_values(self):
+        from memory import config_manager
+        with patch.object(config_manager, "load_api_keys", return_value={}):
+            self.assertFalse(config_manager.get_in_call_addressing_enabled())
+        with patch.object(config_manager, "load_api_keys", return_value={"in_call_addressing": "true"}):
+            self.assertFalse(config_manager.get_in_call_addressing_enabled())
+        with patch.object(config_manager, "load_api_keys", return_value={"in_call_addressing": 1}):
+            self.assertFalse(config_manager.get_in_call_addressing_enabled())
+        with patch.object(config_manager, "load_api_keys", return_value={"in_call_addressing": True}):
+            self.assertTrue(config_manager.get_in_call_addressing_enabled())
+
+    def test_in_call_consent_saves_only_a_boolean_value(self):
+        from memory import config_manager
+        with patch.object(config_manager, "_save_flag") as save:
+            config_manager.save_in_call_addressing_enabled(True)
+        save.assert_called_once_with("in_call_addressing", True)
+        with patch.object(config_manager, "_save_flag") as save:
+            config_manager.save_in_call_addressing_enabled(False)
+        save.assert_called_once_with("in_call_addressing", False)
+
+    def test_call_audio_semantic_addressing_is_disabled_by_default(self):
+        self.assertFalse(should_stream_call_audio(True, False, True, True))
 
     def test_normal_desktop_behaviour_is_unchanged(self):
         self.assertTrue(should_forward_microphone(False, False, False))

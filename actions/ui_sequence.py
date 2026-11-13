@@ -1,9 +1,11 @@
 """Sequential UI actions with a verified postcondition after every step.
 
-The sequence is deliberately narrow: it can invoke only exact, visible,
-uniquely named Button/Hyperlink/MenuItem controls through the safeguards in
-actions.ui_interaction. It cannot type, paste, execute scripts, or infer labels
-or expected results. A failed or unverified step stops the remaining sequence.
+The sequence is deliberately narrow: it can invoke exact, visible,
+uniquely named Button/Hyperlink/MenuItem controls, fill explicitly named safe
+fields, expand tree items, or send one validated key chord to the pinned
+application window. Every step needs an observable postcondition. It cannot
+paste, execute scripts, or infer labels or expected results. A failed or
+unverified step stops the remaining sequence.
 """
 from __future__ import annotations
 
@@ -91,6 +93,85 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
+        if action == "set_checkbox_state":
+            allowed = {"action", "checkbox_label", "checked"}
+            label, desired = raw.get("checkbox_label"), raw.get("checked")
+            if set(raw) != allowed:
+                return None, f"checkbox step {index} must contain only action, checkbox_label and checked"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong checkbox_label"
+            if ui._is_sensitive_input_label(label) or not isinstance(desired, bool):
+                return None, f"step {index} has an unsupported checkbox label or non-boolean checked state"
+            validated.append({"action": action, "checkbox_label": " ".join(label.split()), "checked": desired})
+            continue
+
+        if action == "select_radio_option":
+            allowed = {"action", "radio_label"}
+            label = raw.get("radio_label")
+            if set(raw) != allowed:
+                return None, f"radio step {index} must contain only action and radio_label"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong radio_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a sensitive radio option"
+            validated.append({"action": action, "radio_label": " ".join(label.split())})
+            continue
+
+        if action == "select_tab_item":
+            allowed = {"action", "tab_label"}
+            label = raw.get("tab_label")
+            if set(raw) != allowed:
+                return None, f"tab step {index} must contain only action and tab_label"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong tab_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a sensitive tab"
+            validated.append({"action": action, "tab_label": " ".join(label.split())})
+            continue
+
+        if action == "select_list_item":
+            allowed = {"action", "item_label"}
+            label = raw.get("item_label")
+            if set(raw) != allowed:
+                return None, f"list selection step {index} must contain only action and item_label"
+            if not isinstance(label, str) or not label.strip() or len(label.strip()) > 120:
+                return None, f"step {index} has a missing or overlong item_label"
+            if ui._is_sensitive_input_label(label):
+                return None, f"step {index} targets a sensitive list item"
+            validated.append({"action": action, "item_label": " ".join(label.split())})
+            continue
+
+        if action == "select_dropdown_option":
+            allowed = {"action", "combo_label", "option_label"}
+            combo, option = raw.get("combo_label"), raw.get("option_label")
+            if set(raw) != allowed:
+                return None, f"dropdown step {index} must contain only action, combo_label and option_label"
+            if (not isinstance(combo, str) or not combo.strip() or len(combo.strip()) > 120
+                    or not isinstance(option, str) or not option.strip() or len(option.strip()) > 120):
+                return None, f"step {index} needs exact combo_label and option_label values"
+            if ui._is_sensitive_input_label(combo) or ui._is_sensitive_input_label(option):
+                return None, f"step {index} targets a sensitive dropdown field or option"
+            validated.append({"action": action, "combo_label": " ".join(combo.split()), "option_label": " ".join(option.split())})
+            continue
+
+        if action == "press_keys":
+            allowed = {"action", "keys", "expected_result"}
+            if set(raw) != allowed:
+                return None, f"press_keys step {index} must contain only action, keys and expected_result"
+            rendered, problem = _normalise_key_combo(raw.get("keys"))
+            expected = raw.get("expected_result")
+            if rendered is None:
+                return None, f"step {index}: {problem}"
+            if not isinstance(expected, str) or not expected.strip() or len(expected.strip()) > 160:
+                return None, f"step {index} expected_result must contain 1 to 160 characters"
+            validated.append({
+                "action": "press_keys",
+                "keys": rendered,
+                "key_combo": "+".join("ctrl" if part.strip().lower() == "control" else part.strip().lower() for part in str(raw.get("keys")).split("+")),
+                "expected_result": " ".join(expected.split()),
+            })
+            continue
+
         if action == "fill_text":
             allowed = {"action", "field_label", "text"}
             if set(raw) != allowed:
@@ -110,9 +191,95 @@ def _validate_steps(raw_steps) -> tuple[list[dict] | None, str]:
             })
             continue
 
-        return None, f"step {index} action must be click, fill_text or set_tree_item_expanded"
+        return None, f"step {index} action must be click, fill_text, press_keys or set_tree_item_expanded"
 
     return validated, ""
+
+
+_KEY_NAMES = {
+    "tab": "{TAB}", "enter": "{ENTER}", "return": "{ENTER}",
+    "escape": "{ESC}", "esc": "{ESC}", "space": " ",
+    "backspace": "{BACKSPACE}", "delete": "{DELETE}",
+    "up": "{UP}", "down": "{DOWN}", "left": "{LEFT}", "right": "{RIGHT}",
+    "home": "{HOME}", "end": "{END}", "pageup": "{PGUP}", "pagedown": "{PGDN}",
+}
+_DANGEROUS_KEY_COMBOS = {
+    frozenset(("alt", "f4")), frozenset(("ctrl", "w")),
+    frozenset(("ctrl", "q")), frozenset(("ctrl", "shift", "delete")),
+    frozenset(("shift", "delete")), frozenset(("win", "l")),
+}
+
+
+def _normalise_key_combo(value: object) -> tuple[str | None, str]:
+    """Accept one explicit key or modifier chord; never accept arbitrary text."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 40:
+        return None, "keys must be one key or a short modifier combination"
+    parts = [part.strip().lower() for part in value.split("+")]
+    if not parts or any(not part for part in parts):
+        return None, "key combination is malformed"
+    modifiers = {"ctrl": "^", "control": "^", "alt": "%", "shift": "+"}
+    if len(parts) > 1:
+        if any(part not in modifiers for part in parts[:-1]):
+            return None, "only Ctrl, Alt and Shift modifiers are supported"
+        canonical_modifiers = ["ctrl" if part == "control" else part for part in parts[:-1]]
+        if len(set(canonical_modifiers)) != len(canonical_modifiers):
+            return None, "a modifier cannot be repeated"
+    key = parts[-1]
+    if key in modifiers or not (
+        key in _KEY_NAMES or len(key) == 1 and key.isalnum()
+        or key.startswith("f") and key[1:].isdigit() and 1 <= int(key[1:]) <= 12
+    ):
+        return None, "unsupported key; use a named key, letter, digit or F1–F12"
+    rendered_key = _KEY_NAMES.get(key, "{" + key.upper() + "}" if key.startswith("f") else key)
+    prefix = "".join(modifiers[item] for item in parts[:-1])
+    return prefix + rendered_key, ""
+
+
+def _press_keys_and_verify(keys: str, expected: str,
+                           window_handle: int, process_id: int) -> str:
+    """Send one key chord only to the original foreground process, then verify."""
+    try:
+        from pywinauto import Desktop, keyboard
+        import ctypes
+        window = Desktop(backend="uia").window(handle=int(window_handle)).wrapper_object()
+        if not window.is_visible():
+            return outcome.failed("run_ui_sequence", "the original application window is no longer visible")
+        if int(getattr(window.element_info, "process_id", 0)) != int(process_id):
+            return outcome.failed("run_ui_sequence", "the original window now belongs to another process")
+        before = ui._snapshot(window_handle, process_id)
+        if ui._has_exact_expected_text(before["records"], expected):
+            return outcome.failed(
+                "run_ui_sequence", "the exact expected result is already visible; no key was sent",
+                expected=expected,
+            )
+        window.set_focus()
+        time.sleep(0.12)
+        foreground = int(ctypes.windll.user32.GetForegroundWindow())
+        foreground_pid = ctypes.c_ulong()
+        ctypes.windll.user32.GetWindowThreadProcessId(foreground, ctypes.byref(foreground_pid))
+        if int(foreground_pid.value) != int(process_id):
+            return outcome.failed(
+                "run_ui_sequence", "Windows did not focus the original application; no key was sent",
+            )
+        keyboard.send_keys(keys, with_spaces=True, pause=0.02)
+        deadline = time.monotonic() + 4.0
+        while time.monotonic() < deadline:
+            snapshot = ui._snapshot(window_handle, process_id)
+            if ui._has_exact_expected_text(snapshot["records"], expected):
+                return outcome.done(
+                    "run_ui_sequence", keys=keys, expected=expected, verified=True,
+                )
+            time.sleep(0.2)
+        return outcome.unverified(
+            "run_ui_sequence",
+            "the key was sent to the original application but its expected result was not observed",
+            keys=keys, expected=expected,
+        )
+    except Exception as exc:
+        return outcome.failed(
+            "run_ui_sequence",
+            f"keyboard action failed ({type(exc).__name__}); verify the application before retrying",
+        )
 
 
 def _prepare_step(step: dict, snapshot: dict,
@@ -159,8 +326,57 @@ def _prepare_step(step: dict, snapshot: dict,
     }, ""
 
 
+def _run_pattern_step(action: str, worker, args: tuple,
+                       success_statuses: set[str]) -> str:
+    """Run one pinned-window UIA pattern operation with the shared bounded worker."""
+    try:
+        completed, result, error = ui._run_uia(
+            lambda cancelled: worker(*args, cancelled),
+            ui._INVOKE_TIMEOUT_SECONDS,
+            exclusive_lock=ui._INVOKE_LOCK,
+            pass_cancel_event=True,
+        )
+        if not completed or error is not None:
+            return outcome.unverified(action, "the control may have changed; inspect it before retrying")
+        if not isinstance(result, tuple) or len(result) != 2:
+            return outcome.failed(action, "UI Automation returned an invalid result")
+        status, reason = result
+        if status in success_statuses:
+            return outcome.done(action, verified=True, changed=status not in {"already_set", "already_selected"})
+        if status in {"uncertain", "unverified"}:
+            return outcome.unverified(action, reason)
+        if status in {"busy", "cancelled", "ambiguous_checkbox", "ambiguous_option",
+                      "ambiguous_combo", "ambiguous_item", "missing_option"}:
+            return outcome.ask(action, reason or status)
+        return outcome.failed(action, reason or status)
+    except Exception as exc:
+        return outcome.failed(action, f"the UI Automation operation failed ({type(exc).__name__})")
+
+
+def _ui_sequence_progress(state: dict, message: str) -> None:
+    """Show non-sensitive progress in the HUD activity log."""
+    player = state.get("player")
+    if player is None:
+        return
+    try:
+        player.write_log("SYS: " + str(message or "")[:220])
+    except Exception:
+        pass
+
+
+def _mark_ui_step_done(state: dict) -> None:
+    state["completed"] += 1
+    _ui_sequence_progress(
+        state,
+        f"Windows workflow verified step {state['completed']}/{len(state['steps'])}.",
+    )
+
+
 def _stop_with_step_result(state: dict, index: int, result: str) -> str:
     completed = state["completed"]
+    _ui_sequence_progress(
+        state, f"Windows workflow stopped at step {index + 1}/{len(state['steps'])}."
+    )
     facts = {
         "sequence_id": state["id"],
         "steps_completed": completed,
@@ -212,6 +428,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                     ),
                 )
             if time.monotonic() - state["started_at"] > _MAX_SEQUENCE_SECONDS:
+                _ui_sequence_progress(state, "Windows workflow reached its 10-minute limit; remaining steps were not started.")
                 _release_sequence(state["id"])
                 return outcome.unverified(
                     "run_ui_sequence",
@@ -222,6 +439,110 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
 
             step = state["steps"][index]
+            _ui_sequence_progress(
+                state, f"Windows workflow step {index + 1}/{len(state['steps'])}: {step['action']}."
+            )
+            if step["action"] in {
+                "set_checkbox_state", "select_radio_option", "select_dropdown_option",
+                "select_tab_item", "select_list_item",
+            }:
+                action = step["action"]
+                if action == "set_checkbox_state":
+                    from actions import ui_checkbox
+                    label = step["checkbox_label"]
+                    worker = ui_checkbox._set_on_window
+                    args = (state["window_handle"], state["process_id"], label, step["checked"])
+                    needs_confirmation = ui_checkbox._needs_confirmation(label, step["checked"], state.get("session_memory"))
+                    success = {"changed", "already_set"}
+                    progress_label = label
+                    title = f"Confirm checkbox: {label}"
+                    detail = f"MARK will set '{label}' to {'checked' if step['checked'] else 'unchecked'}. It will not submit or save the form."
+                elif action == "select_radio_option":
+                    from actions import ui_radio, ui_checkbox
+                    label = step["radio_label"]
+                    worker = ui_radio._select_on_window
+                    args = (state["window_handle"], state["process_id"], label)
+                    needs_confirmation = ui_checkbox._needs_confirmation(label)
+                    success = {"selected", "already_selected"}
+                    progress_label = label
+                    title = f"Confirm option: {label}"
+                    detail = f"MARK will select '{label}'. It will not submit or save the form."
+                elif action == "select_dropdown_option":
+                    from actions import ui_dropdown
+                    combo, option = step["combo_label"], step["option_label"]
+                    worker = ui_dropdown._select_worker
+                    args = (state["window_handle"], state["process_id"], combo, option)
+                    needs_confirmation = ui._requires_confirmation(combo, option)
+                    success = {"selected", "already_selected"}
+                    progress_label = f"{combo}: {option}"
+                    title = f"Confirm selection: {option}"
+                    detail = f"MARK will select '{option}' in '{combo}'. It will not submit or save the form."
+                else:
+                    label = (
+                        step["tab_label"] if action == "select_tab_item"
+                        else step["item_label"]
+                    )
+                    control_type = "TabItem" if action == "select_tab_item" else "ListItem"
+                    worker = ui._select_item_on_window
+                    args = (
+                        state["window_handle"], state["process_id"], label,
+                        control_type,
+                    )
+                    needs_confirmation = ui._requires_confirmation(label)
+                    success = {"selected", "already_selected"}
+                    progress_label = label
+                    title = (
+                        f"Confirm tab: {label}" if action == "select_tab_item"
+                        else f"Confirm list selection: {label}"
+                    )
+                    detail = (
+                        f"MARK will select the exact visible {control_type} '{label}'. "
+                        "It will not submit or save the form."
+                    )
+                def perform_pattern_step():
+                    result = _run_pattern_step(action, worker, args, success)
+                    if not result.startswith("status=done "):
+                        return _stop_with_step_result(state, index, result)
+                    _mark_ui_step_done(state)
+                    state["completed_labels"].append(progress_label)
+                    return _continue_sequence(state, index + 1)
+                if needs_confirmation:
+                    return confirm.request(
+                        key=f"run_ui_sequence.{action}", title=title, detail=detail,
+                        run=perform_pattern_step,
+                        on_cancel=lambda: _release_sequence(state["id"]),
+                    )
+                result = _run_pattern_step(action, worker, args, success)
+                if not result.startswith("status=done "):
+                    return _stop_with_step_result(state, index, result)
+                _mark_ui_step_done(state)
+                state["completed_labels"].append(progress_label)
+                continue
+
+            if step["action"] == "press_keys":
+                dangerous = frozenset(step["key_combo"].split("+")) in _DANGEROUS_KEY_COMBOS
+                if dangerous:
+                    return confirm.request(
+                        key="run_ui_sequence.press_keys",
+                        title=f"Confirm keyboard shortcut: {step['key_combo']}",
+                        detail=(
+                            f"MARK will send {step['key_combo']} to the original application window. "
+                            f"It may close a tab or app, delete data, or lock Windows. "
+                            f"Expected visible result: {step['expected_result']}. Confirm only if intended."
+                        ),
+                        run=lambda: _resume_after_key_confirmation(state, index, step),
+                        on_cancel=lambda: _release_sequence(state["id"]),
+                    )
+                result = _press_keys_and_verify(
+                    step["keys"], step["expected_result"],
+                    state["window_handle"], state["process_id"],
+                )
+                if not result.startswith("status=done "):
+                    return _stop_with_step_result(state, index, result)
+                _mark_ui_step_done(state)
+                state["completed_labels"].append(step["key_combo"])
+                continue
+
             if step["action"] == "set_tree_item_expanded":
                 label = step["item_label"]
                 # Expanding/collapsing a tree node is reversible view navigation.
@@ -232,7 +553,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
                 if not result.startswith("status=done "):
                     return _stop_with_step_result(state, index, result)
-                state["completed"] += 1
+                _mark_ui_step_done(state)
                 state["completed_labels"].append(label)
                 if index == 0:
                     state.pop("initial_snapshot", None)
@@ -247,7 +568,7 @@ def _continue_sequence(state: dict, start_index: int) -> str:
                 )
                 if not result.startswith("status=done "):
                     return _stop_with_step_result(state, index, result)
-                state["completed"] += 1
+                _mark_ui_step_done(state)
                 state["completed_labels"].append(step["field_label"])
                 if index == 0:
                     state.pop("initial_snapshot", None)
@@ -315,9 +636,10 @@ def _continue_sequence(state: dict, start_index: int) -> str:
             if not result.startswith("status=done "):
                 return _stop_with_step_result(state, index, result)
 
-            state["completed"] += 1
+            _mark_ui_step_done(state)
             state["completed_labels"].append(prepared["label"])
 
+        _ui_sequence_progress(state, "Windows workflow completed; all steps verified.")
         _release_sequence(state["id"])
         return outcome.done(
             "run_ui_sequence",
@@ -337,6 +659,28 @@ def _continue_sequence(state: dict, start_index: int) -> str:
         )
 
 
+def _resume_after_key_confirmation(state: dict, index: int,
+                                    step: dict) -> str:
+    """Run an approved key chord against the pinned window, then continue."""
+    try:
+        result = _press_keys_and_verify(
+            step["keys"], step["expected_result"],
+            state["window_handle"], state["process_id"],
+        )
+        if not result.startswith("status=done "):
+            return _stop_with_step_result(state, index, result)
+        _mark_ui_step_done(state)
+        state["completed_labels"].append(step["key_combo"])
+        return _continue_sequence(state, index + 1)
+    except Exception as exc:
+        _release_sequence(state["id"])
+        return outcome.failed(
+            "run_ui_sequence",
+            f"confirmed keyboard action failed ({type(exc).__name__}); later steps were not started",
+            sequence_id=state["id"], failed_step=index + 1,
+        )
+
+
 def _resume_tree_after_confirmation(state: dict, index: int,
                                     step: dict) -> str:
     """Run an approved tree action against the original HWND/PID, then continue."""
@@ -347,7 +691,7 @@ def _resume_tree_after_confirmation(state: dict, index: int,
         )
         if not result.startswith("status=done "):
             return _stop_with_step_result(state, index, result)
-        state["completed"] += 1
+        _mark_ui_step_done(state)
         state["completed_labels"].append(step["item_label"])
         if index == 0:
             state.pop("initial_snapshot", None)
@@ -375,7 +719,7 @@ def _resume_after_confirmation(state: dict, index: int,
         )
         if not result.startswith("status=done "):
             return _stop_with_step_result(state, index, result)
-        state["completed"] += 1
+        _mark_ui_step_done(state)
         state["completed_labels"].append(prepared["label"])
         return _continue_sequence(state, index + 1)
     except Exception as exc:
@@ -395,7 +739,7 @@ def _capture_active_window() -> dict:
 
 
 def _start_sequence(steps: list[dict], initial_snapshot: dict,
-                   user_request: str = "") -> str:
+                   user_request: str = "", session_memory=None, player=None) -> str:
     token = _claim_sequence()
     if token is None:
         return outcome.ask(
@@ -405,6 +749,7 @@ def _start_sequence(steps: list[dict], initial_snapshot: dict,
     state = {
         "id": token,
         "steps": steps,
+        "session_memory": session_memory,
         "started_at": time.monotonic(),
         "completed": 0,
         "completed_labels": [],
@@ -412,6 +757,7 @@ def _start_sequence(steps: list[dict], initial_snapshot: dict,
         "window_handle": initial_snapshot["handle"],
         "process_id": initial_snapshot["process_id"],
         "user_request": user_request[:4000],
+        "player": player,
     }
     return _continue_sequence(state, 0)
 
@@ -439,20 +785,25 @@ def run_ui_sequence(parameters: dict, player=None, session_memory=None) -> str:
             f"could not identify the active application window ({type(exc).__name__})",
         )
     from core.autonomy_policy import scope_request
-    return _start_sequence(steps, snapshot, scope_request(session_memory))
+    return _start_sequence(
+        steps, snapshot, scope_request(session_memory), session_memory, player=player,
+    )
 
 
 TOOL = {
     "name": "run_ui_sequence",
     "tier": "core",
-    "brief": "Expand or collapse exact tree items, fill safe fields and click exact controls in a verified 2–8 step Windows UI workflow.",
+    "brief": "Run verified 2–8 step Windows workflows with exact clicks, text entry, tabs, list items, checkboxes, radio/dropdown choices, tree navigation and keyboard shortcuts.",
     "description": (
         "Use only when the user explicitly asks MARK to complete a multi-step "
         "workflow in the currently active Windows application. Supply 2 to 8 "
-        "ordered steps. A set_tree_item_expanded step must supply one exact visible "
+        "ordered steps. Checkbox steps set an exact visible checkbox to a requested boolean state; tab/list/radio steps select one exact visible item through SelectionItemPattern; dropdown steps select one exact visible option from an already-open ComboBox. These use native UI Automation state patterns and verify the result. They never submit or save a form, and existing high-impact confirmation rules still apply. A press_keys step must supply one key or modifier chord and an exact visible postcondition. A set_tree_item_expanded step must supply one exact visible "
         "TreeItem label and a boolean expanded value; MARK verifies the ExpandCollapsePattern "
         "state in the original window before starting the next step. It expands or collapses "
-        "only the node and never activates a child item. A click step must name one exact visible Button, "
+        "only the node and never activates a child item. A press_keys step is refocused to the original "
+        "window and sends only one validated key or Ctrl/Alt/Shift chord; it proceeds only after the exact "
+        "expected accessible text appears. Dangerous close/delete/lock shortcuts require HUD confirmation. "
+        "A click step must name one exact visible Button, "
         "Hyperlink or MenuItem label and the exact distinctive accessible "
         "element text that should newly appear after that click. A fill_text "
         "step must name one exact accessible, non-sensitive Edit field and "
@@ -484,14 +835,14 @@ TOOL = {
         "properties": {
             "steps": {
                 "type": "ARRAY",
-                "description": "Two to eight ordered steps. Use click, fill_text, or set_tree_item_expanded with an exact TreeItem label and boolean expanded state.",
+                "description": "Two to eight ordered steps. Use click, fill_text, press_keys with one key/chord and expected_result, set_checkbox_state with an exact label and boolean, select_tab_item with an exact tab label, select_list_item with an exact list label, select_radio_option with an exact label, select_dropdown_option with exact ComboBox and visible option labels, or set_tree_item_expanded.",
                 "items": {
                     "type": "OBJECT",
                     "properties": {
                         "action": {
                             "type": "STRING",
-                            "enum": ["click", "fill_text", "set_tree_item_expanded"],
-                            "description": "Use click for a verified button press, fill_text for one safe text field, or set_tree_item_expanded for one exact visible TreeItem.",
+                            "enum": ["click", "fill_text", "press_keys", "set_tree_item_expanded", "set_checkbox_state", "select_tab_item", "select_list_item", "select_radio_option", "select_dropdown_option"],
+                            "description": "Use click, fill_text, press_keys, set_tree_item_expanded, set_checkbox_state, select_tab_item, select_list_item, select_radio_option or select_dropdown_option with the exact fields required by that action.",
                         },
                         "button_label": {
                             "type": "STRING",
@@ -499,7 +850,11 @@ TOOL = {
                         },
                         "expected_result": {
                             "type": "STRING",
-                            "description": "For click: exact accessible name of a distinctive UI element that should newly appear after the click.",
+                            "description": "For click: exact accessible name of a distinctive UI element that should newly appear. For press_keys: exact distinctive accessible text that must appear after the key is sent.",
+                        },
+                        "keys": {
+                            "type": "STRING",
+                            "description": "For press_keys: one key such as Tab/Enter or one Ctrl/Alt/Shift chord such as Ctrl+S; no arbitrary text.",
                         },
                         "field_label": {
                             "type": "STRING",
@@ -509,9 +864,33 @@ TOOL = {
                             "type": "STRING",
                             "description": "For fill_text: literal non-secret text to enter; never use for credentials or payment details.",
                         },
+                        "checkbox_label": {
+                            "type": "STRING",
+                            "description": "For set_checkbox_state: exact accessible label of one visible non-sensitive CheckBox.",
+                        },
+                        "checked": {
+                            "type": "BOOLEAN",
+                            "description": "For set_checkbox_state: true to check it, false to uncheck it.",
+                        },
+                        "tab_label": {
+                            "type": "STRING",
+                            "description": "For select_tab_item: exact accessible label of one visible, enabled, non-sensitive TabItem.",
+                        },
+                        "radio_label": {
+                            "type": "STRING",
+                            "description": "For select_radio_option: exact accessible label of one visible non-sensitive RadioButton.",
+                        },
+                        "combo_label": {
+                            "type": "STRING",
+                            "description": "For select_dropdown_option: exact accessible ComboBox label.",
+                        },
+                        "option_label": {
+                            "type": "STRING",
+                            "description": "For select_dropdown_option: exact visible ListItem option in the already-open dropdown.",
+                        },
                         "item_label": {
                             "type": "STRING",
-                            "description": "For set_tree_item_expanded: exact accessible label of one visible, enabled, non-sensitive Windows TreeItem.",
+                            "description": "For select_list_item: exact accessible label of one visible, enabled, non-sensitive ListItem. For set_tree_item_expanded: exact accessible label of one visible, enabled, non-sensitive Windows TreeItem.",
                         },
                         "expanded": {
                             "type": "BOOLEAN",

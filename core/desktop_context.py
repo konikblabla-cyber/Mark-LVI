@@ -76,6 +76,33 @@ def _rect_within_primary_display(
     )
 
 
+def get_foreground_window_identity() -> tuple[int, int] | None:
+    """Return the current Windows foreground HWND/PID without reading its content."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowThreadProcessId.argtypes = [
+            wintypes.HWND, ctypes.POINTER(wintypes.DWORD),
+        ]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        handle = user32.GetForegroundWindow()
+        if not handle:
+            return None
+        process_id = wintypes.DWORD()
+        if not user32.GetWindowThreadProcessId(handle, ctypes.byref(process_id)):
+            return None
+        if not process_id.value:
+            return None
+        return int(handle), int(process_id.value)
+    except Exception:
+        return None
+
+
 def get_desktop_context(include_app: bool = True) -> dict:
     """Read idle time and foreground-window geometry, optionally process name.
 

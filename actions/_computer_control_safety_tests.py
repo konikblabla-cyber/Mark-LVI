@@ -1,9 +1,10 @@
 """Offline regression tests for desktop-control safety boundaries."""
 import sys
+import types
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, call
 
 from actions import computer_control as control
 
@@ -345,6 +346,289 @@ class ComputerControlSafetyTests(unittest.TestCase):
         self.assertEqual(guard.call_args_list[1].args, ("notepad.exe",))
         execute.assert_not_called()
 
+
+
+    def test_verified_visual_click_pins_window_and_checks_exact_postcondition(self):
+        before = {
+            "handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
+        after = {
+            "handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value="") as guard, \
+             patch.object(control, "_screen_find", return_value=(20, 30)) as locate, \
+             patch.object(control, "_click", return_value="Clicked (20, 30)") as click, \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction.focus_window_identity", return_value=before) as focus, \
+             patch("actions.ui_interaction._snapshot", return_value=after) as snapshot, \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch("actions.ui_interaction._wait_for_expected_result", return_value=True), \
+             patch.object(control, "_pinned_window_is_foreground", return_value=True):
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe", 7, 55,
+            )
+        self.assertIn("status=done action=computer_control", result)
+        self.assertIn("verified=true", result)
+        self.assertEqual(guard.call_count, 3)
+        locate.assert_called_once_with(
+            "gear icon", "settings.exe", (10, 20, 90, 70),
+        )
+        focus.assert_called_once_with(7, 55)
+        snapshot.assert_has_calls([call(7, 55), call(7, 55)])
+        click.assert_called_once_with(x=20, y=30)
+
+    def test_verified_visual_click_never_clicks_if_expected_result_is_already_visible(self):
+        before = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=True), \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("status=unverified", result)
+        locate.assert_not_called()
+        click.assert_not_called()
+
+    def test_verified_visual_click_rechecks_foreground_after_slow_image_analysis(self):
+        before = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
+        blocked = "status=failed action=computer_control reason=foreground_changed"
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", side_effect=["", blocked]) as guard, \
+             patch.object(control, "_screen_find", return_value=(20, 30)), \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertEqual(result, blocked)
+        self.assertEqual(guard.call_count, 2)
+        click.assert_not_called()
+
+    def test_unverified_visual_click_is_not_retried(self):
+        before = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
+        after = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_screen_find", return_value=(20, 30)) as locate, \
+             patch.object(control, "_click", return_value="Clicked (20, 30)") as click, \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction._snapshot", side_effect=[before, after, after]), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch("actions.ui_interaction._wait_for_expected_result", return_value=False), \
+             patch.object(control, "_pinned_window_is_foreground", return_value=True):
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("status=unverified", result)
+        self.assertIn("Do not retry automatically", result)
+        locate.assert_called_once()
+        click.assert_called_once()
+
+    def test_critical_visual_click_waits_for_real_hud_confirmation(self):
+        request = {}
+        with patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control.confirm, "request",
+                          side_effect=lambda **kwargs: request.update(kwargs) or "[CONFIRMATION_PENDING]"), \
+             patch.object(control, "_screen_click_verified_execute") as execute:
+            result = control.computer_control({
+                "action": "screen_click_verified",
+                "description": "Delete account button",
+                "expected_result": "Account deleted",
+                "target_app": "settings.exe",
+            })
+        self.assertIn("[CONFIRMATION_PENDING]", result)
+        self.assertIn("Delete account", request["detail"])
+        execute.assert_not_called()
+
+
+
+    def test_verified_visual_click_refuses_sensitive_targets_before_capture(self):
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction._snapshot") as snapshot, \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "Password field", "Password settings", "settings.exe",
+            )
+        self.assertIn("status=failed", result)
+        self.assertIn("credentials", result)
+        snapshot.assert_not_called()
+        locate.assert_not_called()
+        click.assert_not_called()
+
+
+    def test_visible_window_region_is_clipped_to_primary_screen(self):
+        self.assertEqual(
+            control._visible_window_region((10, 20, 110, 120), (100, 80)),
+            (10, 20, 90, 60),
+        )
+        self.assertEqual(
+            control._visible_window_region((-20, -5, 60, 40), (100, 80)),
+            (0, 0, 60, 40),
+        )
+        self.assertIsNone(
+            control._visible_window_region((110, 0, 200, 70), (100, 80)),
+        )
+        self.assertIsNone(
+            control._visible_window_region((20, 20, 20, 60), (100, 80)),
+        )
+
+
+    def test_verified_visual_click_fails_closed_when_window_bounds_are_missing(self):
+        before = {"handle": 7, "process_id": 55, "records": []}
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction._snapshot", return_value=before), \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("status=failed", result)
+        self.assertIn("no full-desktop screenshot was sent", result)
+        locate.assert_not_called()
+        click.assert_not_called()
+
+
+    def test_screen_find_crops_target_window_and_restores_desktop_coordinates(self):
+        class FakeImage:
+            def save(self, stream, format=None):
+                stream.write(b"window-crop")
+
+        desktop = SimpleNamespace(
+            size=lambda: (100, 80),
+            screenshot=Mock(return_value=FakeImage()),
+        )
+        fake_google = types.ModuleType("google")
+        fake_google.__path__ = []
+        fake_genai = types.ModuleType("google.genai")
+        fake_genai.types = SimpleNamespace(
+            Part=SimpleNamespace(from_bytes=lambda **kwargs: ("image", kwargs["data"])),
+        )
+        fake_google.genai = fake_genai
+        modules = {
+            "google": fake_google,
+            "google.genai": fake_genai,
+        }
+        with patch.object(control, "_get_api_key", return_value="test-key"), \
+             patch.object(control, "_require_pyautogui"), \
+             patch.object(control, "pyautogui", desktop), \
+             patch.dict(sys.modules, modules), \
+             patch(
+                 "core.gemini.call",
+                 return_value=SimpleNamespace(text="20,30"),
+             ) as gemini_call:
+            result = control._screen_find(
+                "gear icon", "settings.exe", (10, 20, 90, 70),
+            )
+        self.assertEqual(result, (30, 50))
+        desktop.screenshot.assert_called_once_with(region=(10, 20, 80, 50))
+        prompt = gemini_call.call_args.args[0][1]
+        self.assertIn("80×50 pixels", prompt)
+        self.assertIn("crop of the target application window", prompt)
+
+    def test_screen_find_does_not_capture_full_desktop_when_target_is_offscreen(self):
+        desktop = SimpleNamespace(
+            size=lambda: (100, 80),
+            screenshot=Mock(),
+        )
+        with patch.object(control, "_get_api_key", return_value="test-key"), \
+             patch.object(control, "_require_pyautogui"), \
+             patch.object(control, "pyautogui", desktop), \
+             patch.object(control, "_safe_print"):
+            result = control._screen_find(
+                "gear icon", "settings.exe", (120, 20, 220, 70),
+            )
+        self.assertIsNone(result)
+        desktop.screenshot.assert_not_called()
+
+
+    def test_visual_click_refuses_when_planned_window_handle_or_process_changed(self):
+        before = {
+            "handle": 8, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch("actions.ui_interaction.focus_window_identity", return_value=before), \
+             patch.object(control, "_screen_find") as locate, \
+             patch.object(control, "_click") as click:
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe", 7, 55,
+            )
+        self.assertIn("status=failed", result)
+        self.assertIn("exact window selected by the mission planner", result)
+        locate.assert_not_called()
+        click.assert_not_called()
+
+
+    def test_visual_click_dispatch_forwards_exact_planned_window_identity(self):
+        parameters = {
+            "action": "screen_click_verified",
+            "description": "gear icon",
+            "expected_result": "Privacy panel",
+            "target_app": "settings.exe",
+            "target_window_handle": 7,
+            "target_process_id": 55,
+        }
+        with patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_screen_click_verified_execute",
+                          return_value="status=done action=computer_control verified=true") as execute:
+            result = control.computer_control(parameters)
+        self.assertIn("status=done", result)
+        execute.assert_called_once_with(
+            "gear icon", "Privacy panel", "settings.exe", 7, 55,
+        )
+
+
+    def test_visual_click_refuses_another_window_of_the_same_process(self):
+        before = {
+            "handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": [],
+        }
+        desktop = type("Screen", (), {"size": lambda self: (100, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_screen_find", return_value=(20, 30)) as locate, \
+             patch.object(control, "_click") as click, \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction.focus_window_identity", return_value=before), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch.object(control, "_pinned_window_is_foreground", return_value=False):
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe", 7, 55,
+            )
+        self.assertIn("exact planned window is no longer foreground", result)
+        locate.assert_called_once()
+        click.assert_not_called()
+
+
+    def test_visual_click_discards_coordinates_if_window_moved_after_screenshot(self):
+        before = {"handle": 7, "process_id": 55, "bounds": (10, 20, 90, 70), "records": []}
+        moved = {"handle": 7, "process_id": 55, "bounds": (20, 20, 100, 70), "records": []}
+        desktop = type("Screen", (), {"size": lambda self: (120, 80)})()
+        with patch.object(control.platform, "system", return_value="Windows"), \
+             patch.object(control, "_input_window_guard", return_value=""), \
+             patch.object(control, "_screen_find", return_value=(30, 30)) as locate, \
+             patch.object(control, "_click") as click, \
+             patch.object(control, "pyautogui", desktop), \
+             patch("actions.ui_interaction._snapshot", side_effect=[before, moved]), \
+             patch("actions.ui_interaction._has_exact_expected_text", return_value=False), \
+             patch.object(control, "_pinned_window_is_foreground", return_value=True):
+            result = control._screen_click_verified_execute(
+                "gear icon", "Settings", "settings.exe",
+            )
+        self.assertIn("target window moved or resized", result)
+        locate.assert_called_once()
+        click.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

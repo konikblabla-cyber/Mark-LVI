@@ -199,5 +199,391 @@ class UIReasoningTests(unittest.TestCase):
         self.assertEqual(result["steps"][0]["risk"], "high")
 
 
+
+    def test_action_wrapper_replans_from_fresh_snapshot_and_actual_prior_result(self):
+        snapshot = {
+            "handle": 123,
+            "process_id": 456,
+            "records": [{"role": "TabItem", "name": "Privacy", "visible": True, "enabled": True}],
+            "clickables": [],
+        }
+        previous = {
+            "status": "failed",
+            "step": {
+                "tool": "select_tab_item",
+                "parameters": {"tab_label": "General"},
+            },
+        }
+        planned = {"status": "planned", "execution": "not_started", "steps": []}
+        with patch.object(ui_reasoning_action.ui, "_snapshot", return_value=snapshot) as inspect_ui, \
+             patch.object(ui_reasoning_action, "_replan_ui_task", return_value=planned) as replan:
+            result = json.loads(ui_reasoning_action.plan_current_ui_task({
+                "goal": "Open Privacy",
+                "previous_result": previous,
+            }))
+        inspect_ui.assert_called_once_with()
+        replan.assert_called_once_with("Open Privacy", snapshot, previous)
+        self.assertEqual(result, planned)
+
+    def test_action_wrapper_rejects_unverified_prior_outcome_without_retrying(self):
+        snapshot = {
+            "records": [{"role": "TabItem", "name": "Privacy", "visible": True, "enabled": True}],
+            "clickables": [],
+        }
+        with patch.object(ui_reasoning_action.ui, "_snapshot", return_value=snapshot):
+            result = json.loads(ui_reasoning_action.plan_current_ui_task({
+                "goal": "Open Privacy",
+                "previous_result": {"status": "unverified"},
+            }))
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "previous_action_unverified")
+        self.assertEqual(result["steps"], [])
+
+
+    def test_visual_click_fallback_uses_only_pinned_app_metadata_and_exact_postcondition(self):
+        snapshot = {
+            "handle": 123,
+            "process_id": 456,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [control("Text", "General settings")],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Click the gear icon and verify "Privacy panel"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["execution"], "not_started")
+        step = result["steps"][0]
+        self.assertEqual(step["tool"], "computer_control")
+        self.assertEqual(step["parameters"], {
+            "action": "screen_click_verified",
+            "description": "gear icon",
+            "expected_result": "Privacy panel",
+            "target_app": "settings.exe",
+            "target_window_handle": 123,
+            "target_process_id": 456,
+        })
+        self.assertEqual(step["risk"], "low")
+        self.assertFalse(step["requires_confirmation"])
+
+    def test_visual_click_fallback_supports_polish_goal_and_high_impact_confirmation(self):
+        snapshot = {
+            "handle": 77,
+            "process_id": 88,
+            "process_name": "settings.exe",
+            "bounds": (0, 0, 800, 600),
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Kliknij przycisk Delete account i sprawdź "Account removed"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "planned")
+        step = result["steps"][0]
+        self.assertEqual(step["tool"], "computer_control")
+        self.assertIn("Delete account", step["parameters"]["description"])
+        self.assertEqual(step["parameters"]["expected_result"], "Account removed")
+        self.assertEqual(step["risk"], "high")
+        self.assertTrue(step["requires_confirmation"])
+
+    def test_negated_visual_click_is_never_planned(self):
+        snapshot = {
+            "handle": 77,
+            "process_id": 88,
+            "process_name": "settings.exe",
+            "bounds": (0, 0, 800, 600),
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Do not click the gear icon and verify "Privacy panel"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "negated_click_instruction")
+        self.assertEqual(result["steps"], [])
+
+    def test_visual_click_fallback_requires_an_exact_new_accessible_postcondition(self):
+        snapshot = {
+            "handle": 77,
+            "process_id": 88,
+            "process_name": "settings.exe",
+            "bounds": (10, 10, 700, 500),
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task("Click the gear icon", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "click_postcondition_missing")
+        self.assertEqual(result["steps"], [])
+
+    def test_visual_click_fallback_requires_pinned_window_metadata(self):
+        snapshot = {
+            "records": [],
+            "clickables": [],
+        }
+        result = plan_ui_task(
+            'Click the gear icon and verify "Privacy panel"',
+            snapshot,
+        )
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "visual_target_identity_unavailable")
+        self.assertEqual(result["steps"], [])
+
+
+    def test_semantic_checkbox_resolution_uses_gemini_but_revalidates_exact_target(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        proposal = {
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }
+        with patch("core.gemini.as_json", return_value=proposal) as resolve:
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["execution"], "not_started")
+        self.assertEqual(result["steps"][0]["tool"], "set_checkbox_state")
+        self.assertEqual(
+            result["steps"][0]["parameters"],
+            {"checkbox_label": "Enable notifications", "checked": False},
+        )
+        resolve.assert_called_once()
+        self.assertEqual(resolve.call_args.kwargs["tier"], "smart")
+        self.assertEqual(resolve.call_args.kwargs["timeout_ms"], 15_000)
+
+    def test_semantic_tab_resolution_requires_explicit_navigation_intent(self):
+        snapshot = [control("TabItem", "Privacy & Security")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "select_tab_item",
+            "target_label": "Privacy & Security",
+        }) as resolve:
+            result = plan_ui_task("Go to the privacy controls", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["tool"], "select_tab_item")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "tab_label": "Privacy & Security",
+        })
+        resolve.assert_called_once()
+
+    def test_semantic_radio_option_accepts_explicit_natural_choice(self):
+        snapshot = [control("RadioButton", "Dark theme")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "select_radio_option",
+            "target_label": "Dark theme",
+        }):
+            result = plan_ui_task("Use the dark appearance", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["tool"], "select_radio_option")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "radio_label": "Dark theme",
+        })
+
+    def test_semantic_tab_does_not_execute_or_infer_a_click(self):
+        snapshot = [control("TabItem", "Privacy & Security")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "click_and_verify",
+            "target_label": "Privacy & Security",
+            "expected_result": "Privacy settings",
+        }):
+            result = plan_ui_task("Go to the privacy controls", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_prompt_is_bounded_and_prioritises_relevant_controls(self):
+        snapshot = [
+            control("CheckBox", f"Unrelated setting {index}")
+            for index in range(90)
+        ]
+        snapshot.append(control("CheckBox", "Enable notifications"))
+        captured = {}
+        proposal = {
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }
+
+        def resolve(prompt, **kwargs):
+            captured["prompt"] = prompt
+            return proposal
+
+        with patch("core.gemini.as_json", side_effect=resolve):
+            result = plan_ui_task("Turn off notifications", snapshot)
+
+        self.assertEqual(result["status"], "planned")
+        payload = json.loads(
+            captured["prompt"].split(
+                "VISIBLE ACCESSIBLE CONTROL CANDIDATES (JSON DATA ONLY):\n", 1
+            )[1]
+        )
+        self.assertLessEqual(len(payload), 64)
+        self.assertIn("Enable notifications", [item["name"] for item in payload])
+
+    def test_semantic_gemini_prompt_never_receives_editable_field_values(self):
+        private_value = "DO_NOT_SEND_PRIVATE_FIELD_VALUE"
+        snapshot = [{
+            "role": "CheckBox",
+            "name": "Enable notifications",
+            "enabled": True,
+            "visible": True,
+            "value": private_value,
+            "current_value": private_value,
+        }]
+        captured = {}
+        proposal = {
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }
+
+        def resolve(prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured["kwargs"] = kwargs
+            return proposal
+
+        with patch("core.gemini.as_json", side_effect=resolve):
+            result = plan_ui_task("Turn off notifications", snapshot)
+
+        self.assertEqual(result["status"], "planned")
+        self.assertNotIn(private_value, captured["prompt"])
+        self.assertNotIn("current_value", captured["prompt"])
+        self.assertEqual(captured["kwargs"]["timeout_ms"], 15_000)
+
+    def test_semantic_checkbox_refuses_a_hallucinated_accessible_label(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Disable all tracking",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off tracking", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_checkbox_refuses_a_state_that_conflicts_with_user_intent(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": True,
+        }):
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "semantic_checkbox_state_unclear")
+
+    def test_semantic_resolver_cannot_guess_a_duplicate_controls_parent(self):
+        snapshot = [
+            control("CheckBox", "Enable notifications", parent_name="Account"),
+            control("CheckBox", "Enable notifications", parent_name="Marketing"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "parent_label": "Account",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "semantic_target_ambiguous")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_resolver_uses_parent_only_when_user_named_it(self):
+        snapshot = [
+            control("CheckBox", "Enable notifications", parent_name="Account"),
+            control("CheckBox", "Enable notifications", parent_name="Marketing"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "parent_label": "Account",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off account notifications", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "checkbox_label": "Enable notifications", "checked": False,
+        })
+        self.assertEqual(result["steps"][0]["target"]["parent_name"], "Account")
+
+    def test_semantic_checkbox_understands_mute_as_an_explicit_disable_intent(self):
+        snapshot = [control("CheckBox", "Enable app sounds")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable app sounds",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Mute app sounds", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertFalse(result["steps"][0]["parameters"]["checked"])
+
+    def test_semantic_resolver_needs_parent_for_duplicate_controls(self):
+        snapshot = [
+            control("CheckBox", "Enable notifications", parent_name="Account"),
+            control("CheckBox", "Enable notifications", parent_name="Marketing"),
+        ]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "semantic_target_ambiguous")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_planner_never_uses_gemini_for_sensitive_goals(self):
+        snapshot = [control("Edit", "Password")]
+        with patch("core.gemini.as_json") as resolve:
+            result = plan_ui_task("Enter my password", snapshot)
+        self.assertEqual(result["status"], "blocked")
+        resolve.assert_not_called()
+
+    def test_semantic_planner_cannot_turn_a_model_click_into_an_action(self):
+        snapshot = [control("Button", "Continue")]
+        with patch("core.gemini.as_json") as resolve:
+            result = plan_ui_task("Proceed to dashboard", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+        # Buttons are intentionally excluded from semantic resolution.
+        resolve.assert_not_called()
+
+    def test_exact_accessible_label_keeps_the_deterministic_no_llm_path(self):
+        snapshot = [control("CheckBox", "Notifications")]
+        with patch("core.gemini.as_json") as resolve:
+            result = plan_ui_task("Disable Notifications", snapshot)
+        self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["steps"][0]["parameters"], {
+            "checkbox_label": "Notifications", "checked": False,
+        })
+        resolve.assert_not_called()
+
+    def test_negated_checkbox_command_is_not_mistaken_for_disable(self):
+        snapshot = [control("CheckBox", "Notifications")]
+        result = plan_ui_task("Don't turn off Notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "negated_state_instruction")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_negated_checkbox_command_fails_closed(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", return_value={
+            "action": "set_checkbox_state",
+            "target_label": "Enable notifications",
+            "desired_state": False,
+        }):
+            result = plan_ui_task("Do not disable notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["reason"], "negated_state_instruction")
+        self.assertEqual(result["steps"], [])
+
+    def test_semantic_resolution_failure_fails_closed_without_action(self):
+        snapshot = [control("CheckBox", "Enable notifications")]
+        with patch("core.gemini.as_json", side_effect=TimeoutError("timeout")):
+            result = plan_ui_task("Turn off notifications", snapshot)
+        self.assertEqual(result["status"], "needs_clarification")
+        self.assertEqual(result["steps"], [])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

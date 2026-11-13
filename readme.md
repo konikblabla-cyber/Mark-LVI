@@ -3,7 +3,7 @@
 
 > 📺 **[Watch the full setup video on YouTube](https://www.youtube.com/@FatihMakes)**
 
-A real-time voice AI that can hear, see, speak, and control your computer — on any OS. Supports Windows, macOS, and Linux. Built on the Gemini Live API for native audio streaming, delivering zero subscriptions and total digital autonomy.
+A real-time voice AI that can hear, speak, control your computer, and inspect the computer display on explicit request — on any OS. It has no webcam or camera capability. Supports Windows, macOS, and Linux. Built on the stable Gemini 3.8 Live API for native audio streaming, with Gemini 3.8 Flash and earlier supported Gemini models available for background tasks.
 
 ---
 
@@ -21,6 +21,16 @@ requests at a different model without touching the voice at all.
 The local model can be on your machine (Ollama, LM Studio, llama.cpp, vLLM) or
 somebody else's API (OpenAI, Groq, DeepSeek, Mistral, xAI, OpenRouter, Together).
 Both are the same setting, because all of them speak the same protocol.
+
+**Groq is optional and deliberately rare.** It is disabled by default and is
+never the live voice engine. To use it, select Groq in **CODING** (not
+**BACKGROUND REQUESTS** or the main conversation) and explicitly enable it in
+the task-router settings. MARK enforces a local hard stop of 3 chat calls/day,
+8,000 input characters per call, 20,000 input characters/day and 1,024 output
+tokens per call. Image requests are not sent to Groq. The local ledger is saved
+under the per-user config directory; it does not include other applications or
+people using the same Groq organization/key, so your real provider quota may be
+reached sooner. A rate-limit response is not retried against Groq.
 
 **None of it costs anything if you do not use it.** On a default install the
 `providers/` folder is never imported — not at startup, not on a tool call, not
@@ -56,20 +66,26 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧚 Push-to-Talk | Hold **Ctrl+Space** and the mic opens — closed the rest of the time. Truly global on Windows, window-scoped elsewhere |
 | 🔇 Self-Echo Guard | Never answers its own last sentence: the tail of its own voice is recognised and dropped without muting you |
 | 🪪 Runtime Self-Knowledge | Name, OS, abilities **and limits** are generated from the live system each session — rename it or add a plugin and it knows |
-| 🎙️ Wake Word | Local **"Hey Jarvis"** detection — sleeps until called, auto-sleeps after 2 min of silence, and never streams audio while asleep |
+| 🧠 Address-aware listening | Gemini Proactive Audio decides whether room speech is directed to MARK — no wake phrase needed; optional local privacy mode keeps idle audio on-device |
 | ⚡ Instant Acknowledgment | Speaks a short, context-aware reply in **your language** the instant a longer task starts — no more silent waiting |
-| 🚀 Faster Live Engine | Runs on **Gemini 3.1 Flash Live** — roughly 2× faster time-to-first-word than the previous model |
+| 🚀 Faster Live Engine | Runs on stable **Gemini 3.8 Live**, with Gemini 3.1 Live and Gemini 2.5 Native Audio retained as compatibility fallbacks |
 | 🧩 Self-Describing Skills | Every bundled skill declares its own `TOOL` dict + handler and is auto-discovered at launch — adding one is a single file |
 | 🧠 Recallable Memory | No size limit and nothing silently forgotten — the prompt carries what fits, the rest is looked up on demand from a local search |
 | 🗣️ Voice Interruption | Optional local barge-in — EchoGuard learns the room's speaker echo and stops JARVIS only after sustained human speech is detected; off by default |
 | 🧾 Conversation History | Optional local text transcript archive with retention controls, secret-pattern redaction, search and HUD-confirmed deletion; audio and screenshots are never saved |
-| 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps are marked complete only after their existing tools report verified outcomes |
+| 🎯 Mission Control | Persistent multi-step plans with IDs, ordered steps, pause/resume and progress tracking; steps complete only on verified tool outcomes. A definite tool failure allows one fresh-snapshot alternative; an uncertain result never triggers a blind retry |
 | 🔁 Mission Recovery | After a restart, JARVIS finds the oldest interrupted authorised mission and resumes through read-only recovery; it never blindly repeats the in-flight action |
+| 🧠 Verified Experience Memory | After an entire mission succeeds, JARVIS stores only privacy-filtered topic keywords and the verified tool sequence; similar future missions receive historical hints, never automatic proof or blind replay |
 | 👁️ Local UI Understanding | On-demand Windows UI Automation reads filtered accessible labels from the active application; no screenshots, clipboard, keystroke logging or background capture |
-| 🖱️ Verified UI Workflows | Run 2–8 exact clicks in one application, verify every visible result before continuing, stop on ambiguity and pause critical steps for HUD confirmation |
+| 🧠 Natural UI Intent Mapping | When a command uses different wording from the visible control label, Gemini can map it to one visible checkbox, tab, radio option or tree item; MARK rechecks the exact control and state locally. No field values or screenshots are sent for this mapping, and clicks are never invented |
+| 🖱️ Verified UI Workflows | Run 2–8 ordered actions in one Windows app: exact clicks, safe text entry, tab/list/checkbox/radio/dropdown selection, tree navigation and validated key chords. The sequence pins one window/process, reports non-sensitive HUD progress, verifies each result, stops on ambiguity and pauses critical steps for HUD confirmation. Progress is memory-only and is never replayed after restart |
+| 🖥️ Verified Visual UI Actions | When Windows apps expose no usable accessibility controls, MARK can locate a visible target from a screen capture and click once; it reports success only after the exact expected label appears in the same pinned window. Mission Control can plan this fallback when the goal names the visual target and exact postcondition. Only a crop of the pinned target window is sent to configured Gemini; if bounds cannot be established, visual clicking stops instead of uploading the full desktop. No camera is used |
 | 🎯 Foreground-Aware Input | On Windows, read the active executable locally before sending mouse/keyboard input and verify the same target again before delayed clicks. macOS/Linux use their OS accessibility path without this Windows-only guard |
 | 🛡️ Non-Destructive Text Entry | `smart_type` appends at the cursor by default; replacing existing text and clearing a field require explicit HUD confirmation |
 | 🌐 Browser Text Preservation | Browser `type` and `smart_type` insert at the current cursor by default; replacing existing field contents requires explicit HUD confirmation |
+| ✅ Verified Browser Postconditions | Browser clicks report success only after the exact expected page text or URL appears; otherwise MARK reports an uncertain result and never blindly repeats the click. Typed text is checked locally without returning field contents to the model |
+| 🧭 Verified Browser Sequences | Execute 2–8 safe browser steps in one session. Navigation must verify the exact destination after redirects; clicks require exact postconditions; typing is verified locally. Live HUD progress and an immediate stop on uncertainty. High-impact sends, orders and destructive actions run separately |
+| 🧰 Browser Control Inspection | Inspect up to 80 visible buttons, links and labelled fields without reading input values, cookies or URL query strings. Sensitive controls are omitted; labels are treated as untrusted page data |
 | 📝 Safe UI Text Entry | Fill one explicitly requested, labelled non-sensitive field locally; verify without returning the field value; never submits the form |
 | 🎚️ Verified UI Sliders | Set one exact visible Windows slider value, check its live range, and verify the result locally without returning the value |
 | 🌳 Verified Tree Navigation | Expand or collapse one exact visible Windows TreeItem and verify the resulting state |
@@ -79,7 +95,7 @@ It's not just an assistant — it's an extension of your digital life.
 | ⚠️ Real Confirmation | Shutdown, restart and WiFi wait for a button **you** press — the model cannot confirm its own irreversible actions |
 | 🎧 Audio Device Picker | Choose the microphone and speakers by name, filtered to the short list your OS shows — and measured, so every entry actually works |
 | 🩺 Audio Self-Recovery | Detect a stopped speaker stream or a microphone callback stalled for 5 seconds; reconnect the voice session while preserving conversation context |
-| 🧭 Focus Awareness | After 8 seconds of stable focus, classify the foreground executable into a broad activity category. Shared with check-ins only when desktop awareness is enabled; no window titles or screen contents |
+| 🧭 Live Focus Awareness | After 2.5 seconds of stable focus, keep the foreground executable and broad activity category locally. With Desktop Awareness opt-in, the safe hint is added only to the next relevant desktop-tool result; it is not continuously streamed or persisted in the Live session preamble. No titles, documents, screenshots or clipboard contents are read |
 | 🗂️ Project Awareness | For a user-selected project folder, summarise file types, entry points and Git branch from metadata only. No source code or absolute path is sent to proactive check-ins |
 | 🩺 System Health | Monitor CPU, RAM, temperature, GPU, system-drive free space and battery; report active network adapters and top RAM-consuming processes on request |
 | 🧰 Windows Workspace Profiles | Save named app groups (work, study, gaming, etc.), list/delete them and launch a whole setup through the existing verified app launcher |
@@ -87,8 +103,11 @@ It's not just an assistant — it's an extension of your digital life.
 | 🚀 Windows Auto-Start | Opt-in Task Scheduler entry starts JARVIS at the current user's sign-in with limited privileges; can be checked or disabled from voice commands |
 | 📋 Integrated Status Briefing | One local report combines active missions, pending reminders, monitored topics, saved workspaces and Windows health without changing anything |
 | 🧪 On-demand PC Diagnostics | Ask JARVIS for a read-only Windows health report with resource pressure, disk space, battery, uptime and top memory users; no automatic cleanup or process killing |
-| 🏠 Home Assistant | Optional HTTPS integration for explicitly mapped lights, switches, fans and climate targets; verifies reported state. No locks, doors, alarms or arbitrary services |
-| 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only; no window titles or screen capture |
+| 🏠 Home Assistant | HTTPS control of explicitly mapped lights, switches, fans, climate targets, covers/garage doors, locks and vacuums. Cover/lock actions require HUD confirmation; every action is read back. No alarms, cameras or arbitrary services |
+| 📧 Google Workspace | Optional Gmail search/read, confirmed drafts and HUD-confirmed sending, plus Google Calendar event lists and confirmed event creation through local OAuth |
+| 🎧 Spotify Connect | Optional PKCE integration: search/play, pause/resume, skip, volume, device selection, queue and confirmed private/public playlist creation or additions. Audio stays in Spotify's app; catalog metadata stays in MARK's HUD |
+| 📨 Microsoft 365 / Outlook | Optional Outlook mail search/read and HUD-confirmed sending, plus Outlook Calendar lists and confirmed event creation through delegated OAuth PKCE |
+| 🖥️ Desktop Awareness | On request, identify the foreground app and broad activity category from the executable name only. With opt-in enabled, relevant desktop-tool results include the latest stable foreground-app metadata; disabling the setting stops future sharing. No window titles, document names or screen capture |
 | 📁 Project Overview | On request, inspect the selected project folder's file types, entry points and Git branch; remember metadata without reading source code or storing its path |
 | ⏱️ Process Watch | Watch a named Windows process start or exit; keep the alert on disk until JARVIS can safely deliver it |
 | ⏰ Reminder Management | Set, list and cancel scheduled Windows reminders by their exact ID |
@@ -96,6 +115,8 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧩 Plugin System | Drop a single `.py` file into `plugins/` — JARVIS learns a new skill on next launch |
 | 📄 Linux Office Aliases | Say Word, Excel or PowerPoint to open LibreOffice Writer, Calc or Impress when LibreOffice is installed; process verification recognises the actual runtime executable |
 | 📺 Video on the HUD | Plays YouTube, a local file or any video URL **where the avatar sits** — starts muted, sound on request |
+| 🎵 Windows Media Controls | Play/pause, next, previous and stop in the active Windows media session — no Spotify API key required |
+| 🌦️ Grounded City Weather | Returns a live city weather report using Gemini Google Search grounding; search snippets are clearly labelled when a verified forecast is unavailable |
 | 🪜 Model Ladder | Nine Gemini models in one measured order — a quota, a timeout or an outage steps to the next rung instead of failing |
 | 🔌 Choose Your Engine | Gemini Live, or your own STT + LLM + TTS — picked in the UI, no file editing |
 | 🏠 Local & Third-Party Models | Ollama · LM Studio · llama.cpp · vLLM · OpenAI · Groq · DeepSeek · Mistral · xAI · OpenRouter — one setting, because they share a protocol |
@@ -119,8 +140,14 @@ Python dependencies stay inside that project's local `.venv`; JavaScript and Typ
 
 Running or building code still requires an on-screen confirmation. A process is limited to 5 minutes and 1 MB of captured output; exceeding either limit stops it. The regular code helper writes atomically and supports Undo for files up to 1 MB, without undoing later edits made by the user.
 
-Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit entity map for `light.*`, `switch.*`, `fan.*` or `climate.*` under **Settings → Plugin Settings**. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint. Climate control changes the target temperature only; it does not change HVAC mode.
+Home Assistant integration is optional. Configure its HTTPS address, long-lived token and an explicit alias map under **Settings → Plugin Settings**. Supported entity domains are `light.*`, `switch.*`, `fan.*`, `climate.*`, `cover.*`, `lock.*` and `vacuum.*`; only entities you explicitly map can be controlled. Cover open/close/stop and lock/unlock always wait for a separate HUD confirmation. Lights, switches, fans and climate targets retain state read-back verification; covers, locks and vacuums are also read back before JARVIS reports success. Climate control changes the target temperature only, not HVAC mode. Alarms, cameras, scripts and arbitrary services are deliberately excluded. The token is stored in JARVIS's local `config/api_keys.json`; protect that file with your Windows account. The token is sent only to the configured HTTPS Home Assistant endpoint.
 Routines store only application names and Home Assistant aliases/actions. Activation uses the existing app launcher and the enabled smart-home plugin; every device action is checked against the current allowlist and read back from Home Assistant.
+
+Google Workspace is optional. In Google Cloud, enable **Gmail API** and **Google Calendar API**, configure the OAuth consent screen (add your account as a test user if the app is in testing), create an OAuth Client ID of type **Desktop app**, and download its JSON file as `config/client_secret_google_workspace.json`. This filename is ignored by Git. In MARK, say **“connect Google Workspace”** and complete the Google sign-in in the browser. The refresh token is stored per-user outside the repository (`%LOCALAPPDATA%\MarkLVI\token_google_workspace.json` on Windows). The requested scopes allow Gmail reading and draft/sending, plus view/edit access to events on calendars owned by the signed-in user. Every email send requires an on-screen confirmation showing the exact recipients, subject and body; JARVIS never auto-sends. Creating a Gmail draft, sending an email or adding a Calendar event waits for the exact on-screen HUD confirmation. Use **“disconnect Google Workspace”** to remove the local token; revoke the app separately in your Google Account to remove cloud authorization.
+
+Spotify Connect is optional. Create an app in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), add the exact redirect URI `http://127.0.0.1:8765/callback`, and copy its **Client ID** into **Settings → Plugin Settings → Spotify Connect**. No client secret is used: MARK uses Spotify's Authorization Code + PKCE flow. Then say **“connect Spotify”** and approve the permissions in your browser. The refresh token is stored per-user outside the repository (`%LOCALAPPDATA%\MarkLVI\token_spotify.json` on Windows). Spotify Development Mode currently requires the app owner to have an active **Premium** subscription and limits an app to **5 authorized users**; add the Spotify account you will connect in the app's allowed-users settings. Playback actions also require Premium and a Spotify Connect device to be active. MARK controls Spotify's own player; it does not stream or extract Spotify audio. Track/artist/playlist details are displayed in the local HUD rather than returned to the AI model. Playlist creation and additions are always shown in full and require HUD confirmation. Use **“disconnect Spotify”** to remove the local token; revoke the app separately in your Spotify account if needed.
+
+Microsoft 365 / Outlook is optional. In the [Microsoft Entra admin center](https://entra.microsoft.com/), register a public desktop app. Under **Authentication → Add a platform → Mobile and desktop applications**, register the redirect URI `http://localhost:8766/callback` and enable public-client flows. Under **API permissions**, add Microsoft Graph **delegated** permissions `Mail.Read`, `Mail.Send` and `Calendars.ReadWrite` (no application-wide mailbox permissions and no client secret). Copy the Application (client) ID into **Settings → Plugin Settings → Microsoft 365 — Outlook**; leave tenant as `common` for work/school and personal Microsoft accounts, or use your organization's tenant ID. Say **“connect Microsoft 365”** and complete sign-in in the browser. The refresh token is stored per-user outside the repository (`%LOCALAPPDATA%\MarkLVI\token_microsoft_365.json` on Windows). Outlook mail sending and calendar event creation require the exact content/details to be confirmed on the HUD. Microsoft Graph's send-mail response only means the request was accepted; JARVIS does not claim delivery is verified. Use **“disconnect Microsoft 365”** to remove the local token; revoke cloud consent separately in your Microsoft account if needed.
 
 Process Watch records only executable basenames and start/exit events in a local JSON file. Pending notices remain saved until delivered. It never records command lines, file contents or window text. Reminder cancellation uses the ID returned when a reminder is created or listed.
 
@@ -307,14 +334,14 @@ terminal.
 
 ### ⚡ Nothing heavy is loaded for a feature you did not use
 
-`pyautogui` is 394 ms and OpenCV is 224 ms, and both were paid at **every** launch by the folder scan that discovers actions and plugins — whether or not anyone asked for a keystroke or pointed a webcam at anything.
+`pyautogui` used to cost 394 ms at every launch, even when nobody asked for computer input. It is now imported on first use; MARK does not install or use OpenCV or webcam capture.
 
 They are imported on first use now, across twelve files, and not one of the call sites changed: `computer_settings.py` alone has eighty-six `pyautogui.` calls and every one still reads the way it did.
 
 | | before | after |
 |---|---|---|
 | discovering actions + plugins | 462 ms | **216 ms** |
-| `pyautogui` / `cv2` / `pyperclip` at startup | loaded | **never** |
+| `pyautogui` / `pyperclip` at startup | loaded | **never** |
 
 > The cost turned out to be a hot potato rather than a line item. Deferring it in `actions/` moved the whole 394 ms to `plugins/`, because whichever file imports first pays for everybody — a deferral is only a deferral when it is unanimous.
 
@@ -369,7 +396,7 @@ One new dependency for the whole release — `yt-dlp`, and only to turn a YouTub
 ### The display
 
 #### 📺 Video where the face is
-The HUD already had a surface that takes the centre of the screen and gives it back: the camera. Video shares that same stack, so the avatar, the live camera and a video can never be on screen at the same time — and a video always lands exactly where you are already looking.
+The HUD gives the centre display to video playback when requested, then restores the animated assistant. MARK has no webcam preview or live camera surface.
 
 It accepts **a local file, a direct media URL, a YouTube link, or just a description** ("play the new Dune trailer") and searches for it. It **starts muted every time**, because a soundtrack playing over the assistant is the one thing that could make JARVIS worse rather than better. You turn the sound on by asking, or from the button in the video header.
 
@@ -384,7 +411,7 @@ So there are two players running together, with a timer that corrects any drift 
 The microphone is open while a video plays, so the moment you turn the sound on, JARVIS starts answering the film. The mic now mutes itself when the video's sound goes on and unmutes when it goes off — and it says so in the activity log rather than going deaf silently.
 
 #### 🎛 Two drawers instead of one
-⚙ **SETUP** holds the things you set once — remote control, desktop shortcut, auto-start and customisation. 🎛 **CONTROLS** holds the switches you flick daily — fullscreen, morning brief, wake word, sleep, push-to-talk, HUD style. Only one is open at a time, and each sits under its own header button.
+⚙ **SETUP** holds the things you set once — remote control, desktop shortcut, auto-start and customisation. 🎛 **CONTROLS** holds the switches you flick daily — fullscreen, morning brief, address-aware listening / local privacy, optional in-call address-aware routing, push-to-talk and HUD style. Only one is open at a time, and each sits under its own header button.
 
 The panel used to stutter when it opened, and the obvious explanation — too many buttons — was wrong. Measured, the **first** wake-word state check took **2.104 seconds**, because it imported `openwakeword` on the UI thread the moment the drawer was built. That import now happens off-thread at boot, and the drawer opens instantly whether it has six buttons or sixteen.
 
@@ -460,9 +487,14 @@ Storage and prompt budget are now separate problems:
 * **The prompt carries a core, not a dump.** Identity in full, then the most recently updated facts, budgeted — measured at **971 characters on a memory holding 62 stored facts.** That is *smaller* than the old whole-store cap, so sessions now connect with fewer tokens than before.
 * **The rest is fetched on demand.** A `recall_memory` tool searches the full store locally — no network, no second model, well under a millisecond.
 
+* **Recent conversation continuity is optional.** When the Conversation History plugin is enabled, the last eight text messages may be added to the next session's prompt (max 4,200 characters). The history block is labelled as historical context—not current permission—and is redacted, local-only, and never includes audio or screenshots.
+* When the user asks about an older discussion, `search_conversation_history` can search the same local archive on demand and returns at most five short, sanitised snippets. It is unavailable unless the Conversation History plugin is enabled.
+
 The part that is easy to get wrong: **a model cannot look something up if it doesn't know the thing exists.** So the prompt also carries an **index of the keys** it had no room for. Without that, "who is Ayşe?" gets "I don't know" while `ayse_sister` sits on disk unread. This index interleaves categories rather than sorting by recency — sorting like the core, a memory with forty preferences pushed the one entry the index existed for off the end.
 
 ⚙ → **🧠 MEMORY** shows every stored fact, when it was learned, and an ✕ to forget it. Everything stays in `memory/long_term.json` on your machine.
+
+Verified task experience is separate in `memory/experiences.json`. It stores only topic keywords, completion dates and verified tool names—not raw prompts, tool output, email addresses, credentials or file paths. To clear this history, close MARK and delete that file.
 
 ### ↩️ Undo — it can take back what it did
 
@@ -502,7 +534,7 @@ The token is now issued by the interface. Shutdown, restart and WiFi put a banne
 
 ### 🎧 It finally asks which microphone
 
-Both audio streams opened with no device argument at all, so they always took whatever the OS called "default" — and on Windows that **moves on its own** the moment you plug in a headset in. "JARVIS can't hear me" almost always meant "JARVIS is listening to the webcam".
+Both audio streams opened with no device argument at all, so they always took whatever the OS called "default" — and on Windows that **moves on its own** the moment you plug in a headset in. "JARVIS can't hear me" often meant it had selected the wrong audio endpoint.
 
 ⚙ → **🎧 AUDIO DEVICES** lets you pick the microphone and the speakers by name. Two things matter more than the dropdown:
 
@@ -556,22 +588,37 @@ It is held in memory only, deliberately: writing it to disk would make a fresh l
 | **LVI** | Choose your engine · local & third-party models · Whisper + Piper in ~50 languages · language-following voice · ElevenLabs · tool budget for small models · verified outcomes instead of claimed ones · close an app by name · untrusted-content boundary · platform honesty on Wayland and macOS · hardened phone dashboard |
 | **LVII capability pack** | Voice interruption · opt-in local conversation history · persistent Mission Control · Obsidian-compatible local knowledge vault |
 | *shared* | The last five above also shipped to LIII, LIV and LV at the same time — moving up a Mark never loses them |
-| **LVII+** | Interrupt by voice · conversation history · full file access · security camera · Obsidian |
+| **LVII+** | Interrupt by voice · conversation history · full file access · Obsidian |
 
 ---
 
 ## ⚡ Quick Start
 
+### Windows 10/11 — one-click setup
+
+1. Install **64-bit Python 3.12** from [python.org](https://www.python.org/downloads/windows/). Enable the Python Launcher during setup.
+2. Download and extract the **MARK-LVI-Windows-Portable** ZIP from the [Windows package workflow](https://github.com/konikblabla-cyber/Mark-LVI/actions/workflows/windows-download.yml).
+3. Double-click `START_MARK.bat`. It creates a private `.venv`, installs the required packages and Playwright browsers, then opens MARK.
+4. On first launch, enter your Gemini API key in the setup window. The key is saved locally in `config/api_keys.json` and is not part of the download.
+
+For installation without launching, double-click `INSTALL_MARK.bat`. Later launches through `START_MARK.bat` reuse the environment and only rerun setup when `requirements.txt` or `setup.py` changes.
+
+Google Workspace is optional and needs a one-time OAuth setup; see the **Google Workspace** section below. Do not put an OAuth client secret or token in the repository or share it in chat. Spotify needs a one-time Client ID/redirect setup; see the **Spotify Connect** section below. Do not put OAuth tokens in the repository. Microsoft 365 also needs a one-time Entra app registration; see the **Microsoft 365 / Outlook** section below.
+
+### macOS / Linux
+
 ```bash
 git clone https://github.com/konikblabla-cyber/Mark-LVI.git
 cd Mark-LVI
-python setup.py        # installs deps for YOUR OS + the browser automation engine
-python main.py
+python3 setup.py        # installs deps for YOUR OS + the browser automation engine
+python3 main.py
 ```
 
 `setup.py` installs the Python dependencies for your operating system and checks the required audio runtime. On Linux, install PortAudio first (Debian/Ubuntu: `sudo apt-get install libportaudio2`); the Python wheel alone does not include this system library. Install `libegl1` for the Qt interface. For full X11 desktop input, screenshots and clipboard, also install `gnome-screenshot`, `python3-tk` and `xclip` (Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip`). `scrot` alone is not sufficient for the current PyScreeze screenshot backend. Windows and macOS pip installs include PortAudio automatically. Prefer to install Python packages by hand? `pip install -r requirements.txt` works after the system prerequisite is installed.
 
-> ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. The optional **wake word** engine is *not* installed here — grab it in one click from **⚙ → WAKE WORD** inside the app.
+> ⚠️ **Installation Note:** If you hit a `ModuleNotFoundError` for an OS-specific package, install it with `pip install <module_name>`. **Address-aware mode is the default** — the CONTROLS drawer shows **ADDRESS-AWARE: ON**. No wake phrase is required: Gemini 3.8 Live receives the microphone stream and its Proactive Audio feature decides whether an utterance is directed to MARK. This is the mode for natural, JARVIS-like conversation and requires the Gemini Live engine; input audio is sent to Google while the Live session is connected and may consume audio tokens even when MARK stays silent. Other configured engines do not have Gemini Proactive Audio, so use LOCAL PRIVACY or Push-to-Talk with those engines.
+
+For a local-only alternative, click **ADDRESS-AWARE: ON** to install and enable **LOCAL PRIVACY** mode. In that mode the idle microphone is processed on-device and does not go to Gemini; one of the downloaded phrases ("Hey Jarvis", "Hey Mycroft" or "Hey Rhasspy") opens one request, then MARK returns to local listening. Push-to-Talk is also available. During a detected call, the privacy guard keeps PC microphone audio local by default. The separate **IN-CALL ADDRESSING** switch is OFF by default; enabling it requires an explicit confirmation because other participants' voices and room audio may be sent to Google Gemini. Gemini Proactive Audio then decides whether speech is directed to MARK. This option is available only with Gemini Live Proactive Audio; LOCAL PRIVACY, unsupported engines, unknown WASAPI state and active phone-audio input remain local.
 
 ---
 
@@ -584,14 +631,14 @@ python main.py
 | **Linux desktop tools** | The installer requires `libegl1` for the Qt interface. On X11, install `gnome-screenshot`, `python3-tk` and `xclip` (or `xsel`) for PyAutoGUI screenshots, Tk support and clipboard. `scrot` alone is not sufficient for current PyScreeze. Debian/Ubuntu: `sudo apt-get install libegl1 gnome-screenshot python3-tk xclip` |
 | **macOS permissions** | Accessibility (to type and click) and Screen Recording (to see the screen), both under System Settings → Privacy & Security. Until granted, those actions silently do nothing — the OS reports success either way |
 | **Python** | 3.11, 3.12 or 3.13 |
-| **Microphone** | Required for voice interaction (and for the "Hey Jarvis" wake word). Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
+| **Microphone** | Required for voice interaction. Address-aware mode streams live mic audio to the selected cloud Live provider; LOCAL PRIVACY mode uses on-device wake-phrase detection. Linux also needs PortAudio (`libportaudio2` on Debian/Ubuntu) |
 | **Proactive check-ins** | After 15 minutes without user speech, JARVIS may speak when Windows positively confirms the desktop is idle and no fullscreen window, call or phone session is active. This can happen while the wake-word microphone remains asleep; microphone audio stays local. Without a verified idle sensor, check-ins stay silent |
 | **Speakers** | Required for voice replies |
 | **API Key** | Free Gemini API key (entered on first launch → `config/api_keys.json`). Only for the Gemini engine — a fully local setup needs no key and no account |
 | **GPU** | **Not required, anywhere.** The avatar and HUD video are rendered in software; local speech recognition and the neural voice both run on the CPU by default |
 | **YouTube on the HUD** | `yt-dlp`, installed by `setup.py`. Without it, local files and direct URLs still play and YouTube links open in the browser with an explanation |
 | **Aviation Weather** | No API key or account required. The plugin uses the existing `requests` dependency and AviationWeather.gov's public API; an internet connection is required |
-| **Wake word** *(optional)* | One-click download from ⚙ → WAKE WORD (`openwakeword`, a few MB, fully local) |
+| **Local privacy mode** *(optional)* | One-click local wake-phrase models from ⚙ → CONTROLS (`openwakeword`, fully local); address-aware mode needs no wake model |
 | **A different engine** *(optional)* | Nothing extra. ⚙ → ENGINE & PROVIDERS talks to any local or hosted model over HTTP using a library the app already has |
 | **Local speech recognition** *(optional)* | `faster-whisper`, installed from the same panel. **CPU is the default** — a GPU is an option, never a requirement |
 | **Local voice** *(optional)* | `piper-tts` for a neural voice in ~50 languages, one click from the panel — or nothing at all, and it uses the voices your OS already has |
@@ -603,7 +650,7 @@ python main.py
 ```
 Mark LVI/
 ├── main.py                   # Core loop — Gemini Live session, audio I/O, viseme extraction, tool dispatch
-├── ui.py                     # PyQt6 HUD — avatar canvas, waveform, log panel, settings drawer, camera feed
+├── ui.py                     # PyQt6 HUD — avatar canvas, waveform, log panel, settings drawer
 ├── setup.py                  # OS-aware installer (skips wrong-OS dependencies, checks your Python)
 ├── .gitignore                # Keeps your API key, TLS key and memories out of the repository
 ├── providers/                # OPTIONAL — delete it and the assistant runs on Gemini,
@@ -653,13 +700,11 @@ Mark LVI/
 │   ├── water_reminder.py     # Hydration reminders with intake tracking
 │   ├── quiz.py               # Spoken quizzes
 │   ├── spaced_repetition.py  # Flashcard review
-│   ├── calorie_counter.py    # Food through the webcam
-│   └── pushup_counter.py     # Counts pushups through the webcam
 ├── actions/                  # Bundled skills — each self-describes via a TOOL dict + handler
 │                             #   Everything here drives the COMPUTER, which is what decides
 │                             #   whether a new skill belongs in this folder at all.
 │   ├── web_search.py         # Gemini + DDG parallel search (news, research, price, compare)
-│   ├── screen_processor.py   # Screen & webcam capture for vision
+│   ├── screen_processor.py   # Explicit one-shot computer display capture
 │   ├── background_monitor.py # User-configured topic watching — daily DDG check
 │   ├── proactive.py          # Proactive 2.0 — time/context/rotation-aware check-ins
 │   ├── reminder.py           # OS-native scheduled notifications
@@ -733,7 +778,7 @@ Most data stays on your machine. There is no MARK server, no telemetry and no ac
 
 All three local files are listed in `.gitignore`, so a fork or a pull request cannot leak them by accident. **If you have already committed `config/api_keys.json` anywhere public, revoke that key** at [aistudio.google.com](https://aistudio.google.com/app/apikey) and generate a new one — removing the file in a later commit does not remove it from the history.
 
-Your voice is streamed to Google's Gemini Live API while a session is open; that is one of the few things that leaves your computer, and it stops when you mute or close the app. The Aviation Weather plugin makes a separate public-data request to AviationWeather.gov when you ask for METAR or TAF information.
+In address-aware mode, your microphone audio is streamed to Google Gemini Live while a session is open so Proactive Audio can decide whether speech is directed to MARK. Input audio may be billed even when the model stays silent. In LOCAL PRIVACY mode, idle microphone audio is analysed on-device and is not sent to Gemini until a wake phrase opens a request. In a detected communication call, audio forwarding stays blocked by default. Only the optional **IN-CALL ADDRESSING** consent switch may allow the PC microphone stream to reach Gemini Live Proactive Audio; it is OFF by default and never overrides LOCAL PRIVACY, unsupported engines, unknown WASAPI state or active phone-audio input. The Aviation Weather plugin makes a separate public-data request to AviationWeather.gov when you ask for METAR or TAF information.
 
 **Mark LVI changes what that sentence can say about you.** Choose a local engine — Whisper on your CPU, a model served by Ollama or LM Studio, your system's own voice — and nothing leaves the machine at all: no audio, no transcript, no key, no account. Choose a hosted provider instead and your audio and text go to that vendor rather than to Google. The panel says which is which, and the assistant never quietly switches between them.
 

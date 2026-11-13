@@ -59,41 +59,56 @@ from memory.memory_manager import (
 # The file-backed tools (open_app, web_search, browser_control, …) are no longer
 # imported or declared here — they self-describe via a TOOL dict in their own
 # actions/*.py file and are auto-discovered by core.action_loader at startup.
-# Only tools that are tied to live-session state stay inline in this file
-# (screen_process, close_camera, save_memory, manage_monitor, shutdown_jarvis,
-# system_status).
+# Only tools tied to live-session state stay inline here. MARK has no webcam
+# capture or camera-stream capability; visual inspection is screen-only.
 from core import outcome
 from core.action_loader import strip_meta
-from actions.screen_processor  import _capture_camera, _capture_screen
+from actions.screen_processor import _capture_screen
 from actions.system_monitor    import SystemMonitor, get_system_status
-from actions.proactive         import ProactiveEngine
+from actions.proactive         import ProactiveEngine, can_deliver_proactive
 from actions.background_monitor import (
     add_monitor, remove_monitor, list_monitors, check_all as monitor_check_all,
 )
 from actions.web_search        import _news as _fetch_news_sync
 from memory.config_manager     import (
     get_brief_enabled, get_media_resolution, get_proactive_audio_enabled,
+    get_in_call_addressing_enabled, save_in_call_addressing_enabled,
     get_push_to_talk_enabled, get_thinking_enabled, get_turn_tuning, get_voice,
-    get_wake_word_enabled, save_wake_word_enabled,    get_input_device, get_output_device,
+    get_wake_word_enabled, save_wake_word_enabled, save_proactive_audio_enabled,
+    get_input_device, get_output_device,
     get_desktop_awareness_enabled,
 )
 from core                     import gemini as _gemini
+from core.live_model_policy import (
+    PRIMARY_LIVE_MODEL, blocking_tool_declarations,
+    supports_legacy_thinking_budget, live_proactive_audio_mode,
+    supports_proactive_audio, live_model_candidates,
+)
 from core.plugin_loader        import discover_plugins
 from core                      import undo as undo_stack
 from core                      import confirm as confirm_gate
 from core                      import audio_devices
-from core.audio_recovery import callback_is_stalled, stream_is_active
-from core.focus_context import FocusContextTracker
+from core.audio_recovery import (
+    callback_is_stalled, stream_is_active, offer_latest_audio, LIVE_AUDIO_QUEUE_SIZE,
+)
+from core.focus_context import (
+    DESKTOP_CONTEXT_TOOL_NAMES, FocusContextTracker,
+    append_focus_context_for_tool,
+)
 from core.project_context import (
     inspect_project_folder, format_project_context, remember_project_snapshot,
 )
 from core.action_loader        import discover_actions
 from core.echo                 import EchoGuard
-from core.live_session_policy import go_away_notice, live_turn_is_active
+from core.live_session_policy import (
+    go_away_notice, live_turn_is_active, should_halt_tool_batch,
+    should_sleep_after_addressed_response, should_use_local_wake_mode,
+)
 from core.communication_context import (
     get_active_communication_apps, is_communication_context,
     communication_context_unchanged, initial_communication_gate,
-    should_auto_wake, should_forward_microphone,
+    should_auto_wake, should_forward_microphone, communication_gate_state,
+    should_stream_call_audio,
 )
 from core.desktop_context import get_desktop_context, should_run_proactive_checkin
 from core.viseme               import VisemeStream
@@ -103,7 +118,7 @@ from core.wake_word            import (
 )
 
 # How long the assistant stays awake with no user speech before it auto-sleeps
-# again (wake-word mode only).
+# again (LOCAL PRIVACY mode only).
 WAKE_SLEEP_TIMEOUT = 120.0   # seconds (2 minutes)
 
 def get_base_dir():
@@ -121,11 +136,12 @@ PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 #
 # It is reassigned on every connect, so a model that runs out of quota is
 # stepped over and the assistant keeps talking instead of failing to start.
-LIVE_MODEL          = "models/gemini-3.1-flash-live-preview"
+LIVE_MODEL          = PRIMARY_LIVE_MODEL
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000 
 RECEIVE_SAMPLE_RATE = 24000
-CHUNK_SIZE          = 1024
+CHUNK_SIZE          = 1024   # speaker callback: ~42.7 ms at 24 kHz
+INPUT_AUDIO_BLOCK_SIZE = 640  # microphone callback: 40 ms at 16 kHz
 
 # RMS below which 16-bit PCM is treated as room silence; above _LEVEL_FULL it
 # reads as a full-height waveform. Tuned so ordinary speech lands mid-range and
@@ -380,8 +396,8 @@ def _clean_transcript(text: str) -> str:
 TOOL_DECLARATIONS = [
     # ── Inline tools ─────────────────────────────────────────────────────────
     # These stay here (rather than in an actions/*.py TOOL dict) because their
-    # handling is woven into live-session state — vision capture/injection,
-    # camera stream, memory writes, the monitor engine, and shutdown. All other
+    # handling is woven into live-session state — one-shot screen capture/injection,
+    # memory writes, the monitor engine, and shutdown. All other
     # tools live in their own action file and are auto-discovered by
     # core.action_loader (see JarvisLive.__init__).
     {
@@ -399,30 +415,19 @@ TOOL_DECLARATIONS = [
     {
         "name": "screen_process",
         "description": (
-            "Captures the screen or webcam image and lets you analyze it. "
-            "MUST be called when user asks what is on screen, what you see, "
-            "look at camera, analyze my screen, etc. "
-            "You have NO visual ability without this tool. "
-            "After the image is captured it is sent directly to you — describe what you see and answer the user's question. "
-            "When using camera: the live view stays open until user says close it or calls close_camera."
+            "Capture one screenshot of the computer display for visual inspection. "
+            "Use only when the user explicitly asks what is on screen or requests visual "
+            "help with an application. This tool never accesses a webcam or any camera. "
+            "The screenshot is sent to the configured model for this one request; "
+            "never capture repeatedly or in the background."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "angle": {"type": "STRING", "description": "'screen' to capture display, 'camera' for webcam. Default: 'screen'"},
-                "text":  {"type": "STRING", "description": "The question or instruction about the captured image"}
+                "text": {"type": "STRING", "description": "Question or instruction about the captured screen"}
             },
             "required": ["text"]
         }
-    },
-    {
-        "name": "close_camera",
-        "description": (
-            "Closes the live camera view shown on screen. "
-            "Call when the user says (in ANY language): close camera, stop camera, "
-            "turn off camera, that's creepy, etc."
-        ),
-        "parameters": {"type": "OBJECT", "properties": {}, "required": []}
     },
     {
         "name": "manage_monitor",
@@ -556,9 +561,11 @@ class _ReconnectSignal(Exception):
     new session must genuinely start clean (see the voice-change note in
     _on_voice_change)."""
 
-    def __init__(self, keep_context: bool = True):
+    def __init__(self, keep_context: bool = True, retry_delay: float = 0.0):
         super().__init__()
         self.keep_context = keep_context
+        # Device-level faults should not cause a tight reconnect loop.
+        self.retry_delay = max(0.0, min(float(retry_delay), 30.0))
 
 
 def _is_reconnect_signal(exc: BaseException) -> bool:
@@ -569,6 +576,21 @@ def _is_reconnect_signal(exc: BaseException) -> bool:
     if isinstance(exc, BaseExceptionGroup):
         return any(_is_reconnect_signal(sub) for sub in exc.exceptions)
     return False
+
+
+def _reconnect_delay_of(exc: BaseException) -> float:
+    """Return the bounded delay carried by a reconnect signal in a task group."""
+    if isinstance(exc, _ReconnectSignal):
+        try:
+            return max(0.0, min(float(exc.retry_delay), 30.0))
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+    if isinstance(exc, BaseExceptionGroup):
+        for sub in exc.exceptions:
+            delay = _reconnect_delay_of(sub)
+            if delay:
+                return delay
+    return 0.0
 
 
 def _keep_context_of(exc: BaseException) -> bool:
@@ -603,14 +625,21 @@ class JarvisLive:
         # Fail closed until the first Windows audio-session probe confirms there is no call.
         self._communication_app_active = initial_communication_gate()
         self._communication_context_known = False
+        # Keep the mic gate closed briefly after WASAPI stops reporting a call;
+        # transient session-list gaps must not leak a fragment of conversation.
+        self._communication_last_active_at = None
         # Foreground categories stay local unless desktop awareness is opted in.
-        self._focus_tracker = FocusContextTracker(stable_seconds=8.0)
+        # Refresh the model's broad foreground-app context after a short,
+        # stable app switch. Desktop awareness is opt-in and shares no titles,
+        # document names, screenshots, clipboard contents or keystrokes.
+        self._focus_tracker = FocusContextTracker(stable_seconds=2.5)
         self._focus_context = None
         self._communication_turn_open = False
         self._communication_turn_deadline = 0.0
-        self._pending_vision       = None    # (img_bytes, mime_type, question, angle) to inject after tool response
-        self._vision_cam_active    = False   # True if camera was opened for vision → auto-close after response
-        self._vision_close_pending = False   # True after vision injected; next turn_complete closes camera
+        self._communication_audio_session_active = False  # actual WASAPI signal, not release grace
+        self._in_call_addressing_enabled = get_in_call_addressing_enabled()
+        self._proactive_audio_enabled = get_proactive_audio_enabled()
+        self._pending_vision       = None    # (screen_bytes, mime_type, question) to inject after tool response
         self._vision_last_time     = 0.0     # monotonic time of last screen_process call (cooldown guard)
         self._vision_busy          = False   # True while a vision capture/inject cycle is in flight
         self._interrupted          = False   # True while draining audio after user interrupt
@@ -659,6 +688,7 @@ class JarvisLive:
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
         self.ui.on_voice_interrupt_change = self.set_voice_interrupt_enabled
+        self.ui.on_in_call_addressing_change = self.set_in_call_addressing_enabled
         self.ui.on_voice_change   = self._on_voice_change     # voice picker → rebuild session
         self.ui.on_audio_device_change = self._on_audio_device_change
         self._reconnect_event: asyncio.Event | None = None
@@ -685,6 +715,9 @@ class JarvisLive:
         self._sys_monitor      = SystemMonitor()  # persistent cooldown state
         self._proactive        = ProactiveEngine()
         self._last_user_speech = time.monotonic()  # updated on every user utterance
+        # LOCAL PRIVACY mode grants one addressed request at a time.
+        self._addressed_turn_pending = False
+        self._addressed_response_complete = False
         self._session_log: list[str] = []          # conversation turns for end-of-session summary
         self._queued_process_alerts: list[dict] = []
         self._startup_mission_recovery_injected = False
@@ -701,7 +734,7 @@ class JarvisLive:
             return _record_confirmed_result
         confirm_gate.set_result_observer_factory(_mission_confirmation_result)
 
-        self._enhanced_live = True  # proactive audio; auto-disabled if the server rejects it
+        self._proactive_audio_runtime_disabled_model = None  # endpoint-specific fallback if 2.5 rejects its flag
         self._tuned_live    = True  # turn-taking / media / thinking knobs; same fallback
 
         _base_dir = Path(__file__).resolve().parent
@@ -732,9 +765,13 @@ class JarvisLive:
         self.ui.request_say = self.plugin_say   # plugins: mid-task speech channel
 
         # ── Wake word ────────────────────────────────────────────────────────
-        # _awake gates the mic (see _listen_audio) and the background speakers.
-        # It is True whenever wake word is OFF, so default behaviour is unchanged.
-        self._wake_enabled     = get_wake_word_enabled()
+        # _awake gates the mic only in LOCAL PRIVACY mode. In the default
+        # ADDRESS-AWARE mode, Gemini Proactive Audio judges who the speech is for.
+        # Context-aware listening is the default. The local privacy gate wins
+        # only when explicitly selected instead of semantic cloud addressing.
+        self._wake_enabled     = should_use_local_wake_mode(
+            get_wake_word_enabled(), get_proactive_audio_enabled()
+        )
         self._awake            = not self._wake_enabled
         self._wake_detector: WakeWordDetector | None = None
         self._wake_sleep_timeout = WAKE_SLEEP_TIMEOUT
@@ -791,6 +828,8 @@ class JarvisLive:
         if self._awake:
             return
         self._awake = True
+        self._addressed_turn_pending = False
+        self._addressed_response_complete = False
         self._last_user_speech = time.monotonic()   # start the auto-sleep clock now
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
@@ -802,10 +841,10 @@ class JarvisLive:
         self._awake = False
         self.set_speaking(False)
         self.ui.set_state("SLEEPING")
-        self.ui.write_log(f"SYS: Sleeping — {reason}. Say 'Hey Jarvis' to wake me.")
+        self.ui.write_log(f"SYS: Sleeping — {reason}. Say a wake phrase to wake me.")
 
     async def _run_sleep_watch(self) -> None:
-        """Auto-sleep after the configured silence window (wake-word mode only)."""
+        """Auto-sleep after silence only in LOCAL PRIVACY mode."""
         while True:
             await asyncio.sleep(5)
             if not self._wake_enabled or not self._awake:
@@ -831,34 +870,55 @@ class JarvisLive:
                 # sessions to keep privacy while a real call runs in background.
                 active_audio_apps = await asyncio.to_thread(get_active_communication_apps)
                 active = is_communication_context(foreground_app, active_audio_apps)
+                # Only a positive WASAPI session list may authorize sending call audio.
+                # Unknown session APIs fail closed even though the privacy gate itself stays closed.
+                self._communication_audio_session_active = bool(
+                    active_audio_apps is not None and active
+                )
+                gate_active, self._communication_last_active_at = communication_gate_state(
+                    active, self._communication_last_active_at, time.monotonic()
+                )
                 # The executable is already read locally for call privacy. A
                 # stable category provides broad context, never window contents.
-                focus_change = self._focus_tracker.observe(foreground_app, time.monotonic())
-                if focus_change is not None:
-                    self._focus_context = focus_change
+                if foreground_app:
+                    focus_change = self._focus_tracker.observe(foreground_app, time.monotonic())
+                    if focus_change is not None:
+                        self._focus_context = focus_change
+                else:
+                    # A successful sensor read with no foreground identity is
+                    # not permission to keep telling Gemini the old app is active.
+                    self._focus_tracker.reset()
+                    self._focus_context = None
             except Exception as exc:
                 # A failed privacy probe is not evidence that no call is active.
                 # Close the mic gate immediately; the next successful poll may
                 # reopen it after the local Windows audio state is known again.
+                self._communication_audio_session_active = False
                 self._communication_turn_open = False
                 self._communication_turn_deadline = 0.0
                 self._communication_app_active = True
                 self._communication_context_known = False
+                self._focus_tracker.reset()
+                self._focus_context = None
                 print(f"[CommunicationGuard] context check failed; microphone kept local: {exc}")
+                # Remove stale foreground metadata from Gemini as soon as the
+                # sensor failure is observed; never keep presenting an old app.
                 continue
 
             if communication_context_unchanged(
-                    active, self._communication_app_active,
+                    gate_active, self._communication_app_active,
                     self._communication_context_known):
                 # This remains a local decision. Recent keyboard/mouse input can
                 # wake a sleeping JARVIS for a direct command, but never in a
                 # known communication context.
-                if (not active and self._wake_enabled and not self._awake
+                if (not gate_active and self._wake_enabled and not self._awake
                         and should_auto_wake(
                             context.get("idle_seconds") if isinstance(context, dict) else None,
-                            active,
+                            gate_active,
                         )):
                     self.wake(reason="desktop activity")
+                # The local mic gate is already in its correct state; only now
+                # may the optional cloud context update run.
                 continue
 
             # Close any one-shot request before publishing a new context state.
@@ -866,15 +926,35 @@ class JarvisLive:
             # call gate open while a stale wake-word turn is still marked open.
             self._communication_turn_open = False
             self._communication_turn_deadline = 0.0
-            self._communication_app_active = active
+            self._communication_app_active = gate_active
             self._communication_context_known = True
-            if not active and self._wake_enabled and not self._awake:
+            if not gate_active and self._wake_enabled and not self._awake:
                 if should_auto_wake(
                         context.get("idle_seconds") if isinstance(context, dict) else None,
-                        active):
+                        gate_active):
                     self.wake(reason="desktop activity")
-            if active:
-                if active_audio_apps is None and sys.platform == "win32":
+            if gate_active:
+                if should_stream_call_audio(
+                        self._communication_audio_session_active,
+                        self._in_call_addressing_enabled,
+                        self._proactive_audio_enabled and not self._wake_enabled,
+                        bool(
+                            supports_proactive_audio(
+                                LIVE_MODEL, self._proactive_audio_enabled,
+                                self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
+                            )
+                            and self._engine_caps is None
+                            and self._engine is None
+                            and self.session is not None
+                        ),
+                        self._phone_active,
+                        self._communication_context_known,
+                ):
+                    self.ui.write_log(
+                        "SYS: In-call ADDRESS-AWARE is active. PC microphone audio is being "
+                        "sent to Gemini; Proactive Audio decides whether speech is directed to MARK."
+                    )
+                elif active_audio_apps is None and sys.platform == "win32":
                     self.ui.write_log(
                         "SYS: Windows audio-session detection is unavailable. "
                         "Microphone stays local; repair pycaw/comtypes or use "
@@ -884,7 +964,7 @@ class JarvisLive:
                     ready = self._ensure_wake_detector()
                     if ready:
                         self.ui.write_log(
-                            "SYS: Communication privacy gate active. Say 'Hey Jarvis' "
+                            "SYS: Communication privacy gate active. Say a wake phrase "
                             "for one request, or use Push-to-Talk."
                         )
                     else:
@@ -895,30 +975,98 @@ class JarvisLive:
                 else:
                     self.ui.write_log(
                         "SYS: Call/chat detected. Microphone stays local. Install the "
-                        "local 'Hey Jarvis' wake model or use Push-to-Talk to speak."
+                        "local wake-phrase models or use Push-to-Talk to speak."
                     )
             else:
                 self.ui.write_log(
                     "SYS: Communication privacy gate off — normal microphone mode resumed."
                 )
 
+            # Update Gemini only after the local communication gate has been
+            # closed/opened for the new state, so network latency cannot delay privacy.
+
     # ── Wake word: UI callbacks (called from the Qt thread) ──────────────────
 
+    def set_in_call_addressing_enabled(self, enabled: bool) -> bool:
+        """Apply the UI's explicit consent choice only when Gemini can honour it."""
+        enabled = bool(enabled)
+        if enabled and not (
+                self._proactive_audio_enabled
+                and not self._wake_enabled
+                and supports_proactive_audio(
+                    LIVE_MODEL, self._proactive_audio_enabled,
+                    self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
+                )
+                and self._engine_caps is None
+                and self._engine is None):
+            self._in_call_addressing_enabled = False
+            save_in_call_addressing_enabled(False)
+            self.ui.write_log(
+                "SYS: In-call ADDRESS-AWARE is unavailable on the current engine. "
+                "Gemini Live Proactive Audio is required; microphone privacy remains enabled."
+            )
+            return False
+        self._in_call_addressing_enabled = enabled
+        if enabled:
+            self.ui.write_log(
+                "SYS: In-call ADDRESS-AWARE is ON. During a detected call, PC microphone audio "
+                "may be sent to Gemini so Proactive Audio can decide whether speech is for MARK."
+            )
+        else:
+            self.ui.write_log(
+                "SYS: In-call microphone privacy restored. Call audio stays on this PC unless "
+                "you explicitly use local wake or Push-to-Talk."
+            )
+        return True
+
     def _ui_wake_toggle(self, enable: bool) -> str:
-        """Enable/disable wake word from the settings UI. Returns a status token:
-        'enabled' | 'disabled' | 'need_download'."""
+        """Switch between ADDRESS-AWARE and LOCAL PRIVACY listening modes."""
         if enable:
             if not wake_is_ready():
                 return "need_download"
+            # Fail open to address-aware mode if the local detector cannot
+            # actually start. A present model file does not guarantee that its
+            # ONNX runtime or model can be loaded on this machine.
+            if not self._ensure_wake_detector():
+                save_proactive_audio_enabled(True)
+                self._proactive_audio_enabled = True
+                self._wake_enabled = False
+                save_wake_word_enabled(False)
+                dispatch_to_loop(
+                    self._loop,
+                    lambda: self.ui.write_log(
+                        "SYS: LOCAL PRIVACY could not start its wake detector; "
+                        "ADDRESS-AWARE mode remains active."
+                    ),
+                )
+                return "unavailable"
+            save_proactive_audio_enabled(False)
+            self._proactive_audio_enabled = False
             self._wake_enabled = True
             save_wake_word_enabled(True)
-            self._ensure_wake_detector()
-            self.sleep(reason="wake word enabled")
+            # This callback can run on the installer worker thread. Marshal
+            # Qt state changes onto the asyncio/Qt owner loop.
+            if not dispatch_to_loop(
+                self._loop, lambda: self.sleep(reason="local privacy mode enabled")
+            ):
+                self.sleep(reason="local privacy mode enabled")
+            # Proactive Audio is a connection-time config field. Rebuild the
+            # Live session now so the old semantic-addressing setting cannot
+            # remain active behind the LOCAL PRIVACY label.
+            self.request_reconnect(keep_context=True, reason="LOCAL PRIVACY mode")
             return "enabled"
         else:
+            save_proactive_audio_enabled(True)
+            self._proactive_audio_enabled = True
             self._wake_enabled = False
             save_wake_word_enabled(False)
-            self.wake(reason="wake word disabled")
+            if not dispatch_to_loop(
+                self._loop, lambda: self.wake(reason="address-aware listening enabled")
+            ):
+                self.wake(reason="address-aware listening enabled")
+            # Reconnect to apply Proactive Audio immediately rather than waiting
+            # for an unrelated disconnect or model change.
+            self.request_reconnect(keep_context=True, reason="ADDRESS-AWARE mode")
             return "disabled"
 
     def _ui_wake_manual(self) -> None:
@@ -931,7 +1079,7 @@ class JarvisLive:
             self.wake(reason="you tapped wake")
 
     def _ui_wake_install(self) -> tuple[bool, str]:
-        """Download openwakeword + the model (runs in a UI worker thread)."""
+        """Download local wake-phrase models for LOCAL PRIVACY mode."""
         # Triggered by the user pressing the button, so its progress is exactly
         # what they are waiting to see.
         return wake_install(logger=lambda m: print(f"[Wake] {m}"),
@@ -1107,9 +1255,9 @@ class JarvisLive:
         self._turn_authorization = new_turn_authorization(text)
         # Respect wake-word sleep: a typed command must not be answered while
         # asleep either (the sleep gate is not just for the mic). Wake first with
-        # "Hey Jarvis" or the WAKE NOW button.
+        # "a wake phrase" or the WAKE NOW button.
         if self._wake_enabled and not self._awake:
-            self.ui.write_log("SYS: I'm asleep — say 'Hey Jarvis' or tap WAKE NOW first.")
+            self.ui.write_log("SYS: I'm asleep — say a wake phrase or tap WAKE NOW first.")
             return
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
@@ -1352,7 +1500,7 @@ class JarvisLive:
             _caps = self._engine_caps
             _blocked = set()
             if not _caps.get("vision"):
-                _blocked |= {"screen_process", "close_camera"}
+                _blocked |= {"screen_process"}
             if not _caps.get("tools"):
                 _blocked = {(d.get("name") if isinstance(d, dict)
                              else getattr(d, "name", "")) for d in _all_decls}
@@ -1378,6 +1526,16 @@ class JarvisLive:
         parts = [time_ctx, identity_ctx]
         if mem_str:
             parts.append(mem_str)
+        # Recent transcripts are local, opt-in memory. The formatter returns
+        # nothing unless the user enabled conversation-history storage.
+        try:
+            from memory.conversation_history import format_recent_context
+            recent_context = format_recent_context(limit=8, max_chars=4200)
+        except Exception as _history_import_error:
+            recent_context = ""
+            print(f"[History] Recent context unavailable: {type(_history_import_error).__name__}")
+        if recent_context:
+            parts.append(recent_context)
         if not self._startup_mission_recovery_injected:
             self._startup_mission_recovery_injected = True
             try:
@@ -1400,7 +1558,7 @@ class JarvisLive:
             # validation error, not something the API ignores. A declaration
             # that carries neither comes back as the same object, so what
             # Gemini receives is unchanged from the previous release.
-            tools=[{"function_declarations": strip_meta(_all_decls)}],
+            tools=[{"function_declarations": blocking_tool_declarations(strip_meta(_all_decls))}],
             # Asks the server to issue session-resumption handles. Enabled but
             # NOT yet used: no handle is captured from the resumption update and
             # none is passed back here, so a reconnect starts a fresh session
@@ -1425,15 +1583,14 @@ class JarvisLive:
                 )
             ),
         )
-        if self._enhanced_live:
-            # Proactive audio: JARVIS stays silent when speech isn't addressed
-            # to it (background chatter, talking to someone else in the room).
-            # (Affective dialog was dropped: gemini-3.1-flash-live does not
-            #  support it, and it never reliably detected tone in practice.
-            #  To restore it on a 2.5 native-audio model, add back:
-            #  cfg["enable_affective_dialog"] = True )
-            if get_proactive_audio_enabled():
-                cfg["proactivity"] = types.ProactivityConfig(proactive_audio=True)
+        # Proactive Audio is model-specific: Gemini 3.8 has it permanently on,
+        # Gemini 2.5 Native Audio requires this flag, and Gemini 3.1 Live does
+        # not support it. Never send an unsupported field to the 3.1 endpoint.
+        _proactive_mode = live_proactive_audio_mode(LIVE_MODEL)
+        if (_proactive_mode == "configurable"
+                and get_proactive_audio_enabled()
+                and self._proactive_audio_runtime_disabled_model != LIVE_MODEL):
+            cfg["proactivity"] = types.ProactivityConfig(proactive_audio=True)
 
         if self._tuned_live:
             cfg.update(self._tuning_config())
@@ -1471,7 +1628,7 @@ class JarvisLive:
             out["realtime_input_config"] = types.RealtimeInputConfig(
                 automatic_activity_detection=detect)
 
-        # Screenshots and camera frames are tokenised at this resolution and then
+        # Screen captures are tokenised at this resolution and then
         # stay in the session's context. 'medium' keeps on-screen text legible
         # for a fraction of a full-resolution frame.
         res = get_media_resolution()
@@ -1488,7 +1645,8 @@ class JarvisLive:
         # appear to deliberate on the Live path, so pinning the field only adds a
         # way for a future release to behave differently. Set "thinking_enabled"
         # in config/api_keys.json to true to let it reason instead.
-        if get_thinking_enabled():
+        if (get_thinking_enabled()
+                and supports_legacy_thinking_budget(LIVE_MODEL)):
             out["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
 
         return out
@@ -1544,86 +1702,63 @@ class JarvisLive:
             elif name == "screen_process":
                 import time as _t_mod
                 _now = _t_mod.monotonic()
-                _cooldown = 4.0  # seconds — covers echo window after speaking ends
+                _cooldown = 4.0
                 if self._vision_busy or (_now - self._vision_last_time) < _cooldown:
                     _wait = max(0, _cooldown - (_now - self._vision_last_time))
                     print(f"[Vision] ⏳ Cooldown active ({_wait:.1f}s remaining) — ignoring duplicate call")
                     result = "Vision is still processing the previous request. I will not call this again."
                 else:
-                    self._vision_busy      = True
+                    self._vision_busy = True
                     self._vision_last_time = _now
-                    angle     = args.get("angle", "screen").lower()
                     user_text = args.get("text", "What do you see?")
-                    if angle == "camera":
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_camera)
-                        self.ui.start_camera_stream()
-                        self._vision_cam_active = True
-                        print(f"[Vision] 📷 Camera: {len(img_b):,} bytes")
-                        _stall = "camera"
-                    else:
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
-                        print(f"[Vision] 🖥️  Screen: {len(img_b):,} bytes")
-                        _stall = "screen"
-                    # With task routing enabled, delegate the frame to Gemma
-                    # and return its grounded description as the tool result.
-                    # The live conversation remains on its current engine; only
-                    # this one-shot vision task is delegated. When routing is
-                    # off, preserve MARK's original same-session image injection.
                     try:
-                        from core import model_router
-                        _route_vision = model_router.is_enabled()
-                    except Exception as _route_error:
-                        _route_vision = None
-                        result = f"Vision routing could not be checked safely: {type(_route_error).__name__}."
-                    if _route_vision is None:
+                        img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
+                    except Exception as capture_error:
                         self._vision_busy = False
-                        if angle == "camera":
-                            self._vision_cam_active = False
-                            self.ui.stop_camera_stream()
-                    elif _route_vision:
-                        try:
-                            from core import gemini
-                            from google.genai import types as gtypes
-                            _image_part = gtypes.Part.from_bytes(
-                                data=img_b, mime_type=mime_t)
-                            _vision_reply = await loop.run_in_executor(
-                                None,
-                                lambda: gemini.call(
-                                    [user_text, _image_part],
-                                    tier=gemini.SMART,
-                                    timeout_ms=60000,
-                                    task_type="vision",
-                                ),
-                            )
-                            _vision_text = (getattr(_vision_reply, "text", None) or "").strip()
-                            result = ("Gemma's image analysis: " + _vision_text
-                                      if _vision_text else
-                                      "Gemma did not return an image analysis. No other model was tried.")
-                        except Exception as _vision_error:
-                            result = (f"Gemma image analysis failed ({type(_vision_error).__name__}). "
-                                      "No fallback model was tried.")
-                        finally:
-                            self._vision_busy = False
-                            if angle == "camera":
-                                self._vision_cam_active = False
-                                self.ui.stop_camera_stream()
-                    else:
-                        self._pending_vision = (img_b, mime_t, user_text, angle)
-                        # The image is attached to this same exchange, so there is
-                        # nothing to stall for and nothing to announce. Asking for an
-                        # acknowledgement here is what produced two spoken answers —
-                        # the model filled that turn by answering the question from
-                        # imagination, then answered it again once it could see.
                         result = (
-                            f"[VISION_ACTIVE] {_stall.capitalize()} captured and attached to this "
-                            f"same exchange. Do not acknowledge and do not answer yet — the image "
-                            f"is arriving with this result. Reply once, from what you actually see "
-                            f"in it."
+                            f"Screen capture failed ({type(capture_error).__name__}). "
+                            "No image was sent."
                         )
-
-            elif name == "close_camera":
-                self.ui.stop_camera_stream()
-                result = "Camera closed."
+                    else:
+                        print(f"[Vision] 🖥️ Screen: {len(img_b):,} bytes")
+                        try:
+                            from core import model_router
+                            _route_vision = model_router.is_enabled()
+                        except Exception as _route_error:
+                            _route_vision = None
+                            result = f"Vision routing could not be checked safely: {type(_route_error).__name__}."
+                        if _route_vision is None:
+                            self._vision_busy = False
+                        elif _route_vision:
+                            try:
+                                from core import gemini
+                                from google.genai import types as gtypes
+                                _image_part = gtypes.Part.from_bytes(data=img_b, mime_type=mime_t)
+                                _vision_reply = await loop.run_in_executor(
+                                    None,
+                                    lambda: gemini.call(
+                                        [user_text, _image_part],
+                                        tier=gemini.SMART,
+                                        timeout_ms=60000,
+                                        task_type="vision",
+                                    ),
+                                )
+                                _vision_text = (getattr(_vision_reply, "text", None) or "").strip()
+                                result = ("Gemma's image analysis: " + _vision_text
+                                          if _vision_text else
+                                          "Gemma did not return an image analysis. No other model was tried.")
+                            except Exception as _vision_error:
+                                result = (f"Gemma image analysis failed ({type(_vision_error).__name__}). "
+                                          "No fallback model was tried.")
+                            finally:
+                                self._vision_busy = False
+                        else:
+                            self._pending_vision = (img_b, mime_t, user_text)
+                            result = (
+                                "[VISION_ACTIVE] Screen captured and attached to this same exchange. "
+                                "Do not acknowledge or answer before the image arrives. Reply once, "
+                                "grounded only in the captured display."
+                            )
 
             elif name == "system_status":
                 r = await loop.run_in_executor(None, get_system_status)
@@ -1697,17 +1832,23 @@ class JarvisLive:
                     result = await loop.run_in_executor(
                         None, lambda: self._action_registry.run(name, args, _ctx))
                 result = result or "Done."
-                # web_search: mirror results to the on-screen content panel
-                if (name == "web_search" and r
-                        and not r.startswith("No results")
-                        and not r.startswith("Search failed")):
-                    _mode  = args.get("mode", "search")
-                    _query = args.get("query") or ", ".join(args.get("items", []))
-                    _label = f"{_mode.upper()} — {_query[:38]}" if _query else _mode.upper()
-                    # unwrap: the untrusted markers are for the MODEL. Showing
-                    # them to the person who asked for the search is the
-                    # machinery leaking into the interface.
-                    self.ui.show_content(_label, outcome.unwrap(r))
+                # Mirror the actual dispatcher result to the on-screen panel.
+                # The previous code read `r` here, but that name is only
+                # assigned in the plugin branch below; web_search is an action,
+                # so a successful search was turned into UnboundLocalError.
+                if name == "web_search":
+                    from core.tool_result_presentation import web_search_panel_payload
+                    _panel_payload = web_search_panel_payload(name, result, args)
+                    if _panel_payload is not None:
+                        try:
+                            self.ui.show_content(*_panel_payload)
+                        except Exception as _panel_error:
+                            # A HUD rendering problem must not turn a successful
+                            # search into a failed tool result for the model.
+                            print(
+                                "[WebSearch] HUD panel unavailable: "
+                                f"{type(_panel_error).__name__}"
+                            )
 
             else:
                 if self._plugin_registry.has(name):
@@ -1738,6 +1879,23 @@ class JarvisLive:
             except Exception as _mission_evidence_error:
                 print(f"[Mission] Evidence recording failed closed: {_mission_evidence_error}")
 
+        # After a desktop action, return only the current foreground executable
+        # and its broad category to Gemini. This uses a tool result (not a second
+        # Live input stream), and is shared only when Desktop Awareness is on.
+        if name in DESKTOP_CONTEXT_TOOL_NAMES:
+            try:
+                result = append_focus_context_for_tool(
+                    result,
+                    name,
+                    self._focus_context,
+                    enabled=get_desktop_awareness_enabled(),
+                )
+            except Exception as _focus_result_error:
+                print(
+                    f"[Focus] Tool-result context unavailable: "
+                    f"{type(_focus_result_error).__name__}"
+                )
+
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
 
@@ -1763,34 +1921,55 @@ class JarvisLive:
         )
 
     async def _send_realtime(self):
+        queue = self.out_queue
         while True:
-            msg = await self.out_queue.get()
-            # Gemini 3.x Live rejects the old realtime_input.media_chunks field
-            # (what `media=...` maps to) and closes the socket with a 1007. Send
-            # mic / phone PCM through the new `audio` field instead. Queue items
-            # are {"data": <bytes>, "mime_type": <str>} from _listen_audio and
-            # the phone relay.
-            await self.session.send_realtime_input(
-                audio=types.Blob(
-                    data=msg["data"],
-                    mime_type=msg.get("mime_type", "audio/pcm"),
+            msg = await queue.get()
+            try:
+                await self.session.send_realtime_input(
+                    audio=types.Blob(
+                        data=msg["data"],
+                        mime_type=msg.get("mime_type", "audio/pcm"),
+                    )
                 )
-            )
+            finally:
+                queue.task_done()
 
     async def _listen_audio(self):
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
+        audio_queue = self.out_queue
         last_input_callback = [time.monotonic()]
+
+        def _enqueue_latest_audio(message):
+            # Runs on the asyncio loop, not the real-time PortAudio callback.
+            if audio_queue is not None:
+                offer_latest_audio(audio_queue, message)
 
         def callback(indata, frames, time_info, status):
             # PortAudio can leave a stream object present after a USB endpoint
             # disappears. A callback heartbeat lets the owner task detect that
             # silent failure without doing device enumeration on the audio thread.
             last_input_callback[0] = time.monotonic()
-            # A foreground Discord/Teams/Zoom/phone app is treated as a private
-            # conversation zone. Audio is never forwarded there until a local
-            # wake phrase or explicit PTT hold opens a single request.
-            if self._communication_app_active:
+            # A detected communication session stays local by default. The only
+            # exception is the user's explicit in-call semantic-addressing consent,
+            # and only when Gemini Live Proactive Audio is positively available.
+            if (self._communication_app_active
+                    and not should_stream_call_audio(
+                        self._communication_audio_session_active,
+                        self._in_call_addressing_enabled,
+                        self._proactive_audio_enabled and not self._wake_enabled,
+                        bool(
+                            supports_proactive_audio(
+                                LIVE_MODEL, self._proactive_audio_enabled,
+                                self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
+                            )
+                            and self._engine_caps is None
+                            and self._engine is None
+                            and self.session is not None
+                        ),
+                        self._phone_active,
+                        self._communication_context_known,
+                    )):
                 if (self._communication_turn_open
                         and self._communication_turn_deadline
                         and time.monotonic() >= self._communication_turn_deadline
@@ -1886,10 +2065,14 @@ class JarvisLive:
             
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                try:
+                    loop.call_soon_threadsafe(
+                        _enqueue_latest_audio,
+                        {"data": data, "mime_type": "audio/pcm"},
+                    )
+                except RuntimeError:
+                    # Session shutdown raced the last PortAudio callback.
+                    pass
                 # Feed the live mic level to the HUD so the waveform reacts to
                 # the user's actual voice while listening. Purely cosmetic — any
                 # failure here must never disturb the mic.
@@ -1904,7 +2087,7 @@ class JarvisLive:
                     samplerate=SEND_SAMPLE_RATE,
                     channels=CHANNELS,
                     dtype="int16",
-                    blocksize=CHUNK_SIZE,
+                    blocksize=INPUT_AUDIO_BLOCK_SIZE,
                     device=dev,
                     callback=callback,
                 )
@@ -1921,7 +2104,7 @@ class JarvisLive:
                 _mic_stream = _open_mic(_mic_dev)
             except Exception as _e:
                 # A device the picker listed but the driver will not open right
-                # now — exclusive mode, a webcam already in use, a virtual mic
+                # now — exclusive mode, another application already using it, a virtual mic
                 # whose source went away. Chosen hardware failing must never
                 # mean the assistant cannot hear at all.
                 if _mic_dev is None:
@@ -1940,13 +2123,13 @@ class JarvisLive:
                         self.ui.write_log(
                             "SYS: Microphone stream stopped — restoring audio connection."
                         )
-                        raise _ReconnectSignal(keep_context=True)
+                        raise _ReconnectSignal(keep_context=True, retry_delay=2.0)
                     if callback_is_stalled(
                             last_input_callback[0], time.monotonic(), stall_after=5.0):
                         self.ui.write_log(
                             "SYS: Microphone stopped delivering audio — restoring connection."
                         )
-                        raise _ReconnectSignal(keep_context=True)
+                        raise _ReconnectSignal(keep_context=True, retry_delay=2.0)
         except _ReconnectSignal:
             raise
         except Exception as e:
@@ -1968,17 +2151,16 @@ class JarvisLive:
             return False
 
         import base64 as _b64
-        img_b, mime_t, question, angle = self._pending_vision
+        img_b, mime_t, question = self._pending_vision
         self._pending_vision = None
         b64 = _b64.b64encode(img_b).decode("ascii")
-        print(f"[Vision] 📤 {len(img_b):,} bytes (angle={angle}) → main session")
+        print(f"[Vision] 📤 {len(img_b):,} screen bytes → main session")
 
         # Label the source. Without it the image arrives carrying nothing but
         # the user's own sentence, and a screenshot of this app — which has a
         # face in the middle of it — got read as a photo of the user. What the
         # label *means* is explained once, in the generated [SELF] block.
-        src = ("[IMAGE SOURCE: WEBCAM]" if angle == "camera"
-               else "[IMAGE SOURCE: SCREEN CAPTURE]")
+        src = "[IMAGE SOURCE: SCREEN CAPTURE]"
         await self.session.send_client_content(
             turns={"role": "user", "parts": [
                 {"inline_data": {"mime_type": mime_t, "data": b64}},
@@ -1987,13 +2169,7 @@ class JarvisLive:
             turn_complete=True,
         )
 
-        if self._vision_cam_active:
-            # Camera: stay busy until JARVIS has finished speaking the answer,
-            # then close the preview.
-            self._vision_cam_active    = False
-            self._vision_close_pending = True
-        else:
-            self._vision_busy = False
+        self._vision_busy = False
         return True
 
     async def _receive_audio(self):
@@ -2110,6 +2286,8 @@ class JarvisLive:
                             # flag and skip all further processing for that turn.
                             if self._interrupted:
                                 self._interrupted = False
+                                self._addressed_turn_pending = False
+                                self._addressed_response_complete = False
                                 in_buf  = []
                                 out_buf = []
                                 self._visemes.reset()
@@ -2120,6 +2298,7 @@ class JarvisLive:
 
                             full_in = " ".join(in_buf).strip()
                             if full_in:
+                                self._addressed_turn_pending = True
                                 from core.autonomy_policy import new_turn_authorization
                                 self._turn_authorization = new_turn_authorization(full_in)
                                 self._last_out_logged = ""   # new exchange
@@ -2145,6 +2324,15 @@ class JarvisLive:
                             if full_out and len(full_out) >= _REPEAT_MIN and self._last_out_logged:
                                 if full_out in self._last_out_logged:
                                     full_out = ""
+                            if should_sleep_after_addressed_response(
+                                self._wake_enabled,
+                                self._addressed_turn_pending,
+                                bool(sc.turn_complete),
+                                bool(response.tool_call),
+                            ):
+                                # Audio-only final replies may have no transcript.
+                                self._addressed_response_complete = True
+                                self._addressed_turn_pending = False
                             if full_out:
                                 self._last_out_logged = full_out
                                 self.ui.write_log(f"{self._asst_name}: {full_out}")
@@ -2168,26 +2356,25 @@ class JarvisLive:
                                     self._communication_turn_open = False
                                     self._communication_turn_deadline = 0.0
                                     self.ui.write_log(
-                                        "SYS: Privacy gate closed. Say 'Hey Jarvis' "
+                                        "SYS: Privacy gate closed. Say a wake phrase "
                                         "for the next request."
                                     )
                             out_buf = []
 
-                            if self._vision_close_pending:
-                                # This turn_complete IS the vision answer — close camera + release busy flag
-                                self._vision_close_pending = False
-                                self._vision_busy = False
-                                async def _cam_close():
-                                    await asyncio.sleep(2.0)
-                                    self.ui.stop_camera_stream()
-                                asyncio.create_task(_cam_close())
-
                     if response.tool_call:
-                        fn_responses = []
-                        for fc in response.tool_call.function_calls:
-                            print(f"[JARVIS] 📞 {fc.name}")
-                            fr = await self._execute_tool(fc)
-                            fn_responses.append(fr)
+                        from core.tool_batch import dispatch_tool_batch
+                        fn_responses = await dispatch_tool_batch(
+                            response.tool_call.function_calls,
+                            self._execute_tool,
+                            lambda fc, result: types.FunctionResponse(
+                                id=fc.id, name=fc.name, response={"result": result},
+                            ),
+                            should_halt_tool_batch,
+                            lambda: self.ui.write_log(
+                                "SYS: Remaining calls in this tool batch were stopped "
+                                "at a control handoff or verification boundary."
+                            ),
+                        )
                         await self.session.send_tool_response(
                             function_responses=fn_responses
                         )
@@ -2268,6 +2455,10 @@ class JarvisLive:
                     ):
                         self.set_speaking(False)
                         self._turn_done_event.clear()
+                        if self._addressed_response_complete and self._wake_enabled:
+                            self._addressed_response_complete = False
+                            if self._awake:
+                                self.sleep(reason="request finished — local privacy mode waiting for a wake phrase")
                     continue
 
                 self.set_speaking(True)
@@ -2340,7 +2531,7 @@ class JarvisLive:
                     self.ui.write_log(
                         "SYS: Speaker write failed — restoring audio connection."
                     )
-                    raise _ReconnectSignal(keep_context=True) from e
+                    raise _ReconnectSignal(keep_context=True, retry_delay=2.0) from e
         except _ReconnectSignal:
             raise
         except Exception as e:
@@ -2665,12 +2856,18 @@ class JarvisLive:
                     self._phone_active, _desktop_ctx):
                 continue
 
-            self._proactive.mark_attempted()
+            proactive_session = self.session
 
             try:
                 memory       = await asyncio.to_thread(load_memory)
                 monitors     = await asyncio.to_thread(list_monitors)
                 recent_turns = self._session_log[-8:] if self._session_log else []
+                mission_context = ""
+                try:
+                    from plugins.mission_control import proactive_context
+                    mission_context = await asyncio.to_thread(proactive_context)
+                except Exception as mission_context_error:
+                    print(f"[Mission] Proactive context unavailable: {type(mission_context_error).__name__}")
                 project_context = ""
                 if _desktop_opt_in:
                     selected_folder = getattr(self.ui, "current_file", None)
@@ -2688,8 +2885,25 @@ class JarvisLive:
                     desktop_context = _desktop_ctx if _desktop_opt_in else None,
                     focus_context = self._focus_context if _desktop_opt_in else None,
                     project_context = project_context,
+                    mission_context = mission_context,
                 )
-                await self.session.send_client_content(
+                with self._speaking_lock:
+                    speaking_now = self._is_speaking
+                if not can_deliver_proactive(
+                    session_available=(
+                        proactive_session is not None
+                        and self.session is proactive_session
+                    ),
+                    communication_active=self._communication_app_active,
+                    phone_active=self._phone_active,
+                    speaking=speaking_now,
+                    last_user_speech=self._last_user_speech,
+                    now=time.monotonic(),
+                    min_silence_secs=self._proactive.min_silence_secs,
+                ):
+                    continue
+                self._proactive.mark_attempted()
+                await proactive_session.send_client_content(
                     turns={"role": "user", "parts": [{"text": prompt}]},
                     turn_complete=True,
                 )
@@ -2710,14 +2924,14 @@ class JarvisLive:
                 # No audio for 1 s → phone mic inactive, give PC mic back
                 self._phone_active = False
                 continue
-            self._phone_active = True   # phone is streaming — silence PC mic
-            with self._speaking_lock:
-                speaking = self._is_speaking
-            if not speaking and not self.ui.muted:
-                try:
-                    self.out_queue.put_nowait(chunk)
-                except asyncio.QueueFull:
-                    pass
+            try:
+                self._phone_active = True   # phone is streaming — silence PC mic
+                with self._speaking_lock:
+                    speaking = self._is_speaking
+                if not speaking and not self.ui.muted:
+                    offer_latest_audio(self.out_queue, chunk)
+            finally:
+                q.task_done()
 
     def _on_phone_connected(self) -> None:
         self.ui.write_log("SYS: Phone connected via Remote Dashboard.")
@@ -2839,12 +3053,26 @@ class JarvisLive:
         if self._engine_caps is None:
             client = genai.Client(
                 api_key=_get_api_key(),
-                http_options={"api_version":
-                              "v1alpha" if self._enhanced_live else "v1beta"},
+                # Current Live API docs specify v1beta for Gemini 3.8, Proactive
+                # Audio, session tools and realtime audio configuration.
+                http_options={"api_version": "v1beta"},
             )
-            async with client.aio.live.connect(model=live_model,
-                                               config=config) as session:
-                yield session
+            try:
+                async with client.aio.live.connect(
+                        model=live_model, config=config) as session:
+                    yield session
+            finally:
+                # Every reconnect gets a fresh SDK client. Close its async
+                # transport after the websocket context exits to avoid keeping
+                # old HTTP pools alive for the whole desktop session.
+                try:
+                    await asyncio.wait_for(client.aio.aclose(), timeout=3.0)
+                except Exception as exc:
+                    print(f"[JARVIS] Live async client cleanup: {type(exc).__name__}")
+                try:
+                    client.close()
+                except Exception:
+                    pass
             return
 
         from memory.config_manager import get_pipeline, get_provider_config
@@ -2922,7 +3150,14 @@ class JarvisLive:
                 # off a quota limit is skipped; the name is published back to
                 # LIVE_MODEL so plugins follow whatever is actually in use.
                 global LIVE_MODEL
-                LIVE_MODEL = _gemini.live_model()
+                _safe_models = live_model_candidates(
+                    _gemini.LIVE_MODELS,
+                    self._proactive_audio_enabled,
+                    (self._proactive_audio_runtime_disabled_model,)
+                    if self._proactive_audio_runtime_disabled_model else (),
+                    local_microphone_gate_enabled=(self._wake_enabled or self._ptt_enabled),
+                )
+                LIVE_MODEL = _gemini.live_model(allowed_models=_safe_models)
                 live_model = LIVE_MODEL
                 print(f"[JARVIS] Live model: {live_model}")
 
@@ -2933,13 +3168,23 @@ class JarvisLive:
                 # install this returns None in a few microseconds and nothing
                 # below behaves any differently.
                 self._engine_caps = self._resolve_engine_caps()
+                if self._engine_caps is not None and self._in_call_addressing_enabled:
+                    # A non-Gemini pipeline cannot provide Proactive Audio.
+                    # Revoke the persisted opt-in before opening its microphone path.
+                    self._in_call_addressing_enabled = False
+                    save_in_call_addressing_enabled(False)
+                    self.ui.write_log(
+                        "SYS: In-call ADDRESS-AWARE was disabled because the selected engine "
+                        "does not support Gemini Live Proactive Audio. Call audio stays local."
+                    )
+                    self.ui.refresh_in_call_addressing_btn()
                 config = self._build_config()
 
                 # The conversation itself. `_open_session` gives back a Gemini
                 # Live session or a local pipeline wearing the same interface —
                 # the Live branch still builds a fresh client on every reconnect
-                # to avoid stale HTTP state, and still asks for v1alpha when
-                # proactive audio is on.
+                    # to avoid stale HTTP state, using the documented v1beta
+                    # Live endpoint for all supported models.
                 async with (
                     self._open_session(live_model, config) as session,
                     asyncio.TaskGroup() as tg,
@@ -2961,14 +3206,12 @@ class JarvisLive:
 
                     self.session          = session
                     self.audio_in_queue   = asyncio.Queue()
-                    self.out_queue        = asyncio.Queue(maxsize=200)
+                    self.out_queue        = asyncio.Queue(maxsize=LIVE_AUDIO_QUEUE_SIZE)
                     self._turn_done_event = asyncio.Event()
                     self._rx_deadline     = None
 
                     # Reset transient state that must not carry over from a previous session
                     self._pending_vision       = None
-                    self._vision_cam_active    = False
-                    self._vision_close_pending = False
                     self._vision_busy          = False
                     self._vision_last_time     = 0.0
                     self._interrupted          = False
@@ -2983,16 +3226,29 @@ class JarvisLive:
                         self.ui.write_log("SYS: Reconnected — conversation restored.")
 
                     # Wake word: if enabled, come up ASLEEP (mic gated, silent)
-                    # until the user says "Hey Jarvis" or taps wake in the UI.
+                    # until the user says "a wake phrase" or taps wake in the UI.
                     if self._wake_enabled:
                         self._ensure_wake_detector()
                         self._awake = False
                         self.ui.set_state("SLEEPING")
-                        self.ui.write_log("SYS: JARVIS online — sleeping. Say 'Hey Jarvis' to wake me.")
+                        self.ui.write_log("SYS: JARVIS online — sleeping. Say a wake phrase to wake me.")
                     else:
                         self._awake = True
                         self.ui.set_state("LISTENING")
-                        self.ui.write_log("SYS: JARVIS online.")
+                        self.ui.write_log("SYS: JARVIS online — address-aware listening active; no wake phrase needed.")
+                        if (self._engine_caps is None and supports_proactive_audio(
+                                LIVE_MODEL, self._proactive_audio_enabled,
+                                self._proactive_audio_runtime_disabled_model == LIVE_MODEL,
+                        )):
+                            self.ui.write_log(
+                                "SYS: Gemini Proactive Audio decides whether speech is directed to MARK. "
+                                "Microphone audio is streamed while this session is connected."
+                            )
+                        else:
+                            self.ui.write_log(
+                                "SYS: Contextual speech filtering is unavailable; use LOCAL PRIVACY "
+                                "mode or Push-to-Talk to avoid reacting to background speech."
+                            )
 
                     # What this machine will not permit, said once, on screen.
                     #
@@ -3064,6 +3320,12 @@ class JarvisLive:
                         # handle so the next connect really does start empty.
                         self._resume_handle = None
                     self._conn_backoff = 0
+                    _retry_delay = _reconnect_delay_of(e)
+                    if _retry_delay:
+                        self.ui.write_log(
+                            f"SYS: Audio recovery — retrying in {_retry_delay:.0f}s."
+                        )
+                        await asyncio.sleep(_retry_delay)
                     continue
 
                 # A resumption handle the server will not accept — expired, or
@@ -3094,7 +3356,14 @@ class JarvisLive:
                 # not start today": one model means one daily limit, and the
                 # limit always arrives mid-conversation.
                 if _gemini.note_live_failure(live_model, err_str):
-                    nxt = _gemini.live_model()
+                    _safe_models = live_model_candidates(
+                        _gemini.LIVE_MODELS,
+                        self._proactive_audio_enabled,
+                        (self._proactive_audio_runtime_disabled_model,)
+                        if self._proactive_audio_runtime_disabled_model else (),
+                        local_microphone_gate_enabled=(self._wake_enabled or self._ptt_enabled),
+                    )
+                    nxt = _gemini.live_model(allowed_models=_safe_models)
                     self.ui.write_log(
                         f"SYS: Switching to {nxt.split('/')[-1]} — the previous "
                         f"model is out of quota."
@@ -3123,15 +3392,21 @@ class JarvisLive:
 
                 # Proactive audio rejected by the server (preview API drift) —
                 # drop it and reconnect with the plain config.
-                if self._enhanced_live and (
-                    "INVALID_ARGUMENT" in err_str
-                    or "proactiv" in err_str.lower()
-                    or "Unknown name" in err_str
-                    or "unexpected keyword" in err_str
-                ):
-                    self._enhanced_live = False
+                if (live_proactive_audio_mode(live_model) == "configurable"
+                        and self._proactive_audio_runtime_disabled_model != live_model
+                        and "proactiv" in err_str.lower()):
+                    self._proactive_audio_runtime_disabled_model = live_model
+                    if self._in_call_addressing_enabled:
+                        self._in_call_addressing_enabled = False
+                        save_in_call_addressing_enabled(False)
+                        self.ui.write_log(
+                            "SYS: In-call ADDRESS-AWARE consent was disabled because this Gemini "
+                            "endpoint rejected Proactive Audio. PC microphone audio stays local in calls."
+                        )
+                        self.ui.refresh_in_call_addressing_btn()
                     self.ui.write_log(
-                        "SYS: Proactive audio unavailable — reconnecting without it."
+                        "SYS: Proactive Audio unavailable — address-aware filtering is off. "
+                        "Use LOCAL PRIVACY mode or Push-to-Talk to avoid background speech."
                     )
                     continue
 

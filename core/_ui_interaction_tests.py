@@ -471,5 +471,65 @@ class UIInteractionTests(unittest.TestCase):
         self.assertFalse(requires_ui_confirmation("Save", "Save the settings"))
 
 
+
+    def test_focus_window_identity_activates_only_the_expected_process_and_handle(self):
+        focus_calls = []
+        class FakeWindow:
+            is_visible = lambda self: True
+            element_info = types.SimpleNamespace(process_id=55)
+            def set_focus(self):
+                focus_calls.append("focused")
+
+        class FakeDesktop:
+            def window(self, handle):
+                focus_calls.append(("handle", handle))
+                return types.SimpleNamespace(wrapper_object=lambda: FakeWindow())
+
+        fake_pywinauto = types.ModuleType("pywinauto")
+        fake_pywinauto.Desktop = lambda backend: FakeDesktop()
+
+        def immediate_uia(callback, timeout, exclusive_lock=None, pass_cancel_event=False):
+            try:
+                return True, callback(), None
+            except Exception as exc:
+                return True, None, exc
+
+        with patch.dict(sys.modules, {"pywinauto": fake_pywinauto}), \
+             patch.object(ui_interaction, "_run_uia", side_effect=immediate_uia), \
+             patch.object(ui_interaction, "_snapshot", return_value={
+                 "handle": 7, "process_id": 55, "records": [],
+             }) as snapshot:
+            active = ui_interaction.focus_window_identity(7, 55)
+        self.assertEqual(focus_calls, [("handle", 7), "focused"])
+        self.assertEqual(active["handle"], 7)
+        snapshot.assert_called_once_with()
+
+    def test_focus_window_identity_rejects_a_reused_handle_from_another_process(self):
+        class FakeWindow:
+            is_visible = lambda self: True
+            element_info = types.SimpleNamespace(process_id=99)
+            def set_focus(self):
+                raise AssertionError("must not focus a window from another process")
+
+        class FakeDesktop:
+            def window(self, handle):
+                return types.SimpleNamespace(wrapper_object=lambda: FakeWindow())
+
+        fake_pywinauto = types.ModuleType("pywinauto")
+        fake_pywinauto.Desktop = lambda backend: FakeDesktop()
+
+        def immediate_uia(callback, timeout, exclusive_lock=None, pass_cancel_event=False):
+            try:
+                return True, callback(), None
+            except Exception as exc:
+                return True, None, exc
+
+        with patch.dict(sys.modules, {"pywinauto": fake_pywinauto}), \
+             patch.object(ui_interaction, "_run_uia", side_effect=immediate_uia), \
+             patch.object(ui_interaction, "_snapshot") as snapshot:
+            with self.assertRaisesRegex(RuntimeError, "another process"):
+                ui_interaction.focus_window_identity(7, 55)
+        snapshot.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -33,6 +33,7 @@ class MissionControlReliabilityTests(unittest.TestCase):
             "steps": steps,
         })
         data = mission_control._read()
+        self.assertIn("[MISSION_PLAN_SAVED]", result)
         self.assertEqual(len(data["missions"]), 1, result)
         return data["missions"][0]["id"]
 
@@ -437,6 +438,348 @@ class MissionControlReliabilityTests(unittest.TestCase):
         self.assertEqual(mission_control.startup_recovery_context(), "")
 
 
+
+    def test_experience_journal_is_saved_only_after_every_step_is_verified(self):
+        mission_id = self.plan("Open audio settings\nVerify microphone privacy")
+        self.start(mission_id)
+        with patch("memory.memory_manager.record_verified_mission") as remember:
+            self.record_verified_tool("open_app")
+            first = self.complete(mission_id, "S01")
+            self.assertIn("[MISSION_CONTINUE]", first)
+            self.assertFalse(remember.called)
+
+            self.record_verified_tool("click_and_verify")
+            final = self.complete(mission_id, "S02")
+            self.assertIn("[MISSION_COMPLETE]", final)
+            remember.assert_called_once()
+            completed = remember.call_args.args[0]
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(
+                [step["verified_tool"] for step in completed["steps"]],
+                ["open_app", "click_and_verify"],
+            )
+
+    def test_related_experience_is_added_as_non_authoritative_step_context(self):
+        mission_id = self.plan("Configure microphone privacy settings")
+        with patch(
+            "memory.memory_manager.format_experience_hints",
+            return_value="\n[PAST_EXPERIENCE_HINTS] prior verified workflow [/PAST_EXPERIENCE_HINTS]",
+        ) as lookup:
+            result = self.start(mission_id)
+        self.assertIn("[PAST_EXPERIENCE_HINTS]", result)
+        self.assertIn("prior verified workflow", result)
+        lookup.assert_called_once()
+        self.assertIn("Configure microphone privacy settings", lookup.call_args.args[0])
+
+
+
+
+    def test_failed_planned_ui_action_gets_one_fresh_alternative_then_stops(self):
+        mission_id = self._running_mission("Open Privacy tab")
+        self._plan_ui_action(mission_id, tool="select_tab_item")
+        self.assertFalse(mission_control.record_tool_result(
+            self.scope, "select_tab_item",
+            "status=failed action=select_tab_item reason=target_not_found",
+        ))
+        persisted = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(persisted["ui_last_attempt"]["status"], "failed")
+        self.assertNotIn("target_not_found", json.dumps(persisted))
+
+        alternative = {
+            "status": "planned",
+            "execution": "not_started",
+            "steps": [{
+                "tool": "select_list_item",
+                "parameters": {"item_label": "Privacy section"},
+                "risk": "low",
+                "requires_confirmation": False,
+                "reason": "Use the uniquely visible alternative entry",
+                "expected_result": "The selected list entry becomes active",
+            }],
+        }
+        with patch("plugins.mission_control._fresh_ui_plan", return_value=alternative) as replan:
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_REPLAN]", result)
+        replan.assert_called_once_with("Open Privacy tab", {
+            "status": "failed",
+            "step": {
+                "tool": "select_tab_item",
+                "parameters": {"tab_label": "Privacy"},
+            },
+        })
+        updated = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(updated["ui_action"]["tool"], "select_list_item")
+        self.assertEqual(updated["ui_replan_count"], 1)
+        self.assertEqual(updated["ui_action_history"][0]["tool"], "select_tab_item")
+        self.assertNotIn("ui_last_attempt", updated)
+
+        self.assertFalse(mission_control.record_tool_result(
+            self.scope, "select_list_item",
+            "status=failed action=select_list_item reason=alternative_not_found",
+        ))
+        with patch("plugins.mission_control._fresh_ui_plan") as second_replan:
+            stopped = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_REPLAN_LIMIT]", stopped)
+        second_replan.assert_not_called()
+
+    def test_unverified_planned_ui_action_is_recovery_not_replan(self):
+        mission_id = self._running_mission("Open Privacy tab")
+        self._plan_ui_action(mission_id, tool="select_tab_item")
+        self.assertFalse(mission_control.record_tool_result(
+            self.scope, "select_tab_item",
+            "status=unverified action=select_tab_item reason=timeout",
+        ))
+        persisted = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(persisted["ui_last_attempt"]["status"], "unverified")
+        with patch("plugins.mission_control._fresh_ui_plan") as replan:
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_RECOVERY]", result)
+        replan.assert_not_called()
+
+
+    def test_mission_control_persists_and_verifies_visual_computer_control_step(self):
+        mission_id = self._running_mission(
+            'Click the gear icon and verify "Privacy panel"',
+        )
+        visual_plan = {
+            "status": "planned",
+            "steps": [{
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                    "target_window_handle": 7,
+                    "target_process_id": 55,
+                },
+                "risk": "low",
+                "requires_confirmation": False,
+                "reason": "Use a cropped visual target and exact postcondition",
+                "expected_result": "Privacy panel appears in the same window",
+            }],
+        }
+        snapshot = {
+            "handle": 7,
+            "process_id": 55,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [],
+            "clickables": [],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=visual_plan):
+            result = mission_control.run({
+                "action": "plan_ui_step", "mission_id": mission_id, "step_id": "S01",
+            }, session_memory=self.scope)
+        self.assertIn("[MISSION_UI_PLAN]", result)
+        saved = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(saved["ui_action"]["tool"], "computer_control")
+        self.assertEqual(saved["ui_action"]["parameters"]["action"], "screen_click_verified")
+
+        self.assertTrue(mission_control.record_tool_result(
+            self.scope, "computer_control",
+            "status=done action=computer_control verified=true expected=Privacy_panel",
+        ))
+        completed = self.complete(mission_id, "S01")
+        self.assertIn("[MISSION_COMPLETE]", completed)
+        saved = mission_control._read()["missions"][0]["steps"][0]
+        self.assertEqual(saved["status"], "done")
+        self.assertEqual(saved["verified_tool"], "computer_control")
+
+
+    def test_visual_mission_replan_refuses_if_foreground_app_changed(self):
+        previous_result = {
+            "status": "failed",
+            "step": {
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                    "target_window_handle": 7,
+                    "target_process_id": 55,
+                },
+            },
+        }
+        snapshot = {
+            "handle": 9,
+            "process_id": 99,
+            "process_name": "notepad.exe",
+            "bounds": (10, 10, 500, 500),
+            "records": [],
+            "clickables": [],
+        }
+        with patch("actions.ui_interaction.focus_window_identity", return_value=snapshot), \
+             patch("core.ui_reasoning.replan_ui_task") as replan:
+            result = mission_control._fresh_ui_plan(
+                'Click the gear icon and verify "Privacy panel"',
+                previous_result,
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(
+            result["reason"],
+            "the original target window or process changed; visual replan refused",
+        )
+        replan.assert_not_called()
+
+
+    def test_visual_ui_plan_without_exact_window_ids_is_blocked(self):
+        snapshot = {
+            "handle": 7,
+            "process_id": 55,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [],
+            "clickables": [],
+        }
+        proposed = {
+            "status": "planned",
+            "steps": [{
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                },
+                "risk": "low",
+                "requires_confirmation": False,
+            }],
+        }
+        with patch("actions.ui_interaction._snapshot", return_value=snapshot), \
+             patch("core.ui_reasoning.plan_ui_task", return_value=proposed):
+            result = mission_control._fresh_ui_plan(
+                'Click the gear icon and verify "Privacy panel"',
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("unsupported UI action shape", result["reason"])
+        self.assertEqual(result["steps"], [])
+
+
+    def test_visual_mission_replan_restores_exact_hwnd_before_using_fresh_snapshot(self):
+        previous_result = {
+            "status": "failed",
+            "step": {
+                "tool": "computer_control",
+                "parameters": {
+                    "action": "screen_click_verified",
+                    "description": "gear icon",
+                    "expected_result": "Privacy panel",
+                    "target_app": "settings.exe",
+                    "target_window_handle": 7,
+                    "target_process_id": 55,
+                },
+            },
+        }
+        restored_snapshot = {
+            "handle": 7,
+            "process_id": 55,
+            "process_name": "settings.exe",
+            "bounds": (10, 20, 810, 620),
+            "records": [],
+            "clickables": [],
+        }
+        proposed = {"status": "blocked", "reason": "no alternative", "steps": []}
+        with patch(
+            "actions.ui_interaction.focus_window_identity",
+            return_value=restored_snapshot,
+        ) as restore, patch(
+            "core.ui_reasoning.replan_ui_task",
+            return_value=proposed,
+        ) as replan:
+            result = mission_control._fresh_ui_plan(
+                'Click the gear icon and verify "Privacy panel"',
+                previous_result,
+            )
+        restore.assert_called_once_with(7, 55)
+        replan.assert_called_once_with(
+            'Click the gear icon and verify "Privacy panel"',
+            restored_snapshot,
+            previous_result,
+        )
+        self.assertEqual(result, proposed)
+
+
+class MissionControlProactiveContextTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.store = Path(self.temp_dir.name) / "missions.json"
+        self.path_patch = patch.object(mission_control, "_DATA_PATH", self.store)
+        self.path_patch.start()
+
+    def tearDown(self):
+        self.path_patch.stop()
+        self.temp_dir.cleanup()
+
+    def _plan(self, title, step):
+        result = mission_control.run({
+            "action": "plan",
+            "title": title,
+            "goal": "Complete the requested local task",
+            "steps": step,
+        })
+        return result.split("MISSION ", 1)[1].split(":", 1)[0]
+
+    def test_context_includes_only_authorized_active_mission_and_does_not_mutate_it(self):
+        planned_id = self._plan("Plan only", "Do not run this step")
+        self.assertEqual(mission_control.proactive_context(), "")
+
+        active_id = self._plan("Desktop assistant", "Open the project dashboard")
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Run the desktop assistant mission")
+        started = mission_control.run({
+            "action": "start", "mission_id": active_id,
+        }, session_memory=scope)
+        self.assertIn("[MISSION_CONTINUE]", started)
+
+        before = mission_control._read()
+        context = mission_control.proactive_context()
+        after = mission_control._read()
+
+        self.assertIn("Desktop assistant", context)
+        self.assertIn("Open the project dashboard", context)
+        self.assertIn(active_id, context)
+        self.assertNotIn(planned_id, context)
+        self.assertIn("UNTRUSTED LOCAL DATA", context)
+        self.assertEqual(before, after, "proactive context must be read-only")
+
+    def test_paused_and_completed_missions_are_not_in_proactive_context(self):
+        mission_id = self._plan("Paused mission", "Continue later")
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Run the mission")
+        mission_control.run({
+            "action": "start", "mission_id": mission_id,
+        }, session_memory=scope)
+        mission_control.run({"action": "pause", "mission_id": mission_id})
+        self.assertEqual(mission_control.proactive_context(), "")
+
+    def test_disabled_plugin_does_not_inject_startup_recovery_context(self):
+        mission_id = self._plan("Recovery mission", "Inspect the project window")
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Run the recovery mission")
+        mission_control.run({
+            "action": "start", "mission_id": mission_id,
+        }, session_memory=scope)
+        with patch("memory.config_manager.get_plugin_enabled", return_value=False):
+            self.assertEqual(mission_control.startup_recovery_context(), "")
+
+    def test_disabled_plugin_does_not_publish_its_mission_context(self):
+        mission_id = self._plan("Private mission", "Review the local project")
+        from core.autonomy_policy import new_turn_authorization
+        scope = new_turn_authorization("Run the mission")
+        mission_control.run({
+            "action": "start", "mission_id": mission_id,
+        }, session_memory=scope)
+        with patch("memory.config_manager.get_plugin_enabled", return_value=False):
+            self.assertEqual(mission_control.proactive_context(), "")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

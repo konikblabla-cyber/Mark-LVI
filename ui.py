@@ -50,7 +50,7 @@ except Exception as _e:            # noqa: BLE001 - reported, never fatal
     print(f"[Video] playback unavailable ({_e}) — the HUD will not show video.")
 
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
     QMainWindow, QPushButton, QScrollArea, QSizePolicy, QSplitter,
     QGraphicsScene, QGraphicsView,
     QStackedWidget, QTextEdit, QVBoxLayout, QWidget, QProgressBar, QSlider,
@@ -528,6 +528,10 @@ class HudCanvas(QWidget):
             self._vis_i = None
         except Exception:
             pass
+
+    def refresh_in_call_addressing_btn(self) -> None:
+        """Refresh microphone privacy state through Qt's owning event loop."""
+        self._win._wake_btns_sig.emit()
 
     def set_audio_level(self, level: float) -> None:
         """Thread-safe entry point for the audio threads. Stores the louder of
@@ -1374,73 +1378,6 @@ class _DropCanvas(QWidget):
             z.mousePressEvent(e)
 
 
-class _CameraPreview(QWidget):
-    """Floating overlay that briefly shows what the camera captured."""
-
-    _W, _H = 244, 188
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(f"""
-            _CameraPreview {{
-                background: rgba(0, 6, 10, 242);
-                border: 1px solid {C.PRI};
-                border-radius: 6px;
-            }}
-        """)
-        self.setFixedWidth(self._W)
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(6, 5, 6, 6)
-        lay.setSpacing(4)
-
-        hdr = QHBoxLayout()
-        title = QLabel("◈  VISUAL INPUT")
-        title.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        hdr.addWidget(title)
-        hdr.addStretch()
-        close_btn = QPushButton("✕")
-        close_btn.setFixedSize(16, 16)
-        close_btn.setFont(QFont("Courier New", 8))
-        close_btn.setStyleSheet(
-            f"color: {C.TEXT_DIM}; background: transparent; border: none;"
-        )
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.clicked.connect(self.hide)
-        hdr.addWidget(close_btn)
-        lay.addLayout(hdr)
-
-        self._img_lbl = QLabel()
-        self._img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img_lbl.setStyleSheet("background: transparent;")
-        lay.addWidget(self._img_lbl)
-
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.hide)
-
-        self.hide()
-
-    def show_frame(self, img_bytes: bytes) -> None:
-        px = QPixmap()
-        px.loadFromData(img_bytes)
-        if not px.isNull():
-            max_w = self._W - 12
-            scaled = px.scaled(
-                max_w, 160,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._img_lbl.setPixmap(scaled)
-            self._img_lbl.setFixedSize(scaled.width(), scaled.height())
-            self.adjustSize()
-        self.show()
-        self.raise_()
-        self._timer.start(6_000)   # auto-dismiss after 6 s
-
-
 class SetupOverlay(QWidget):
     done = pyqtSignal(str, str)
 
@@ -2056,10 +1993,21 @@ class ConfirmBanner(_HudOverlay):
         lay.addWidget(ttl)
 
         if detail:
-            dtl = QLabel(detail)
-            dtl.setWordWrap(True)
+            # Confirmation details can include a complete email body or a
+            # multi-field calendar event. A wrapped QLabel grew without bound
+            # and could push the CONFIRM/CANCEL buttons below the visible HUD.
+            # Keep the whole text inspectable in a bounded, read-only viewport.
+            dtl = QTextEdit()
+            dtl.setReadOnly(True)
+            dtl.setAcceptRichText(False)
+            dtl.setPlainText(detail)
             dtl.setFont(QFont("Courier New", 8))
-            dtl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+            dtl.setMinimumHeight(112)
+            dtl.setMaximumHeight(220)
+            dtl.setStyleSheet(
+                f"QTextEdit {{ color: {C.TEXT_MED}; background: transparent; "
+                "border: none; padding: 0; }}"
+            )
             lay.addWidget(dtl)
 
         row = QHBoxLayout(); row.setSpacing(8)
@@ -2100,8 +2048,8 @@ class AudioDeviceOverlay(_HudOverlay):
 
     Both audio streams used to open with no `device=` at all, so they always
     took the OS default — which on Windows moves by itself the moment a headset
-    is plugged in. 'JARVIS can't hear me' is usually 'JARVIS is listening to the
-    webcam'."""
+    is plugged in. 'JARVIS can't hear me' is usually a wrong or disconnected
+    default audio endpoint."""
 
     picked = pyqtSignal()      # emitted after Apply, when something changed
 
@@ -3476,11 +3424,20 @@ class ProvidersOverlay(_HudOverlay):
         lay.addWidget(self._router_enabled_combo)
 
         lay.addWidget(self._label(
-            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash, and verified private local endpoints. "
-            "Groq GPT-OSS-120B is metered and blocked; other paid/custom cloud models are blocked too. "
-            "Gemma screenshots and prompts are sent to Google; its free-tier content may be used to improve products. "
-            "Remove payment methods and auto-top-ups at providers.",
+            "Hard $0 allowlist: Google Gemma 4 26B A4B, Z.AI GLM-4.7-Flash and verified private local endpoints. "
+            "Gemma image requests go to Google; its free-tier data policy applies. "
+            "Groq is separate: metered, disabled by default and never used for the voice conversation.",
             7, C.ACC))
+        self._groq_enabled_combo = self._combo()
+        self._groq_enabled_combo.addItem("Groq OFF — do not send MARK requests there", False)
+        self._groq_enabled_combo.addItem("Groq ON — coding tasks only, with local daily caps", True)
+        self._groq_enabled_combo.setCurrentIndex(1 if cfg.get("groq_enabled") else 0)
+        lay.addWidget(self._groq_enabled_combo)
+        lay.addWidget(self._label(
+            "Groq is allowed only when selected under CODING (not BACKGROUND REQUESTS or ② THINKING). "
+            "MARK hard stop: 3 calls/day, 8,000 input characters per request, 20,000 input characters/day, "
+            "1,024 output tokens/request. A 429 is not retried against Groq. These local limits do not cover other apps using the same Groq key.",
+            7, C.TEXT_DIM))
         self._router_free_combo = self._combo()
         self._router_free_combo.addItem("Not verified — router stays blocked", False)
         self._router_free_combo.addItem("Verified: $0 plan, no payment method, no auto top-up", True)
@@ -3825,6 +3782,7 @@ class ProvidersOverlay(_HudOverlay):
             router_values = {
                 "enabled": router_enabled,
                 "zero_cost_confirmed": zero_cost_confirmed,
+                "groq_enabled": bool(self._groq_enabled_combo.currentData()),
                 "gemma_model": self._gemma_model_edit.text().strip() or "gemma-4-26b-a4b-it",
                 "daily_calls": int(self._router_calls_edit.text().strip()),
                 "daily_input_chars": int(self._router_chars_edit.text().strip()),
@@ -4282,7 +4240,7 @@ class RemoteKeyOverlay(QWidget):
 
         self._update_qr(auto_login_url)
 
-        lay.addWidget(_lbl("Scan with phone camera to connect instantly", 8, color=C.TEXT_DIM))
+        lay.addWidget(_lbl("Open this QR code on your phone to connect instantly", 8, color=C.TEXT_DIM))
 
         # THE ONE FAILURE THAT LOOKS LIKE THE SERVER BEING OFF.
         #
@@ -4493,9 +4451,6 @@ class MainWindow(QMainWindow):
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
     _codejob_sig    = pyqtSignal(object)     # dev_agent job state — live coding panel
     _reconfig_sig   = pyqtSignal()           # trigger setup overlay from any thread
-    _camera_sig     = pyqtSignal(bytes)      # show camera frame preview (small overlay)
-    _cam_stream_sig = pyqtSignal(bool)       # True=start live stream, False=stop
-    _cam_frame_sig  = pyqtSignal(bytes)      # live camera frame → HUD area
     _video_open_sig  = pyqtSignal(str, str, bool, str)  # video, title, muted, audio
     _wake_btns_sig   = pyqtSignal()          # wake state resolved off-thread
     _video_close_sig = pyqtSignal()
@@ -4542,6 +4497,7 @@ class MainWindow(QMainWindow):
         self.get_plugins       = None   # callable: () -> list[dict], set by JarvisLive
         self.get_plugin_settings = None # callable: () -> list[dict] settings schemas, set by JarvisLive
         self.on_wake_toggle    = None   # callable: (enable: bool) -> str, set by JarvisLive
+        self.on_in_call_addressing_change = None  # callable: (enabled: bool) -> None
         self.on_wake_manual    = None   # callable: () -> None — manual sleep/wake
         self.on_push_to_talk   = None   # callable: (enable: bool) -> str scope
         self.ptt_hold          = None   # callable: (held: bool) -> None — windowed chord
@@ -4573,46 +4529,7 @@ class MainWindow(QMainWindow):
         self._content_panel = self._build_content_panel()
         self._quiz_panel = self._build_quiz_panel()
 
-        # Live camera container — replaces HUD when camera stream is active
-        _cam_cont = QWidget()
-        _cam_cont.setStyleSheet("background: #000308;")
-        _cam_v = QVBoxLayout(_cam_cont)
-        _cam_v.setContentsMargins(0, 0, 0, 0)
-        _cam_v.setSpacing(0)
-        _cam_hdr = QHBoxLayout()
-        _cam_hdr.setContentsMargins(8, 5, 8, 5)
-        _cam_title = QLabel("◈  CAMERA FEED")
-        _cam_title.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        _cam_title.setStyleSheet(f"color: {C.PRI}; background: transparent;")
-        _cam_hdr.addWidget(_cam_title)
-        _cam_hdr.addStretch()
-        _cam_x = QPushButton("✕  CLOSE")
-        _cam_x.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        _cam_x.setCursor(Qt.CursorShape.PointingHandCursor)
-        _cam_x.setStyleSheet(f"""
-            QPushButton {{
-                color: {C.TEXT_DIM}; background: transparent;
-                border: none; padding: 2px 6px;
-            }}
-            QPushButton:hover {{ color: {C.PRI}; }}
-        """)
-        _cam_x.clicked.connect(self.stop_camera_stream)
-        _cam_hdr.addWidget(_cam_x)
-        _cam_v.addLayout(_cam_hdr)
-        self._cam_live_lbl = QLabel()
-        self._cam_live_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._cam_live_lbl.setStyleSheet("background: transparent;")
-        self._cam_live_lbl.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        _cam_v.addWidget(self._cam_live_lbl, stretch=1)
-
         # ── Video surface ────────────────────────────────────────────────
-        # Built exactly like the camera page above and stacked beside it,
-        # because it is the same idea: something takes the centre of the HUD
-        # for a while and then gives it back. Sharing the stack rather than
-        # inventing a second mechanism means the avatar, the camera and a video
-        # can never be on screen at once.
         self._video_split = False        # is the sound a separate stream?
         self._video_auto_muted = False   # did JARVIS close the mic, or the user?
         # A plain flag rather than reading the widget. video_is_playing() is
@@ -4724,11 +4641,9 @@ class MainWindow(QMainWindow):
             _miss.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent;")
             _vid_v.addWidget(_miss, stretch=1)
 
-        # Stack: 0 = animated HUD, 1 = live camera, 2 = video
-        self._hud_cam_stack = QStackedWidget()
-        self._hud_cam_stack.addWidget(self.hud)
-        self._hud_cam_stack.addWidget(_cam_cont)
-        self._hud_cam_stack.addWidget(self._video_cont)
+        self._hud_stack = QStackedWidget()
+        self._hud_stack.addWidget(self.hud)
+        self._hud_stack.addWidget(self._video_cont)
 
         self._center_split = QSplitter(Qt.Orientation.Vertical)
         self._center_split.setStyleSheet(f"""
@@ -4740,7 +4655,7 @@ class MainWindow(QMainWindow):
                 background: {C.PRI_DIM};
             }}
         """)
-        self._center_split.addWidget(self._hud_cam_stack)
+        self._center_split.addWidget(self._hud_stack)
         self._center_split.addWidget(self._content_panel)
         self._center_split.addWidget(self._quiz_panel)
         self._center_split.setStretchFactor(0, 3)
@@ -4778,11 +4693,8 @@ class MainWindow(QMainWindow):
         self._content_sig.connect(self._show_content)
         self._codejob_sig.connect(self._show_code_job)
         self._reconfig_sig.connect(self._show_setup)
-        self._camera_sig.connect(self._show_camera_frame)
         self._confirm_sig.connect(self._show_confirm_banner)
         self._confirm_hide_sig.connect(self._hide_confirm_banner)
-        self._cam_stream_sig.connect(self._on_cam_stream)
-        self._cam_frame_sig.connect(self._on_cam_frame)
         self._wake_btns_sig.connect(self._refresh_wake_btns)
         self._video_open_sig.connect(self._on_video_open)
         self._video_close_sig.connect(self._on_video_close)
@@ -4792,10 +4704,6 @@ class MainWindow(QMainWindow):
         self._quiz_sig.connect(self._show_quiz)
         self._quiz_hide_sig.connect(self._hide_quiz)
         self._review_sig.connect(self._show_review)
-        self._cam_stop = threading.Event()
-
-        # Camera preview overlay (child of central widget, positioned in resizeEvent)
-        self._cam_preview = _CameraPreview(self.centralWidget())
 
         # Clipboard panel (child of central widget, bottom-center)
         self._clipboard_panel = ClipboardPanel(self.centralWidget())
@@ -4814,81 +4722,6 @@ class MainWindow(QMainWindow):
         sc_intr = QShortcut(QKeySequence("Escape"), self)
         sc_intr.activated.connect(self._do_interrupt)
 
-    def _show_camera_frame(self, img_bytes: bytes):
-        """Slot — display camera preview overlay (main thread)."""
-        self._cam_preview.show_frame(img_bytes)
-        cw = self.centralWidget()
-        pw = _CameraPreview._W
-        ph = self._cam_preview.height()
-        self._cam_preview.setGeometry(
-            cw.width() - _RIGHT_W - pw - 12,
-            cw.height() - ph - 28,
-            pw, ph,
-        )
-
-    # --- Live camera stream in HUD area ------------------------------------
-    def _on_cam_stream(self, start: bool) -> None:
-        if start:
-            self._hud_cam_stack.setCurrentIndex(1)
-        else:
-            self._hud_cam_stack.setCurrentIndex(0)
-            self._cam_live_lbl.clear()
-
-    def _on_cam_frame(self, data: bytes) -> None:
-        px = QPixmap()
-        px.loadFromData(data)
-        if not px.isNull():
-            w, h = self._cam_live_lbl.width(), self._cam_live_lbl.height()
-            if w > 1 and h > 1:
-                self._cam_live_lbl.setPixmap(
-                    px.scaled(w, h,
-                              Qt.AspectRatioMode.KeepAspectRatio,
-                              Qt.TransformationMode.SmoothTransformation)
-                )
-
-    def start_camera_stream(self) -> None:
-        self._cam_stop.clear()
-        self._cam_stream_sig.emit(True)
-        t = threading.Thread(target=self._cam_loop, daemon=True, name="cam-stream")
-        t.start()
-
-    def _cam_loop(self) -> None:
-        try:
-            import cv2
-            # Reuse camera index detected by screen_processor (cached in api_keys.json)
-            cam_idx = 0
-            try:
-                import json as _j
-                cfg = _j.loads((CONFIG_DIR / "api_keys.json").read_text())
-                cam_idx = int(cfg.get("camera_index", 0))
-            except Exception:
-                pass
-            try:
-                backend = cv2.CAP_DSHOW if _OS == "Windows" else cv2.CAP_ANY
-            except AttributeError:
-                backend = 0
-            cap = cv2.VideoCapture(cam_idx, backend)
-            if not cap.isOpened():
-                cap = cv2.VideoCapture(0)
-            if not cap.isOpened():
-                return
-            # warm-up frames
-            for _ in range(5):
-                cap.read()
-            while not self._cam_stop.wait(0.033) and cap.isOpened():
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
-                    self._cam_frame_sig.emit(buf.tobytes())
-            cap.release()
-        except Exception as e:
-            print(f"[Camera] Stream error: {e}")
-        finally:
-            self._cam_stream_sig.emit(False)
-
-    def stop_camera_stream(self) -> None:
-        self._cam_stop.set()
-
     # --- Video in the HUD area ---------------------------------------------
     #
     # Everything below runs on the Qt thread. Plugins and the assistant reach it
@@ -4900,8 +4733,6 @@ class MainWindow(QMainWindow):
             self.write_log("SYS: Video playback is not available in this Qt "
                            "install.")
             return
-        # A video and the live camera cannot share the centre of the HUD.
-        self._cam_stop.set()
 
         self._video_title.setText(f"▶  {(title or 'VIDEO')[:44].upper()}")
         self._video_split = bool(audio_source)
@@ -4912,7 +4743,7 @@ class MainWindow(QMainWindow):
         self._video_player.setSource(url)
         if self._video_split:
             self._video_sound.setSource(QUrl(audio_source))
-        self._hud_cam_stack.setCurrentIndex(2)
+        self._hud_stack.setCurrentIndex(1)
         self._video_on = True
         # Re-run now that the video counts as playing: _set_video_muted ran
         # before this line and saw no video, so its mic check was a no-op.
@@ -4949,7 +4780,7 @@ class MainWindow(QMainWindow):
                 p.setSource(QUrl())
         self._video_split = False
         self._video_on = False
-        self._hud_cam_stack.setCurrentIndex(0)
+        self._hud_stack.setCurrentIndex(0)
         self._sync_mic_for_video()      # gives the microphone back
 
     def _set_video_muted(self, muted: bool) -> None:
@@ -5412,14 +5243,6 @@ class MainWindow(QMainWindow):
                 (cw.height() - oh) // 2,
                 ow, oh,
             )
-        # Camera preview — bottom-right corner of the center/HUD area
-        pw = _CameraPreview._W
-        ph = self._cam_preview.height() or _CameraPreview._H
-        self._cam_preview.setGeometry(
-            cw.width() - _RIGHT_W - pw - 12,
-            cw.height() - ph - 28,
-            pw, ph,
-        )
         # Clipboard panel — bottom-center
         if hasattr(self, '_clipboard_panel') and self._clipboard_panel.isVisible():
             self._position_clipboard_panel()
@@ -5865,8 +5688,11 @@ class MainWindow(QMainWindow):
         self._wake_btn.clicked.connect(self._toggle_wake_word)
         self._wake_sleep_btn = _row(QPushButton())
         self._wake_sleep_btn.clicked.connect(self._tap_wake_manual)
+        self._in_call_addressing_btn = _row(QPushButton())
+        self._in_call_addressing_btn.clicked.connect(self._toggle_in_call_addressing)
+        self._refresh_in_call_addressing_btn()
         # Neutral until the real state lands from the background warm-up.
-        self._wake_btn.setText("🎙  WAKE WORD")
+        self._wake_btn.setText("◈  ADDRESS-AWARE")
         self._wake_btn.setStyleSheet(self._BTN_DIM)
         self._wake_sleep_btn.hide()
 
@@ -6745,8 +6571,9 @@ class MainWindow(QMainWindow):
         ready, enabled = False, False
         try:
             from core.wake_word import is_ready
-            from memory.config_manager import get_wake_word_enabled
-            ready, enabled = is_ready(), get_wake_word_enabled()
+            from memory.config_manager import get_wake_word_enabled, get_proactive_audio_enabled
+            ready = is_ready()
+            enabled = bool(get_wake_word_enabled() and not get_proactive_audio_enabled())
         except Exception:
             pass
         return {"ready": ready, "enabled": enabled, "awake": True}
@@ -6766,20 +6593,127 @@ class MainWindow(QMainWindow):
                 text-align: left; padding: 0 8px; }}
             QPushButton:hover {{ color: {C.TEXT}; border: 1px solid {C.BORDER_B}; }}"""
         self._wake_btn.setEnabled(True)
-        if not st["ready"]:
-            self._wake_btn.setText("⬇  WAKE WORD: DOWNLOAD")
-            self._wake_btn.setStyleSheet(_off)
-            self._wake_sleep_btn.hide()
-        elif st["enabled"]:
-            self._wake_btn.setText("🎙  WAKE WORD: ON")
+        if st["enabled"]:
+            self._wake_btn.setText("🔒  LOCAL PRIVACY: ON")
             self._wake_btn.setStyleSheet(_on)
+            self._wake_btn.setToolTip(
+                "Local privacy mode: idle microphone audio stays on this PC. "
+                "Use one of the local wake phrases or Push-to-Talk to open a request."
+            )
             self._wake_sleep_btn.show()
             self._wake_sleep_btn.setText("😴  SLEEP NOW" if st["awake"] else "👂  WAKE NOW")
             self._wake_sleep_btn.setStyleSheet(_off)
         else:
-            self._wake_btn.setText("🎙  WAKE WORD: OFF")
-            self._wake_btn.setStyleSheet(_off)
+            self._wake_btn.setText("◈  ADDRESS-AWARE: ON")
+            self._wake_btn.setStyleSheet(_on)
+            self._wake_btn.setToolTip(
+                "No wake phrase required. With Gemini Live, microphone audio is streamed while connected "
+                "and Proactive Audio decides whether speech is directed to MARK. "
+                "Other engines need LOCAL PRIVACY or Push-to-Talk. Click to switch to local-only wake mode."
+            )
             self._wake_sleep_btn.hide()
+        if hasattr(self, "_in_call_addressing_btn"):
+            self._refresh_in_call_addressing_btn()
+
+    def _refresh_in_call_addressing_btn(self):
+        from memory.config_manager import (
+            get_in_call_addressing_enabled, get_proactive_audio_enabled,
+        )
+        enabled = get_in_call_addressing_enabled()
+        address_aware = get_proactive_audio_enabled()
+        paused = enabled and not address_aware
+        style_on = (
+            f"QPushButton {{ background: #001a08; color: {C.GREEN}; "
+            f"border: 1px solid {C.GREEN_D}; border-radius: 3px; text-align: left; padding: 0 8px; }}"
+        )
+        style_off = (
+            f"QPushButton {{ background: transparent; color: {C.TEXT_DIM}; "
+            f"border: 1px solid {C.BORDER}; border-radius: 3px; text-align: left; padding: 0 8px; }}"
+        )
+        if paused:
+            self._in_call_addressing_btn.setText("🔒  IN-CALL ADDRESSING: PAUSED")
+            self._in_call_addressing_btn.setStyleSheet(style_off)
+            self._in_call_addressing_btn.setToolTip(
+                "Saved as ON, but paused because LOCAL PRIVACY is active. "
+                "PC microphone audio remains local until ADDRESS-AWARE mode is restored."
+            )
+        elif enabled:
+            self._in_call_addressing_btn.setText("◈  IN-CALL ADDRESSING: ON")
+            self._in_call_addressing_btn.setStyleSheet(style_on)
+            self._in_call_addressing_btn.setToolTip(
+                "During detected calls, PC microphone audio is sent to Gemini. "
+                "This may include other participants' voices. Gemini Proactive Audio "
+                "decides whether speech is addressed to MARK."
+            )
+        else:
+            self._in_call_addressing_btn.setText("◈  IN-CALL ADDRESSING: OFF")
+            self._in_call_addressing_btn.setStyleSheet(style_off)
+            self._in_call_addressing_btn.setToolTip(
+                "OFF: call audio stays on this PC. Turn ON to let Gemini hear the PC "
+                "microphone during detected calls and decide whether you are addressing MARK. "
+                "Other participants' voices may also be heard."
+            )
+
+    def _toggle_in_call_addressing(self):
+        from memory.config_manager import (
+            get_in_call_addressing_enabled, get_proactive_audio_enabled,
+            save_in_call_addressing_enabled,
+        )
+        want = not get_in_call_addressing_enabled()
+        if want:
+            if not get_proactive_audio_enabled():
+                QMessageBox.information(
+                    self,
+                    "IN-CALL ADDRESSING UNAVAILABLE",
+                    "Switch from LOCAL PRIVACY to ADDRESS-AWARE mode first. "
+                    "In-call semantic routing requires Gemini Proactive Audio.",
+                )
+                return
+            answer = QMessageBox.question(
+                self,
+                "ENABLE IN-CALL ADDRESSING?",
+                "While Discord, Teams, Zoom or another call is active, audio from "
+                "this PC microphone will be sent to Google's Gemini service. "
+                "This can include other participants' voices and room audio. "
+                "Gemini Proactive Audio will decide whether speech is directed to MARK; "
+                "this is cloud processing, not local-only privacy. Enable it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            save_in_call_addressing_enabled(want)
+            if self.on_in_call_addressing_change:
+                applied = self.on_in_call_addressing_change(want)
+                if want and applied is False:
+                    save_in_call_addressing_enabled(False)
+                    QMessageBox.information(
+                        self,
+                        "IN-CALL ADDRESSING UNAVAILABLE",
+                        "The active engine cannot provide Gemini Live Proactive Audio. "
+                        "The setting remains OFF and microphone privacy is unchanged.",
+                    )
+                    self._refresh_in_call_addressing_btn()
+                    return
+            elif want:
+                save_in_call_addressing_enabled(False)
+                QMessageBox.warning(
+                    self,
+                    "IN-CALL ADDRESSING",
+                    "The live microphone controller is not ready. The setting remains OFF.",
+                )
+                self._refresh_in_call_addressing_btn()
+                return
+        except Exception as exc:
+            if want:
+                save_in_call_addressing_enabled(False)
+            QMessageBox.warning(
+                self,
+                "IN-CALL ADDRESSING",
+                f"The setting could not be applied: {type(exc).__name__}.",
+            )
+        self._refresh_in_call_addressing_btn()
 
     def _refresh_talk_btns(self):
         """Repaint the push-to-talk row from the saved setting."""
@@ -6937,7 +6871,7 @@ class MainWindow(QMainWindow):
         st = self._wake_state()
         if not st["ready"]:
             # First time: download openwakeword + model in a worker thread.
-            self._wake_btn.setText("⬇  DOWNLOADING… (one-time)")
+            self._wake_btn.setText("⬇  INSTALLING LOCAL PRIVACY…")
             self._wake_btn.setEnabled(False)
             def _work():
                 try:
@@ -6948,18 +6882,35 @@ class MainWindow(QMainWindow):
                     ok, msg = False, str(e)
                 if ok and self.on_wake_toggle:
                     try:
-                        self.on_wake_toggle(True)   # auto-enable after a successful download
-                    except Exception:
-                        pass
+                        result = self.on_wake_toggle(True)  # enable after the model download
+                        if result == "unavailable":
+                            ok = False
+                            msg = (
+                                "The wake models downloaded, but the local detector "
+                                "could not start. ADDRESS-AWARE mode remains enabled."
+                            )
+                    except Exception as exc:
+                        ok = False
+                        msg = f"The wake models downloaded, but LOCAL PRIVACY could not start: {type(exc).__name__}."
                 self._wake_dl_sig.emit(ok, msg)
             threading.Thread(target=_work, daemon=True).start()
             return
         # Already downloaded → just flip enabled/disabled through JarvisLive.
         if self.on_wake_toggle:
             try:
-                self.on_wake_toggle(not st["enabled"])
-            except Exception:
-                pass
+                result = self.on_wake_toggle(not st["enabled"])
+                if result == "unavailable":
+                    self._log_sig.emit(
+                        "SYS: LOCAL PRIVACY could not start. Check the wake detector error above."
+                    )
+                elif result == "need_download":
+                    self._log_sig.emit(
+                        "SYS: LOCAL PRIVACY models are missing. Click again to install them."
+                    )
+            except Exception as exc:
+                self._log_sig.emit(
+                    f"SYS: Could not change listening mode: {type(exc).__name__}."
+                )
         self._refresh_wake_btns()
 
     def _on_wake_install_done(self, ok: bool, msg: str):
@@ -7470,6 +7421,14 @@ class JarvisUI:
         self._win.on_wake_toggle = cb
 
     @property
+    def on_in_call_addressing_change(self):
+        return self._win.on_in_call_addressing_change
+
+    @on_in_call_addressing_change.setter
+    def on_in_call_addressing_change(self, cb):
+        self._win.on_in_call_addressing_change = cb
+
+    @property
     def on_wake_manual(self):
         return self._win.on_wake_manual
 
@@ -7588,10 +7547,6 @@ class JarvisUI:
         self._win._ready = False
         self._win._reconfig_sig.emit()
 
-    def show_camera_frame(self, img_bytes: bytes):
-        """Thread-safe: show a webcam frame in the small overlay (screen captures)."""
-        self._win._camera_sig.emit(img_bytes)
-
     def show_video(self, source: str, title: str = "", muted: bool = True,
                    audio_source: str = "") -> None:
         """Thread-safe: play a video where the avatar normally is.
@@ -7619,14 +7574,6 @@ class JarvisUI:
 
     def video_is_playing(self) -> bool:
         return bool(self._win.video_is_playing())
-
-    def start_camera_stream(self) -> None:
-        """Thread-safe: start live camera feed in the full HUD area."""
-        self._win.start_camera_stream()
-
-    def stop_camera_stream(self) -> None:
-        """Thread-safe: stop the live camera feed."""
-        self._win.stop_camera_stream()
 
     @property
     def assistant_name(self) -> str:

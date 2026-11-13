@@ -10,10 +10,89 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from core import model_router as router
 from core import gemini
+
+
+class LiveCallLifecycleTests(unittest.TestCase):
+    def test_concurrency_slot_is_released_after_worker_finishes(self):
+        slots = gemini.threading.BoundedSemaphore(1)
+
+        class InlineThread:
+            def __init__(self, target, **_kwargs):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+            def join(self, timeout=None):
+                return None
+
+            def is_alive(self):
+                return False
+
+        with patch.object(gemini, "_LIVE_SLOTS", slots), \
+             patch.object(gemini.threading, "Thread", InlineThread), \
+             patch.object(gemini, "_live_turn", new=AsyncMock(return_value="ok")):
+            reply = gemini._live_call("hello", None, 10_000, "test-key")
+
+        self.assertEqual(reply.text, "ok")
+        self.assertTrue(slots.acquire(blocking=False))
+        slots.release()
+
+    def test_join_timeout_keeps_slot_until_background_worker_cleans_up(self):
+        slots = gemini.threading.BoundedSemaphore(1)
+        workers = []
+
+        class DeferredThread:
+            def __init__(self, target, **_kwargs):
+                self.target = target
+                self.finished = False
+                workers.append(self)
+
+            def start(self):
+                return None
+
+            def join(self, timeout=None):
+                return None
+
+            def is_alive(self):
+                return not self.finished
+
+            def finish(self):
+                self.target()
+                self.finished = True
+
+        with patch.object(gemini, "_LIVE_SLOTS", slots), \
+             patch.object(gemini.threading, "Thread", DeferredThread), \
+             patch.object(gemini, "_live_turn", new=AsyncMock(return_value="ok")):
+            with self.assertRaises(TimeoutError):
+                gemini._live_call("hello", None, 10_000, "test-key")
+
+            self.assertFalse(slots.acquire(blocking=False))
+            workers[0].finish()
+            self.assertTrue(slots.acquire(blocking=False))
+            slots.release()
+
+    def test_thread_start_failure_releases_reserved_slot(self):
+        slots = gemini.threading.BoundedSemaphore(1)
+
+        class FailedThread:
+            def __init__(self, target, **_kwargs):
+                self.target = target
+
+            def start(self):
+                raise RuntimeError("thread could not start")
+
+        with patch.object(gemini, "_LIVE_SLOTS", slots), \
+             patch.object(gemini.threading, "Thread", FailedThread):
+            with self.assertRaisesRegex(RuntimeError, "could not start"):
+                gemini._live_call("hello", None, 10_000, "test-key")
+
+        self.assertTrue(slots.acquire(blocking=False))
+        slots.release()
 
 
 class RouterClassificationTests(unittest.TestCase):
@@ -99,6 +178,33 @@ class RouterSafetyTests(unittest.TestCase):
             with self.assertRaises(router.RouterError):
                 router.dispatch("search the web", tier="search")
 
+    def test_groq_is_not_used_for_general_reasoning(self):
+        settings = {"enabled": True, "zero_cost_confirmed": True, "groq_enabled": True,
+                    "gemma_vision": True}
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_provider_for", return_value="openai_compat@groq"), \
+             patch.object(router, "_is_groq_provider", return_value=True), \
+             patch.object(router, "_reserve") as reserve:
+            result = router.dispatch("Explain how this works", tier="smart")
+        self.assertIs(result, router.NOT_ROUTED)
+        reserve.assert_not_called()
+
+    def test_groq_is_allowed_for_coding_without_the_free_plan_ack(self):
+        settings = {"enabled": True, "zero_cost_confirmed": False, "groq_enabled": True,
+                    "gemma_vision": True, "second_opinion": False}
+        reply = router.RouterReply("generated code")
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_provider_for", return_value="openai_compat@groq"), \
+             patch.object(router, "_is_groq_provider", return_value=True), \
+             patch.object(router, "_assert_zero_cost_provider"), \
+             patch.object(router, "_reserve", return_value=25), \
+             patch.object(router, "_provider_call", return_value=reply) as provider_call, \
+             patch.object(router, "_audit"):
+            result = router.dispatch("Write Python code to parse JSON", tier="smart")
+        self.assertIs(result, reply)
+        self.assertEqual(provider_call.call_args.args[0], "openai_compat@groq")
+        self.assertEqual(provider_call.call_args.args[4], "coding")
+
     def test_enabled_router_uses_configured_fast_provider(self):
         settings = {
             "enabled": True, "zero_cost_confirmed": True,
@@ -177,16 +283,82 @@ class RouterSafetyTests(unittest.TestCase):
 
     def test_verified_free_zai_model_is_allowed(self):
         config = {"model": "glm-4.7-flash", "base_url": "https://api.z.ai/api/paas/v4"}
-        with patch("memory.config_manager.get_provider_config", return_value=config), \
+        with patch.object(router, "_settings", return_value={"zero_cost_confirmed": True}), \
+             patch("memory.config_manager.get_provider_config", return_value=config), \
              patch("providers.registry.catalog_entry", return_value={"id": "zai", "local": False}):
             router._assert_zero_cost_provider("openai_compat@zai")
 
-    def test_metered_groq_model_is_blocked(self):
-        config = {"model": "openai/gpt-oss-120b", "base_url": "https://api.groq.com/openai/v1"}
-        with patch("memory.config_manager.get_provider_config", return_value=config), \
+    def test_groq_is_blocked_by_default(self):
+        config = {"model": "openai/gpt-oss-120b", "base_url": "https://api.groq.com/openai/v1",
+                  "api_key": "test-key"}
+        with patch.object(router, "_settings", return_value={"groq_enabled": False}), \
+             patch("memory.config_manager.get_provider_config", return_value=config), \
+             patch("memory.config_manager.get_coding_provider", return_value="openai_compat@groq"), \
+             patch("memory.config_manager.get_sidecar_provider", return_value=""), \
+             patch("memory.config_manager.get_pipeline", return_value={}), \
              patch("providers.registry.catalog_entry", return_value={"id": "groq", "local": False}):
             with self.assertRaises(router.RouterError):
                 router._assert_zero_cost_provider("openai_compat@groq")
+
+    def test_groq_allowed_only_in_explicit_coding_slot(self):
+        config = {"model": "openai/gpt-oss-120b", "base_url": "https://api.groq.com/openai/v1",
+                  "api_key": "test-key"}
+        with patch.object(router, "_settings", return_value={"groq_enabled": True}), \
+             patch("memory.config_manager.get_provider_config", return_value=config), \
+             patch("memory.config_manager.get_coding_provider", return_value="openai_compat@groq"), \
+             patch("memory.config_manager.get_sidecar_provider", return_value=""), \
+             patch("memory.config_manager.get_pipeline", return_value={}), \
+             patch("providers.registry.catalog_entry", return_value={"id": "groq", "local": False}):
+            router._assert_zero_cost_provider("openai_compat@groq")
+
+    def test_groq_cannot_be_used_as_sidecar_or_conversation_engine(self):
+        config = {"model": "openai/gpt-oss-120b", "base_url": "https://api.groq.com/openai/v1",
+                  "api_key": "test-key"}
+        for sidecar, pipeline in (("openai_compat@groq", {}), ("", {"llm": "openai_compat@groq"})):
+            with patch.object(router, "_settings", return_value={"groq_enabled": True}), \
+                 patch("memory.config_manager.get_provider_config", return_value=config), \
+                 patch("memory.config_manager.get_coding_provider", return_value="openai_compat@groq"), \
+                 patch("memory.config_manager.get_sidecar_provider", return_value=sidecar), \
+                 patch("memory.config_manager.get_pipeline", return_value=pipeline), \
+                 patch("providers.registry.catalog_entry", return_value={"id": "groq", "local": False}):
+                with self.assertRaises(router.RouterError):
+                    router._assert_zero_cost_provider("openai_compat@groq")
+
+    def test_groq_local_budget_counts_calls_and_characters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            usage = Path(tmp) / "groq.json"
+            settings = {"groq_enabled": True, "groq_daily_calls": 1,
+                        "groq_daily_input_chars": 20, "groq_max_input_chars": 15}
+            with patch.object(router, "_groq_usage_path", return_value=usage), \
+                 patch.object(router, "_settings", return_value=settings), \
+                 patch.object(router, "_assert_zero_cost_provider"):
+                self.assertEqual(router.reserve_groq_request([
+                    {"role": "user", "content": "hello"}
+                ]), 5)
+                with self.assertRaises(router.RouterError):
+                    router.reserve_groq_request([{"role": "user", "content": "x"}])
+
+    def test_groq_local_budget_rejects_long_requests_and_images(self):
+        settings = {"groq_enabled": True, "groq_daily_calls": 3,
+                    "groq_daily_input_chars": 20000, "groq_max_input_chars": 5}
+        with patch.object(router, "_settings", return_value=settings), \
+             patch.object(router, "_assert_zero_cost_provider"):
+            with self.assertRaises(router.RouterError):
+                router.reserve_groq_request([{"role": "user", "content": "too long"}])
+            with self.assertRaises(router.RouterError):
+                router.reserve_groq_request([{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA=="}}
+                ]}])
+
+    def test_groq_chat_body_has_a_hard_output_token_cap(self):
+        from providers.llm_openai import OpenAICompatLLM
+        # Avoid importing optional httpx: _body only needs these four fields.
+        llm = object.__new__(OpenAICompatLLM)
+        llm.base = "https://api.groq.com/openai/v1"
+        llm.model = "openai/gpt-oss-120b"
+        llm.caps = {"tools": False}
+        body = llm._body([{"role": "user", "content": "hello"}], None, False, None)
+        self.assertEqual(body.get("max_completion_tokens"), 1024)
 
     def test_only_allowlisted_gemma_is_accepted(self):
         self.assertEqual(router.GEMMA_VISION_MODEL, "gemma-4-26b-a4b-it")

@@ -22,3 +22,59 @@ def go_away_time_left(response):
     notice = go_away_notice(response)
     return getattr(notice, "time_left", None) if notice is not None else None
 
+
+def should_sleep_after_addressed_response(wake_word_enabled: bool,
+                                          addressed_turn_pending: bool,
+                                          turn_complete: bool,
+                                          tool_call_pending: bool = False) -> bool:
+    """Close the cloud mic gate after a final addressed turn, even without text transcription."""
+    return bool(
+        wake_word_enabled and addressed_turn_pending
+        and turn_complete and not tool_call_pending
+    )
+
+def should_use_local_wake_mode(local_wake_preference: bool,
+                               proactive_audio_enabled: bool) -> bool:
+    """Use local wake gating only when explicitly selected instead of semantic addressing."""
+    return bool(local_wake_preference and not proactive_audio_enabled)
+
+
+def should_halt_tool_batch(result) -> bool:
+    """Stop precomputed sibling tool calls after a gate or uncertain outcome.
+
+    Gemini can return several function calls in one response. Once one call
+    asks for human approval, hits a blocker/recovery boundary, or cannot verify
+    its effect, later calls from that same already-generated batch must not run.
+    They are returned to the model as not executed so it can reconsider them
+    after the user resolves the first result.
+    """
+    text = str(result or "").strip()
+    if not text:
+        return False
+    # Page/document text is explicitly wrapped as untrusted content. When a
+    # tool also supplies an app-owned receipt, inspect only the prefix before
+    # that wrapper so page text cannot forge a control marker.
+    untrusted_at = text.find("<<<UNTRUSTED source=")
+    control_text = text[:untrusted_at].strip() if untrusted_at >= 0 else text
+    if not control_text:
+        return False
+    if any(marker in control_text for marker in (
+        "[CONFIRMATION_PENDING]",
+        "[CONFIRMATION_BUSY]",
+        "[MISSION_PLAN_SAVED]",
+        "[VISION_ACTIVE]",
+        "[MISSION_BLOCKED]",
+        "[MISSION_CONTINUE]",
+        "[MISSION_COMPLETE]",
+        "[MISSION_RECOVERY]",
+        "[MISSION_UI_PLAN]",
+        "[MISSION_UI_RECOVERY]",
+        "[MISSION_UI_RESULT_VERIFIED]",
+    )):
+        return True
+    # Dispatcher exceptions may happen after an external action was dispatched;
+    # their effects are uncertain, so do not run sibling calls from this batch.
+    if control_text.startswith("Tool '") and " failed:" in control_text:
+        return True
+    status = control_text.split(None, 1)[0]
+    return status in {"status=failed", "status=unverified", "status=ask"}

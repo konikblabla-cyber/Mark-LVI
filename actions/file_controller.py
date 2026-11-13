@@ -966,10 +966,10 @@ def _file_confirmation(parameters: dict, session_memory=None, player=None):
     if action == "delete":
         target = name or path
         explicit_target = _delete_target_was_explicitly_requested(request, path, name)
-        permanent_delete = bool(_PERMANENT_DELETE_RE.search(request))
-        # Moving an explicitly named file to the system Trash is reversible.
-        # Permanent deletion/erasure always requires a separate human approval.
-        if permanent_delete or not explicit_target:
+        # An explicit command naming this exact file/folder authorizes this
+        # one deletion, including permanent deletion. Unscoped or inferred
+        # deletion still requires the HUD gate.
+        if not explicit_target:
             return confirm.request(
                 key="file_delete", title=("Move to Trash: " + target)[:120],
                 detail=("File action: delete (move to Trash)\nTarget: " + target +
@@ -999,8 +999,12 @@ def _file_confirmation(parameters: dict, session_memory=None, player=None):
             target = target / name
         try:
             target = target.resolve(strict=False)
+            explicit_overwrite = bool(
+                name and _delete_target_was_explicitly_requested(request, path, name)
+            )
             if (_is_safe_path(target) and target.is_file()
-                    and target.stat().st_size > _UNDO_CONTENT_LIMIT):
+                    and target.stat().st_size > _UNDO_CONTENT_LIMIT
+                    and not explicit_overwrite):
                 size = _format_size(target.stat().st_size)
                 return confirm.request(
                     key="file_large_overwrite",

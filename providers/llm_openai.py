@@ -129,7 +129,7 @@ CATALOG = (
      "values": {"base_url": PRESETS["MiniMax"], **_CLOUD,
                 "model": "MiniMax-M3.1-Flash"}},
     {"id": "groq",       "label": "Groq",
-     "note": "metered tokens · blocked by MARK's $0 router guard", "local": False,
+     "note": "metered · opt-in, coding-only, strict local daily cap", "local": False,
      "values": {"base_url": PRESETS["Groq"], **_CLOUD}},
     {"id": "zai",        "label": "Z.ai",
      "note": "GLM-4.7-Flash only is $0 · other model IDs blocked", "local": False,
@@ -398,6 +398,12 @@ class OpenAICompatLLM:
         if self._vision_known and self._vision_known != self.model:
             self._vision_known = ""
 
+    def _guard_groq_request(self, messages: list[dict]) -> None:
+        """Reserve the MARK-local Groq budget before any metered chat call."""
+        if "api.groq.com" in self.base:
+            from core.model_router import reserve_groq_request
+            reserve_groq_request(messages)
+
     # -- headers ------------------------------------------------------------
     def _headers(self) -> dict:
         h = {"Content-Type": "application/json"}
@@ -414,6 +420,10 @@ class OpenAICompatLLM:
             body["tool_choice"] = "auto"
         if temperature is not None:
             body["temperature"] = temperature
+        if "api.groq.com" in self.base:
+            # A hard output bound keeps accidental code-generation loops cheap.
+            # Groq's current API accepts max_completion_tokens for chat completions.
+            body["max_completion_tokens"] = 1024
         if "minimax" in self.base:
             # MiniMax's M2 models put their thinking inline as <think>…</think>
             # unless asked not to. The pipeline filters that out of speech, but
@@ -428,6 +438,7 @@ class OpenAICompatLLM:
                  temperature: float | None = None) -> tuple[str, list[FunctionCall]]:
         """Text and any tool calls. Raises on failure so the ladder can read the
         error, classify it and rest this rung exactly as it rests a Gemini one."""
+        self._guard_groq_request(messages)
         try:
             with self._httpx.Client(timeout=timeout or self.timeout,
                                     trust_env=self._trust_env) as cl:
@@ -456,6 +467,7 @@ class OpenAICompatLLM:
         the end. Streaming is what lets speech start before the sentence is
         finished; a server that cannot stream still works, it just answers all
         at once."""
+        self._guard_groq_request(messages)
         body = self._body(messages, tools, stream, temperature)
 
         # Not wrapped with the address here: the streaming path is only used by

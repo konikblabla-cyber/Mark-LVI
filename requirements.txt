@@ -43,7 +43,6 @@ pyperclip
 
 # ── Vision & media ────────────────────────────────────────────────────────────
 pillow>=10,<13
-opencv-python>=4.8,<5
 mss>=9,<11
 
 # ── System, files & documents ─────────────────────────────────────────────────
@@ -65,7 +64,10 @@ qrcode[pil]>=7,<9
 # imported inside a try/except at the point of use, so an uninstalled extra
 # disables exactly one plugin and never touches the rest of the app.
 google-api-python-client     # gmail_control, calendar_control — OAuth
+google-auth-httplib2         # bounded, per-call authenticated Google API transport
 google-auth-oauthlib         # gmail_control, calendar_control — OAuth
+# IANA timezone database for zoneinfo on Windows; required for Google Calendar.
+tzdata>=2024.1,<2027
 tinytuya                     # home_assistant — Tuya / Smart Life bulbs
 paho-mqtt                    # printer_control — MQTT printers
 openpyxl                     # excel_writer — spreadsheet output

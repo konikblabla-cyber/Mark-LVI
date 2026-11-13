@@ -64,6 +64,8 @@ THE LADDER, MEASURED
 """
 from __future__ import annotations
 
+from core.live_model_policy import LIVE_MODEL_FALLBACKS
+
 import asyncio
 import json
 import re
@@ -156,44 +158,37 @@ PROVIDER_PREFIX = "prov:"
 # cooldown after one attempt instead of being paid for on every call.
 _LADDERS = {
     FAST: (LIVE,
-           "gemini-2.5-flash-lite", "gemini-3.5-flash-lite",
-           "gemini-3.1-flash-lite", "gemini-flash-lite-latest",
-           "gemini-2.5-flash", "gemini-3.5-flash",
-           "gemini-3.6-flash", "gemini-3-flash-preview"),
+           "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+           "gemini-3.8-flash", "gemini-3.6-flash",
+           "gemini-2.5-flash-lite", "gemini-flash-lite-latest",
+           "gemini-2.5-flash", "gemini-3.5-flash", "gemini-3-flash-preview"),
     SMART: (LIVE,
-            "gemini-2.5-flash", "gemini-3.5-flash",
-            "gemini-2.5-flash-lite", "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-3.6-flash", "gemini-3-flash-preview", "gemini-flash-latest"),
+            "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
+            "gemini-3.5-flash", "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite", "gemini-2.5-flash",
+            "gemini-2.5-flash-lite", "gemini-3-flash-preview", "gemini-flash-latest"),
     # Grounded search needs response.candidates[...].grounding_metadata, which a
     # Live turn does not produce. REST only, and it says so rather than silently
     # returning an answer with no sources behind it.
-    SEARCH: ("gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite",
-             "gemini-flash-latest"),
+    SEARCH: ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
+             "gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"),
 }
 
-# The conversation's own model, and ONE careful fallback behind it.
+# A short, capability-aware ladder for the one user-facing conversation.
 #
-# Deliberately not a long ladder. The Live quota is not the one that runs out —
-# the text models are — and Live models are not interchangeable the way text
-# models are: they differ in which config fields they accept and in what they
-# can do, so falling through a list of them risks connecting to something that
-# behaves like a different assistant. The key also offers transcribe-live,
-# live-translate and a robotics streaming model, none of which are assistants
-# at all.
-#
-# So there are two: the current one, and the native-audio model this assistant
-# used before it, which is known to work here. A mismatch in config is already
-# survivable — the connect loop drops the tuning and proactive-audio fields and
-# reconnects when the server rejects them.
-LIVE_MODELS = (
-    "models/gemini-3.1-flash-live-preview",
-    "models/gemini-2.5-flash-native-audio-preview-12-2025",
-)
+# Live models are not interchangeable: they differ in tool calling, turn-taking
+# and Proactive Audio. The order therefore preserves the feature the assistant
+# relies on most: 3.8 is first (Proactive Audio is built in), 2.5 Native Audio is
+# the first fallback (it supports configurable Proactive Audio), and 3.1 Live is
+# last (it has synchronous tools but no Proactive Audio). That keeps MARK's
+# address-aware listening alive for as long as a supported endpoint is usable.
+# The key also exposes transcription, translation and robotics models, none of
+# which are suitable replacements for the user-facing assistant.
+LIVE_MODELS = LIVE_MODEL_FALLBACKS
 
 # The Live model to use for one-shot calls. main.py owns the real one; this is
 # only the fallback for when this module is imported without it (tests).
-_LIVE_FALLBACK = "models/gemini-3.1-flash-live-preview"
+_LIVE_FALLBACK = LIVE_MODEL_FALLBACKS[0]
 
 # How many one-shot Live sessions may exist at once.
 #
@@ -215,6 +210,9 @@ _LIVE_FALLBACK = "models/gemini-3.1-flash-live-preview"
 # after another, and the screen agent's loop is sequential.
 _LIVE_SLOTS = threading.BoundedSemaphore(3)
 _LIVE_SLOT_WAIT = 3.0
+_LIVE_CONNECT_TIMEOUT = 8.0
+_LIVE_SEND_TIMEOUT = 3.0
+_LIVE_CLOSE_TIMEOUT = 2.0
 
 _ONE_SHOT_SYSTEM = (
     "You are a data-processing function, not an assistant and not in a "
@@ -283,14 +281,20 @@ def is_gone_error(err: str) -> bool:
             or "permission" in low or "403" in err)
 
 
-def live_model() -> str:
-    """The Live model to open the conversation with: the first rung that is not
-    resting. If every one is resting the ladder is used from the top anyway —
-    refusing to connect at all is never the better answer."""
-    for m in LIVE_MODELS:
+def live_model(allowed_models=None) -> str:
+    """Choose the first usable Live endpoint from the caller's safe candidates.
+
+    The default keeps the full legacy ladder for non-microphone one-shot uses.
+    The always-on voice session passes a capability-filtered list so a model
+    without Proactive Audio cannot receive room speech unless local gating is on.
+    """
+    candidates = tuple(allowed_models) if allowed_models is not None else LIVE_MODELS
+    if not candidates:
+        raise RuntimeError("no Live model is safe for the current microphone mode")
+    for m in candidates:
         if not _cooling(m):
             return m
-    return LIVE_MODELS[0]
+    return candidates[0]
 
 
 def note_live_failure(model: str, err: str) -> bool:
@@ -463,32 +467,61 @@ async def _live_turn(parts: list, system: str, key: str, timeout_s: float) -> st
 
     cm = cl.aio.live.connect(model=_live_model(),
                              config=gtypes.LiveConnectConfig(**kwargs))
-    session = await asyncio.wait_for(cm.__aenter__(), 30)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(10.0, float(timeout_s))
+
+    def remaining() -> float:
+        left = deadline - loop.time()
+        if left <= 0:
+            raise asyncio.TimeoutError("Gemini Live one-shot deadline expired")
+        return left
+
+    session = None
     try:
-        await session.send_client_content(
-            turns={"role": "user", "parts": parts}, turn_complete=True)
+        session = await asyncio.wait_for(
+            cm.__aenter__(),
+            timeout=min(_LIVE_CONNECT_TIMEOUT, remaining()),
+        )
+        await asyncio.wait_for(
+            session.send_client_content(
+                turns={"role": "user", "parts": parts}, turn_complete=True
+            ),
+            timeout=min(_LIVE_SEND_TIMEOUT, remaining()),
+        )
         chunks: list[str] = []
 
         async def drain():
+            # The SDK receive iterator ends at interaction/turn completion.
+            # Collect all transcript chunks from that turn and return; a second
+            # receive() would wait for a future turn and add idle latency.
             async for resp in session.receive():
                 sc = getattr(resp, "server_content", None)
                 if sc and sc.output_transcription and sc.output_transcription.text:
                     chunks.append(sc.output_transcription.text)
 
-        await asyncio.wait_for(drain(), timeout=timeout_s)
-        # The transcription can trail the audio turn by a beat; a short second
-        # drain stops a reply being cut mid-token. chat_takeover learned this
-        # the same way and for the same reason.
-        try:
-            await asyncio.wait_for(drain(), timeout=1.5)
-        except asyncio.TimeoutError:
-            pass
+        await asyncio.wait_for(drain(), timeout=remaining())
         return "".join(chunks).strip()
     finally:
         try:
-            await cm.__aexit__(None, None, None)
-        except Exception:
-            pass
+            if session is not None:
+                try:
+                    await asyncio.wait_for(
+                        cm.__aexit__(None, None, None),
+                        timeout=_LIVE_CLOSE_TIMEOUT,
+                    )
+                except Exception:
+                    pass
+        finally:
+            # Live uses the async transport; close it explicitly instead of
+            # leaving one httpx client behind for every one-shot request.
+            try:
+                await asyncio.wait_for(cl.aio.aclose(), timeout=_LIVE_CLOSE_TIMEOUT)
+            except Exception:
+                pass
+            try:
+                cl.close()
+            except Exception:
+                pass
 
 
 def _live_call(contents, config, timeout_ms: int, key: str):
@@ -525,13 +558,29 @@ def _live_call(contents, config, timeout_ms: int, key: str):
                 _live_turn(parts, str(system), key, max(10.0, timeout_ms / 1000.0)))
         except BaseException as e:                     # noqa: BLE001
             box["error"] = e
+        finally:
+            # The slot belongs to the worker for the full lifetime of the
+            # network session. A caller-side join timeout must not make room
+            # for another session while this one is still running.
+            _LIVE_SLOTS.release()
 
+    th = threading.Thread(target=runner, daemon=True, name="gemini-live-oneshot")
     try:
-        th = threading.Thread(target=runner, daemon=True, name="gemini-live-oneshot")
         th.start()
-        th.join(timeout=max(15.0, timeout_ms / 1000.0 + 20.0))
-    finally:
+    except BaseException:
         _LIVE_SLOTS.release()
+        raise
+
+    join_timeout = max(
+        15.0,
+        max(10.0, timeout_ms / 1000.0) + _LIVE_CLOSE_TIMEOUT + 3.0,
+    )
+    th.join(timeout=join_timeout)
+    if th.is_alive():
+        raise TimeoutError(
+            "Gemini Live one-shot session exceeded its deadline; "
+            "its concurrency slot remains reserved until cleanup finishes."
+        )
     if "error" in box:
         raise box["error"]
     text = box.get("text")
@@ -641,10 +690,13 @@ def _guard_provider_fallback(provider_id: str, contents) -> int:
     from core import model_router
 
     settings = model_router._settings()
-    if not settings.get("zero_cost_confirmed"):
+    # A provider must not bypass the $0 acknowledgement just because it is
+    # configured as a generic sidecar. The sole exception is the exact Groq
+    # endpoint after the owner separately opts in and selects it for CODING.
+    if (not settings.get("zero_cost_confirmed")
+            and not model_router._is_groq_provider(provider_id)):
         raise model_router.RouterError(
-            "provider fallback blocked: first confirm that every selected "
-            "provider is on a $0 plan with no payment method"
+            "provider fallback blocked: verify the $0 plan or enable capped Groq for CODING"
         )
     model_router._assert_zero_cost_provider(provider_id)
     return model_router._reserve(contents, settings)
@@ -748,36 +800,44 @@ def call(contents, tier: str = FAST, config=None,
 
     cl = None
     tried = [m for m in ladder if not _cooling(m)] or list(ladder)
-    for model in tried:
-        try:
-            if model == LIVE:
-                reply = _live_call(contents, config, timeout_ms, resolved_key)
-                if reply is not None:
-                    return reply
-                raise RuntimeError("the Live turn came back empty")
-            if model.startswith(PROVIDER_PREFIX):
-                return _provider_call(model, contents, config, timeout_ms)
-            if cl is None:
-                cl = client(timeout_ms=timeout_ms, key=resolved_key)
-            kwargs = {"model": model, "contents": contents}
-            if config is not None:
-                kwargs["config"] = config
-            return cl.models.generate_content(**kwargs)
-        except Exception as e:
-            msg = str(e)
-            if is_quota_error(msg):
-                _cool(model)
-                print(f"[Gemini] {model}: out of quota — skipping it for "
-                      f"{_COOLDOWN_SECONDS // 60} minutes")
-            elif is_gone_error(msg):
-                _cool(model, _GONE_SECONDS)
-                print(f"[Gemini] {model}: unavailable to this key — set aside")
-            elif is_unavailable_error(msg):
-                _cool(model, _UNAVAILABLE_SECONDS)
-                print(f"[Gemini] {model}: not answering — resting it for "
-                      f"{_UNAVAILABLE_SECONDS // 60} minutes")
-            else:
-                print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
+    try:
+        for model in tried:
+            try:
+                if model == LIVE:
+                    reply = _live_call(contents, config, timeout_ms, resolved_key)
+                    if reply is not None:
+                        return reply
+                    raise RuntimeError("the Live turn came back empty")
+                if model.startswith(PROVIDER_PREFIX):
+                    return _provider_call(model, contents, config, timeout_ms)
+                if cl is None:
+                    cl = client(timeout_ms=timeout_ms, key=resolved_key)
+                kwargs = {"model": model, "contents": contents}
+                if config is not None:
+                    kwargs["config"] = config
+                return cl.models.generate_content(**kwargs)
+            except Exception as e:
+                msg = str(e)
+                if is_quota_error(msg):
+                    _cool(model)
+                    print(f"[Gemini] {model}: out of quota — skipping it for "
+                          f"{_COOLDOWN_SECONDS // 60} minutes")
+                elif is_gone_error(msg):
+                    _cool(model, _GONE_SECONDS)
+                    print(f"[Gemini] {model}: unavailable to this key — set aside")
+                elif is_unavailable_error(msg):
+                    _cool(model, _UNAVAILABLE_SECONDS)
+                    print(f"[Gemini] {model}: not answering — resting it for "
+                          f"{_UNAVAILABLE_SECONDS // 60} minutes")
+                else:
+                    print(f"[Gemini] {model}: {type(e).__name__}: {msg[:140]}")
+
+    finally:
+        if cl is not None:
+            try:
+                cl.close()
+            except Exception:
+                pass
     return None
 
 

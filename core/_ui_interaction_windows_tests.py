@@ -488,6 +488,16 @@ class WindowsUIAIntegrationTests(unittest.TestCase):
             _user32.SendMessageW(tree, 0x1102, 1, root)  # TVM_EXPAND / TVE_COLLAPSE
         time.sleep(0.05)
 
+
+    def test_snapshot_exposes_real_target_window_bounds(self):
+        snapshot = _snapshot(int(self.hwnd))
+        bounds = snapshot.get("bounds")
+        self.assertIsInstance(bounds, tuple, snapshot)
+        self.assertEqual(len(bounds), 4, snapshot)
+        self.assertLess(bounds[0], bounds[2], bounds)
+        self.assertLess(bounds[1], bounds[3], bounds)
+        self.assertTrue(snapshot.get("process_name"), snapshot)
+
     def test_real_native_button_without_expected_change_is_not_reported_done(self):
         snapshot = _snapshot(int(self.hwnd))
         matches = _matching_controls(snapshot["clickables"], "No change")

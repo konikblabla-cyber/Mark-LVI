@@ -7,6 +7,8 @@ happens to have in the foreground when the user confirms.
 """
 from __future__ import annotations
 
+import ctypes
+import ntpath
 import re
 import sys
 import threading
@@ -300,6 +302,63 @@ def _collect_accessible_controls(window, include_wrappers: bool = False):
     return records, clickables
 
 
+def _process_name_from_pid(process_id: object) -> str:
+    """Resolve a process basename, with a Win32 fallback when psutil is denied."""
+    try:
+        pid = int(process_id)
+        if pid <= 0:
+            return ""
+    except (TypeError, ValueError, OverflowError):
+        return ""
+
+    try:
+        import psutil
+        name = str(psutil.Process(pid).name() or "").strip()
+        if name:
+            return ntpath.basename(name.replace("/", "\\"))[:100]
+    except Exception:
+        pass
+
+    # PROCESS_QUERY_LIMITED_INFORMATION is sufficient for
+    # QueryFullProcessImageNameW and does not request VM/read/write rights.
+    process_handle = None
+    try:
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        open_process.restype = wintypes.HANDLE
+
+        query_image = kernel32.QueryFullProcessImageNameW
+        query_image.argtypes = (
+            wintypes.HANDLE, wintypes.DWORD,
+            wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD),
+        )
+        query_image.restype = wintypes.BOOL
+
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = (wintypes.HANDLE,)
+        close_handle.restype = wintypes.BOOL
+
+        process_handle = open_process(0x1000, False, pid)
+        if not process_handle:
+            return ""
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = wintypes.DWORD(len(buffer))
+        if not query_image(process_handle, 0, buffer, ctypes.byref(length)):
+            return ""
+        return ntpath.basename(buffer.value.replace("/", "\\"))[:100]
+    except Exception:
+        return ""
+    finally:
+        if process_handle:
+            try:
+                kernel32.CloseHandle(process_handle)
+            except Exception:
+                pass
+
+
 def _read_window_snapshot(window_handle=None, expected_process_id=None) -> dict:
     """Read one specific window; None means the current active window.
 
@@ -333,9 +392,21 @@ def _read_window_snapshot(window_handle=None, expected_process_id=None) -> dict:
             "the window handle no longer belongs to the original application process"
         )
     records, clickables = _collect_accessible_controls(window)
+    try:
+        rect = window.rectangle()
+        bounds = (
+            int(rect.left), int(rect.top), int(rect.right), int(rect.bottom),
+        )
+        if bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+            bounds = None
+    except Exception:
+        bounds = None
+    process_name = _process_name_from_pid(process_id)
     return {
         "handle": int(handle),
         "process_id": int(process_id),
+        "process_name": process_name,
+        "bounds": bounds,
         "records": records,
         "clickables": clickables,
     }
@@ -358,6 +429,55 @@ def _snapshot(window_handle=None, expected_process_id=None) -> dict:
     if not isinstance(value, dict) or not isinstance(value.get("records"), list):
         raise RuntimeError("UI Automation returned an invalid window snapshot")
     return value
+
+def focus_window_identity(window_handle: int, expected_process_id: int) -> dict:
+    """Bring one previously identified window forward, then prove it is foreground.
+
+    Used only for an action already bound to a specific HWND/PID (for example
+    after the user confirms MARK's HUD dialog). A reused handle, hidden window,
+    failed focus, or foreground mismatch all fail closed.
+    """
+    try:
+        handle = int(window_handle)
+        process_id = int(expected_process_id)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("a positive window handle and process ID are required") from exc
+    if handle <= 0 or process_id <= 0:
+        raise ValueError("a positive window handle and process ID are required")
+
+    def _focus_exact_window():
+        from pywinauto import Desktop
+        window = Desktop(backend="uia").window(handle=handle).wrapper_object()
+        if not window.is_visible():
+            raise RuntimeError("the original target window is no longer visible")
+        actual_pid = getattr(window.element_info, "process_id", 0)
+        if not _valid_window_process_id(actual_pid, process_id):
+            raise RuntimeError("the original window handle now belongs to another process")
+        window.set_focus()
+        return True
+
+    completed, value, error = _run_uia(
+        _focus_exact_window,
+        _SNAPSHOT_TIMEOUT_SECONDS,
+        exclusive_lock=_SNAPSHOT_LOCK,
+    )
+    if not completed:
+        raise TimeoutError("UI Automation could not focus the original window within 4 seconds")
+    if error is not None:
+        detail = " ".join(str(error or "").split())[:160]
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(
+            f"UI Automation could not focus the original window ({type(error).__name__}){suffix}"
+        ) from error
+    if value is not True:
+        raise RuntimeError("UI Automation did not confirm focus of the original window")
+
+    active = _snapshot()
+    if (active.get("handle") != handle
+            or active.get("process_id") != process_id):
+        raise RuntimeError("the original target window did not become the foreground window")
+    return active
+
 
 
 def _invoke_on_window(window_handle: int, expected_process_id: int,
@@ -853,3 +973,126 @@ TOOL = {
     },
     "handler": click_and_verify,
 }
+
+
+def _has_combo_ancestor(control, max_depth: int = 6) -> bool:
+    """Distinguish standalone ListItems from options owned by a ComboBox."""
+    current = control
+    for _ in range(max(1, min(int(max_depth), 10))):
+        try:
+            parent = current.parent()
+            if parent is None:
+                return False
+            info = parent.element_info
+            if str(getattr(info, "control_type", "") or "") == "ComboBox":
+                return True
+            if str(getattr(info, "control_type", "") or "") == "Window":
+                return False
+            current = parent
+        except Exception:
+            return False
+    return False
+
+
+def _select_item_on_window(
+    window_handle: int,
+    expected_process_id: int,
+    item_label: str,
+    control_type: str,
+    cancelled,
+) -> tuple[str, str]:
+    """Select one exact TabItem/ListItem in a pinned HWND/PID and verify SelectionItemPattern."""
+    if control_type not in {"TabItem", "ListItem"}:
+        return "unsupported", "only TabItem and ListItem controls are supported"
+    from pywinauto import Desktop
+
+    try:
+        window = Desktop(backend="uia").window(
+            handle=int(window_handle)
+        ).wrapper_object()
+    except Exception:
+        return "missing_window", "the original application window is no longer available"
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before selection"
+    if not window.is_visible():
+        return "missing_window", "the original application window is no longer visible"
+    if int(getattr(window, "handle", 0) or 0) != int(window_handle):
+        return "changed_window", "the original window handle changed"
+    actual_pid = getattr(window.element_info, "process_id", 0)
+    if not _valid_window_process_id(actual_pid, expected_process_id):
+        return "changed_window", "the original window now belongs to another process"
+
+    wanted = _normalise(item_label)
+    if not wanted:
+        return "missing_item", "the accessible label contains no searchable characters"
+    matches = []
+    try:
+        descendants = window.descendants()
+    except Exception:
+        return "unavailable", "the target application does not expose its accessibility tree"
+    for index, control in enumerate(descendants):
+        if cancelled.is_set():
+            return "cancelled", "the operation expired before selection"
+        if index >= _MAX_SCANNED_CONTROLS:
+            break
+        try:
+            info = control.element_info
+            if str(getattr(info, "control_type", "") or "") != control_type:
+                continue
+            if bool(getattr(info, "is_password", False)) or bool(getattr(info, "is_offscreen", False)):
+                continue
+            name = str(getattr(info, "name", "") or "")
+            if _is_sensitive_input_label(name) or _normalise(name) != wanted:
+                continue
+            rect = control.rectangle()
+            if rect.width() <= 0 or rect.height() <= 0 or not control.is_enabled():
+                continue
+            matches.append(control)
+        except Exception:
+            continue
+
+    if not matches:
+        return "missing_item", f"no visible, enabled, non-sensitive {control_type} has that exact accessible label"
+    if len(matches) != 1:
+        return "ambiguous_item", f"more than one {control_type} has that exact accessible label"
+    if control_type == "ListItem" and _has_combo_ancestor(matches[0]):
+        return "dropdown_option", (
+            "this ListItem belongs to a ComboBox; use select_dropdown_option with "
+            "the exact ComboBox label and visible option label"
+        )
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before selection"
+
+    try:
+        pattern = matches[0].iface_selection_item
+        selected = bool(pattern.CurrentIsSelected)
+    except Exception:
+        return "unsupported", f"the {control_type} does not expose a readable SelectionItemPattern state"
+    if selected:
+        return "already_selected", ""
+
+    if cancelled.is_set():
+        return "cancelled", "the operation expired before SelectionItemPattern.Select"
+    try:
+        pattern.Select()
+    except Exception:
+        return "uncertain", "the item may have been selected but the provider raised an error"
+
+    deadline = time.monotonic() + min(1.5, _VERIFY_TIMEOUT_SECONDS)
+    while True:
+        if cancelled.is_set():
+            return "uncertain", "the operation expired after selection; inspect before retrying"
+        try:
+            if (int(getattr(window, "handle", 0) or 0) != int(window_handle)
+                    or not _valid_window_process_id(
+                        getattr(window.element_info, "process_id", 0), expected_process_id,
+                    )):
+                return "uncertain", "the original window identity changed after selection"
+            if bool(pattern.CurrentIsSelected):
+                return "selected", ""
+        except Exception:
+            return "uncertain", "the item may have been selected but its state could not be verified"
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "unverified", "the item did not report selected after the operation"
+        time.sleep(min(_VERIFY_INTERVAL, remaining))

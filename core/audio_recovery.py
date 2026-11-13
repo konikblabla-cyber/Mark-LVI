@@ -6,6 +6,7 @@ are moving. These helpers keep the health decision deterministic and testable.
 """
 from __future__ import annotations
 
+import asyncio
 import math
 
 
@@ -36,3 +37,39 @@ def callback_is_stalled(
     if limit <= 0 or current < last:
         return False
     return current - last > limit
+
+
+# Live audio is time-sensitive: a 16-frame backlog is at most about half a
+# second when the PC microphone uses 32 ms blocks. Older audio is less useful
+# than the current microphone state once a sender falls behind.
+LIVE_AUDIO_QUEUE_SIZE = 16
+
+
+def offer_latest_audio(queue: asyncio.Queue, item) -> bool:
+    """Put an audio frame without allowing stale backlog to build up.
+
+    If the bounded queue is full, discard the oldest frame and keep the newest.
+    This deliberately favours conversation latency over replaying seconds-old
+    audio after a network or scheduler stall. Must be called on the queue's
+    owning asyncio loop.
+    """
+    try:
+        queue.put_nowait(item)
+        return True
+    except asyncio.QueueFull:
+        pass
+
+    try:
+        queue.get_nowait()
+    except asyncio.QueueEmpty:
+        pass
+    else:
+        # A dropped frame is a completed queue item too. Keep Queue.join()
+        # accounting correct for future diagnostics and shutdown drains.
+        queue.task_done()
+
+    try:
+        queue.put_nowait(item)
+        return True
+    except asyncio.QueueFull:
+        return False

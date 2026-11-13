@@ -118,7 +118,24 @@ def _check_assets() -> None:
         )
 
 
+def _configure_console() -> None:
+    """Keep setup output safe on legacy Windows code pages such as cp1252.
+
+    Setup messages intentionally contain Unicode symbols. A console encoding
+    that cannot represent one of them must never abort dependency installation.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream is not None and hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            # pythonw, redirected streams, and unusual console wrappers are
+            # not allowed to make installation fail.
+            pass
+
+
 def main() -> None:
+    _configure_console()
     print(f"⚙  MARK LIV setup — detected OS: {OS or 'unknown'}, "
           f"Python {sys.version_info[0]}.{sys.version_info[1]}")
     _check_python()

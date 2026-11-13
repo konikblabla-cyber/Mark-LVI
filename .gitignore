@@ -10,7 +10,9 @@ config/certs/                 # the dashboard's TLS private key and certificate
 config/whatsapp_web/          # a LINKED WhatsApp session — committing it hands
                               # somebody your WhatsApp account, not just a key
 **/token*.json                # Google OAuth tokens (Gmail / Calendar plugins)
-**/client_secret*.json        # Google OAuth client secrets
+**/client_secret*.json
+# Google Workspace Desktop OAuth client secrets (never commit).
+config/client_secret_google_workspace.json        # Google OAuth client secrets
 *credentials*.json
 .env
 .env.*
@@ -67,6 +69,9 @@ memory/conversation_history.jsonl
 memory/conversation_history.jsonl.tmp
 memory/missions.json
 memory/missions.json.tmp
+memory/experiences.json
+memory/experiences.json.tmp
+.experiences-*.tmp
 .history-*.tmp
 .missions-*.tmp
 **/.jarvis-*.tmp

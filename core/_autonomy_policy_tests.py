@@ -42,28 +42,64 @@ class AutonomyPolicyTests(unittest.TestCase):
             "Send", user_request="Open the settings page"
         ))
 
-    def test_critical_financial_and_permanent_actions_always_prompt(self):
+    def test_unscoped_critical_actions_still_prompt(self):
         for target, request in (
-            ("Pay now", "Pay now"),
-            ("Purchase", "Purchase this item"),
-            ("Transfer funds", "Transfer funds"),
-            ("Delete account", "Delete account"),
-            ("Delete", "Permanently delete the selected file"),
+            ("Pay now", ""),
+            ("Purchase", ""),
+            ("Transfer funds", ""),
+            ("Delete account", ""),
+            ("Delete", "Please handle the files"),
             ("Submit", "Submit payment"),
             ("Save", "Change security settings"),
             ("Reset", "Factory reset this PC"),
-            ("Sign", "Sign the contract"),
-            ("Permanently erase", "Permanently erase these files"),
-            ("Factory reset", "Factory reset this PC"),
-            ("Zamknij konto", "Zamknij konto"),
-            ("Delete", "Permanently delete this selected file"),
-            ("Submit", "Submit payment"),
-            ("Save", "Change security settings"),
-            ("Reset", "Factory reset this PC"),
-            ("Sign", "Sign the contract"),
+            ("Sign", "Please handle the contract"),
+            ("Permanently erase", "Please clean up the folder"),
+            ("Factory reset", ""),
+            ("Zamknij konto", ""),
         ):
             with self.subTest(target=target):
                 self.assertTrue(requires_ui_confirmation(target, user_request=request))
+
+    def test_explicit_destructive_target_commands_are_authorized_once(self):
+        for target, request in (
+            ("Delete report.txt", "Delete report.txt"),
+            ("Permanently erase these files", "Permanently erase these files"),
+            ("Delete account", "Delete account"),
+            ("Sign the contract", "Sign the contract"),
+        ):
+            with self.subTest(target=target):
+                self.assertFalse(requires_ui_confirmation(target, user_request=request))
+
+    def test_explicit_send_publish_and_submit_commands_are_authorized(self):
+        for target, request in (
+            ("Send message to Alex", "Send message to Alex: I will arrive at 18:30"),
+            ("Publish release notes", "Publish release notes"),
+            ("Submit application", "Submit application"),
+        ):
+            with self.subTest(target=target):
+                self.assertFalse(requires_ui_confirmation(target, user_request=request))
+
+    def test_explicit_file_and_field_commands_authorize_the_named_target(self):
+        for target, request in (
+            ("report.txt", "Overwrite report.txt"),
+            ("report.txt", "Delete report.txt permanently"),
+            ("Downloads", "Organize Downloads"),
+            ("search field", "Replace text in search field"),
+            ("project folder", "Move project folder"),
+            ("draft.docx", "Edit draft.docx"),
+        ):
+            with self.subTest(target=target, request=request):
+                from core.autonomy_policy import explicitly_requested_target_action
+                self.assertTrue(explicitly_requested_target_action(request, target))
+
+    def test_negated_file_commands_do_not_authorize(self):
+        from core.autonomy_policy import explicitly_requested_target_action
+        self.assertFalse(explicitly_requested_target_action(
+            "Do not delete report.txt", "report.txt"
+        ))
+        self.assertFalse(explicitly_requested_target_action(
+            "Nie usuwaj raport.txt", "raport.txt"
+        ))
 
     def test_direct_send_authorization_is_recipient_scoped_and_one_shot(self):
         scope = new_turn_authorization("Wyślij wiadomość do Alex: będę o 18:30")

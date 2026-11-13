@@ -11,12 +11,21 @@ on:
       - "core/_ui_runtime_smoke.py"
       - "core/audio_devices.py"
       - "core/_audio_devices_tests.py"
+      - "core/audio_recovery.py"
+      - "core/_audio_recovery_tests.py"
+      - "core/dashboard_*.py"
+      - "core/_dashboard_*_tests.py"
+      - "dashboard/**"
       - "actions/**"
       - "plugins/**"
       - "main.py"
       - "core/action_loader.py"
       - "core/plugin_loader.py"
       - "core/focus_context.py"
+      - "core/_focus_context_tests.py"
+      - "core/_live_focus_context_tests.py"
+      - "memory/conversation_history.py"
+      - "memory/_conversation_history_tests.py"
       - "core/project_context.py"
 
 jobs:
@@ -40,6 +49,8 @@ jobs:
         run: python -m playwright install chromium
       - name: Launch Chromium and render a local page
         run: python -m core._browser_runtime_smoke
+      - name: Compile every Python source tree
+        run: python -m compileall -q actions core dashboard memory plugins providers main.py ui.py setup.py
       - name: Check for broken or conflicting dependencies
         run: python -m pip check
       - name: Smoke-test Windows desktop-control imports
@@ -48,10 +59,35 @@ jobs:
         run: python -c "import sounddevice as sd; version = sd.get_portaudio_version(); print('PortAudio:', version); assert version is not None"
       - name: Probe Windows input and output endpoints
         run: python -c "from core.audio_devices import list_devices; print('Microphones:', list_devices('input', refresh=True)); print('Speakers:', list_devices('output', refresh=True))"
+      - name: Test bounded low-latency audio queues
+        run: python -m core._audio_recovery_tests
+      - name: Test screen-only visual capture policy
+        run: python -m actions._screen_processor_tests
+      - name: Test safe Windows application launching
+        run: python -m actions._open_app_tests
+      - name: Test safe Windows UI selection patterns
+        run: python -m actions._ui_selection_tests
+      - name: Test multi-step tab and list workflows
+        run: python -m actions._ui_sequence_tests
+      - name: Test autonomous mission and capability contracts
+        run: python -m core._capability_tests
+      - name: Test remote dashboard authentication and upload limits
+        run: |
+          python -m core._dashboard_policy_tests
+          python -m core._dashboard_auth_tests
+          python -m core._dashboard_upload_tests
       - name: Smoke-test Windows WASAPI communication sessions
         run: python -c "from core.communication_context import get_active_communication_apps; print('Active communication sessions:', get_active_communication_apps())"
       - name: Smoke-test Windows foreground monitor detection
         run: python -c "from core.desktop_context import get_desktop_context; result = get_desktop_context(); assert isinstance(result, dict); print('Desktop sensor:', result)"
+      - name: Test live foreground context and privacy
+        run: python -m core._focus_context_tests
+      - name: Test live session desktop context updates
+        run: python -m core._live_focus_context_tests
+      - name: Test opt-in conversation memory context
+        run: python -m memory._conversation_history_tests
+      - name: Test local conversation recall tool
+        run: python -m actions._search_conversation_history_tests
       - name: Create and paint an offscreen Qt window
         env:
           QT_QPA_PLATFORM: offscreen
@@ -62,8 +98,8 @@ jobs:
           window.close(); app.processEvents(); print('Qt offscreen window OK')"
       - name: Import core runtime dependencies
         run: >-
-          python -c "import PyQt6.QtCore, sounddevice, numpy, google.genai,
-          httpx, requests, bs4, playwright, PIL, cv2, psutil, send2trash,
+          python -c "import dashboard.server, PyQt6.QtCore, sounddevice, numpy, google.genai,
+          httpx, requests, bs4, playwright, PIL, psutil, send2trash,
           pptx, fastapi, uvicorn, cryptography, multipart, qrcode, ddgs,
           pdfplumber, PyPDF2, docx, pynvml, googleapiclient.discovery,
           google_auth_oauthlib.flow, tinytuya, paho.mqtt.client, openpyxl,
@@ -77,7 +113,7 @@ jobs:
           from core.plugin_loader import discover_plugins;
           reserved = {item['name'] for item in main.TOOL_DECLARATIONS};
           actions = discover_actions(Path('actions'), reserved_names=reserved, logger=lambda _: None);
-          required_actions = {'desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
+          required_actions = {'open_app','select_tab_item','select_list_item','search_conversation_history','desktop_awareness','project_status','windows_startup','diagnose_computer','status_briefing','workspace_mode','reminder','routine_mode'};
           missing_actions = sorted(required_actions - actions.names());
           assert not missing_actions, f'Missing actions: {missing_actions}';
           plugins = discover_plugins(Path('plugins'), reserved | actions.names(), logger=lambda _: None);

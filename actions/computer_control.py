@@ -496,7 +496,27 @@ def _close_app(app_name: str, confirmed_index: int | None = None) -> str:
     )
 
 
-def _screen_find(description: str) -> tuple[int, int] | None:
+def _visible_window_region(bounds, screen_size) -> tuple[int, int, int, int] | None:
+    """Return the part of a target window visible on the controllable primary screen."""
+    try:
+        left, top, right, bottom = (int(value) for value in bounds)
+        screen_width, screen_height = (int(value) for value in screen_size)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if screen_width <= 0 or screen_height <= 0:
+        return None
+    x0, y0 = max(0, left), max(0, top)
+    x1, y1 = min(screen_width, right), min(screen_height, bottom)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1 - x0, y1 - y0
+
+
+def _screen_find(
+    description: str,
+    target_app: str = "",
+    window_bounds=None,
+) -> tuple[int, int] | None:
     api_key = _get_api_key()
     if not api_key:
         _safe_print("[ComputerControl] ⚠️ No API key for screen_find")
@@ -507,17 +527,33 @@ def _screen_find(description: str) -> tuple[int, int] | None:
         from google.genai import types as gtypes
 
         _require_pyautogui()
-        w, h  = pyautogui.size()
-        img   = pyautogui.screenshot()
-        buf   = io.BytesIO()
+        screen_width, screen_height = pyautogui.size()
+        offset_x = offset_y = 0
+        if window_bounds is not None:
+            region = _visible_window_region(
+                window_bounds, (screen_width, screen_height),
+            )
+            if region is None:
+                return None
+            offset_x, offset_y, capture_width, capture_height = region
+            img = pyautogui.screenshot(region=region)
+            capture_scope = "a crop of the target application window"
+        else:
+            capture_width, capture_height = screen_width, screen_height
+            img = pyautogui.screenshot()
+            capture_scope = "the full screen"
+
+        buf = io.BytesIO()
         img.save(buf, format="PNG")
         image_bytes = buf.getvalue()
 
         prompt = (
-            f"This is a screenshot of a {w}×{h} pixel screen. "
-            f"Locate the UI element described as: '{description}'. "
-            f"Reply with ONLY the center coordinates as: x,y "
-            f"If the element is not visible, reply: NOT_FOUND"
+            f"This image is {capture_scope}, {capture_width}×{capture_height} pixels. "
+            f"Locate the UI element described as: '{str(description)[:200]}'. "
+            + (f"Only search inside the foreground application {str(target_app)[:100]}. "
+               if target_app else "")
+            + "Reply with ONLY the center coordinates as: x,y relative to this image. "
+            + "If the element is not visible, reply: NOT_FOUND"
         )
 
         from core import gemini
@@ -534,17 +570,224 @@ def _screen_find(description: str) -> tuple[int, int] | None:
 
         match = re.search(r"(\d+)\s*,\s*(\d+)", text)
         if match:
-            return int(match.group(1)), int(match.group(2))
+            return (
+                int(match.group(1)) + offset_x,
+                int(match.group(2)) + offset_y,
+            )
 
     except Exception as e:
         _safe_print(f"[ComputerControl] ⚠️ screen_find failed: {e}")
 
     return None
 
+
+
+def _pinned_window_is_foreground(window_handle: int, process_id: int) -> bool:
+    """Confirm the exact HWND/PID is active, not merely another window in the same app."""
+    try:
+        from core.desktop_context import get_foreground_window_identity
+        return get_foreground_window_identity() == (
+            int(window_handle), int(process_id),
+        )
+    except Exception:
+        return False
+
+
+def _screen_click_verified_execute(
+    description: str,
+    expected_result: str,
+    target_app: str,
+    expected_window_handle: int | None = None,
+    expected_process_id: int | None = None,
+) -> str:
+    """Use visual grounding for a control, then verify the exact result in that app."""
+    description = " ".join(str(description or "").split())
+    expected = " ".join(str(expected_result or "").split())
+    target = " ".join(str(target_app or "").split())
+    if not description or len(description) > 200:
+        return outcome.failed("computer_control", "a visual control description of 1 to 200 characters is required")
+    if not expected or len(expected) > 160:
+        return outcome.failed("computer_control", "an exact accessible result of 1 to 160 characters is required")
+    if platform.system().casefold() != "windows":
+        return outcome.failed("computer_control", "verified visual clicking currently requires Windows UI Automation")
+    if not target or len(target) > 100:
+        return outcome.failed("computer_control", "target_app must be the exact foreground executable name")
+    if (expected_window_handle is None) != (expected_process_id is None):
+        return outcome.failed(
+            "computer_control", "window handle and process ID must be supplied together",
+        )
+    if expected_window_handle is not None:
+        try:
+            expected_window_handle = int(expected_window_handle)
+            expected_process_id = int(expected_process_id)
+        except (TypeError, ValueError, OverflowError):
+            return outcome.failed(
+                "computer_control", "the planned target window identity is invalid",
+            )
+        if expected_window_handle <= 0 or expected_process_id <= 0:
+            return outcome.failed(
+                "computer_control", "the planned target window identity is invalid",
+            )
+
+    try:
+        from actions import ui_interaction as ui
+        if ui._is_sensitive_input_label(description) or ui._is_sensitive_input_label(expected):
+            return outcome.failed(
+                "computer_control",
+                "visual targets or expected labels involving credentials, verification codes or payment data are not supported",
+            )
+        if expected_window_handle is not None:
+            # A real HUD confirmation may briefly make MARK the foreground
+            # window. Restore only the HWND/PID that the planner originally
+            # approved, then prove it became active before taking a screenshot.
+            before = ui.focus_window_identity(
+                expected_window_handle, expected_process_id,
+            )
+        else:
+            blocked = _input_window_guard(target)
+            if blocked:
+                return blocked
+            before = ui._snapshot()
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"could not pin the target window for verification ({type(exc).__name__}); no click was sent",
+        )
+    blocked = _input_window_guard(target)
+    if blocked:
+        return blocked
+
+    handle = before.get("handle")
+    process_id = before.get("process_id")
+    if not handle or not process_id:
+        return outcome.failed("computer_control", "the target window has no stable identity; no click was sent")
+    if expected_window_handle is not None and (
+        int(handle) != expected_window_handle
+        or int(process_id) != expected_process_id
+    ):
+        return outcome.failed(
+            "computer_control",
+            "the active window is not the exact window selected by the mission planner; no click was sent",
+        )
+    bounds = before.get("bounds")
+    if not isinstance(bounds, (tuple, list)) or len(bounds) != 4:
+        return outcome.failed(
+            "computer_control",
+            "the target window bounds are unavailable; no full-desktop screenshot was sent",
+        )
+    if ui._has_exact_expected_text(before.get("records", []), expected):
+        return outcome.unverified(
+            "computer_control",
+            "the expected result was already visible; no click was sent and its cause is unknown",
+            operation="screen_click_verified", expected=expected,
+        )
+
+    # The screenshot locator proposes a point; the app process/window identity
+    # is checked again before any input reaches the desktop.
+    coordinates = _screen_find(description, target, before.get("bounds"))
+    if coordinates is None:
+        return outcome.failed(
+            "computer_control", "the requested visual control could not be located",
+            operation="screen_click_verified", target=target,
+        )
+    try:
+        x, y = int(coordinates[0]), int(coordinates[1])
+        width, height = pyautogui.size()
+    except Exception as exc:
+        return outcome.failed("computer_control", f"screen coordinates are unavailable ({type(exc).__name__})")
+    if not (0 <= x < int(width) and 0 <= y < int(height)):
+        return outcome.failed(
+            "computer_control", "visual locator returned coordinates outside the primary screen",
+            x=x, y=y, width=width, height=height,
+        )
+
+    blocked = _input_window_guard(target)
+    if blocked:
+        return blocked
+    if not _pinned_window_is_foreground(handle, process_id):
+        return outcome.failed(
+            "computer_control",
+            "the exact planned window is no longer foreground; no visual click was sent",
+            target=target,
+        )
+    try:
+        current = ui._snapshot(int(handle), int(process_id))
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"the original target window changed during visual analysis ({type(exc).__name__}); no click was sent",
+        )
+    if current.get("bounds") != bounds:
+        return outcome.unverified(
+            "computer_control",
+            "the target window moved or resized during visual analysis; stale coordinates were discarded and no click was sent",
+            operation="screen_click_verified", target=target,
+        )
+    if ui._has_exact_expected_text(current.get("records", []), expected):
+        return outcome.unverified(
+            "computer_control",
+            "the expected result appeared during visual analysis; no click was sent",
+            operation="screen_click_verified", expected=expected,
+        )
+
+    blocked = _input_window_guard(target)
+    if blocked:
+        return blocked
+    if not _pinned_window_is_foreground(handle, process_id):
+        return outcome.failed(
+            "computer_control",
+            "the exact planned window changed before the click; no input was sent",
+            target=target,
+        )
+    try:
+        final_snapshot = ui._snapshot(int(handle), int(process_id))
+    except Exception as exc:
+        return outcome.failed(
+            "computer_control",
+            f"the target window could not be rechecked immediately before clicking ({type(exc).__name__}); no click was sent",
+        )
+    if final_snapshot.get("bounds") != bounds:
+        return outcome.unverified(
+            "computer_control",
+            "the target window moved or resized before the click; stale coordinates were discarded and no click was sent",
+            operation="screen_click_verified", target=target,
+        )
+    if ui._has_exact_expected_text(final_snapshot.get("records", []), expected):
+        return outcome.unverified(
+            "computer_control",
+            "the exact expected result appeared before the click; no click was sent",
+            operation="screen_click_verified", expected=expected,
+        )
+    if not _pinned_window_is_foreground(handle, process_id):
+        return outcome.failed(
+            "computer_control",
+            "the exact planned window is no longer foreground; no click was sent",
+            target=target,
+        )
+    click_result = _click(x=x, y=y)
+    if "status=failed" in str(click_result).lower():
+        return click_result
+
+    verified = ui._wait_for_expected_result(
+        expected, lambda: ui._snapshot(int(handle), int(process_id)),
+    )
+    if not verified:
+        return outcome.unverified(
+            "computer_control",
+            "the visual click was sent, but the exact expected accessible result did not appear. Do not retry automatically.",
+            operation="screen_click_verified", target=target,
+            expected=expected, x=x, y=y,
+        )
+    return outcome.done(
+        "computer_control", operation="screen_click_verified",
+        target=target, expected=expected, x=x, y=y, verified=True,
+    )
+
+
 _INPUT_ACTIONS = {
     "type", "smart_type", "click", "left_click", "double_click",
     "right_click", "move", "drag", "hotkey", "press", "scroll",
-    "copy", "paste", "screen_click", "clear_field",
+    "copy", "paste", "screen_click", "screen_click_verified", "clear_field",
 }
 
 
@@ -682,7 +925,8 @@ def computer_control(
       clear_field   — select-all + delete (HUD confirmation required)
       focus_window  — bring window to foreground
       screen_find   — AI element finder (returns x,y)
-      screen_click  — AI element finder + click
+      screen_click  — AI element finder + click (unverified)
+      screen_click_verified — AI-located click with exact same-window UIA postcondition
       random_data   — generate fake form data
       user_data     — pull real data from memory
     """
@@ -718,14 +962,20 @@ def computer_control(
             text = str(params.get("text", "") or "")
             clear_first = bool(params.get("clear_first", False))
             if clear_first:
-                return confirm.request(
-                    key="computer_control.smart_type.replace_text",
-                    title="Confirm replacing active text",
-                    detail="This selects all text in the active application before typing the replacement. Confirm only if the intended field or document is active.",
-                    run=lambda: _run_confirmed_input(
-                        lambda: _smart_type(text, clear_first=True), target_app
-                    ),
-                )
+                from core.autonomy_policy import explicitly_requested_target_action, scope_request
+                target_label = "replace active text " + str(target_app or "field")
+                if not explicitly_requested_target_action(
+                    scope_request(session_memory), target_label
+                ):
+                    return confirm.request(
+                        key="computer_control.smart_type.replace_text",
+                        title="Confirm replacing active text",
+                        detail="This selects all text in the active application before typing the replacement. Confirm only if the intended field or document is active.",
+                        run=lambda: _run_confirmed_input(
+                            lambda: _smart_type(text, clear_first=True), target_app
+                        ),
+                    )
+                return _smart_type(text, clear_first=True)
             return _smart_type(text, clear_first=False)
 
         if action in ("click", "left_click"):
@@ -758,12 +1008,28 @@ def computer_control(
                 frozenset(("win", "r")),
             }
             if isinstance(keys, list) and frozenset(keys) in dangerous:
-                return confirm.request(
-                    key="computer_control.dangerous_hotkey",
-                    title="Confirm potentially disruptive keyboard shortcut",
-                    detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
-                    run=lambda: _run_confirmed_input(lambda: _hotkey(*keys), target_app),
-                )
+                from core.autonomy_policy import scope_request
+                request = scope_request(session_memory).casefold()
+                chord = frozenset(keys)
+                phrases = {
+                    frozenset(("alt", "f4")): r"(?:alt\s*\+\s*f4|close\s+(?:the\s+)?active\s+window|zamknij\s+aktywne\s+okno)",
+                    frozenset(("ctrl", "w")): r"(?:ctrl\s*\+\s*w|close\s+(?:the\s+)?(?:current\s+)?tab|zamknij\s+kartę|zamknij\s+karte)",
+                    frozenset(("ctrl", "q")): r"(?:ctrl\s*\+\s*q|quit\s+(?:the\s+)?app|close\s+(?:the\s+)?application|zamknij\s+program)",
+                    frozenset(("ctrl", "shift", "delete")): r"(?:ctrl\s*\+\s*shift\s*\+\s*delete|clear\s+(?:browser\s+)?(?:history|browsing\s+data)|wyczyść\s+(?:historię|dane\s+przeglądania)|wyczysc\s+(?:historie|dane\s+przegladania))",
+                    frozenset(("ctrl", "alt", "delete")): r"(?:ctrl\s*\+\s*alt\s*\+\s*delete|open\s+(?:the\s+)?(?:windows\s+)?security\s+screen|otwórz\s+ekran\s+zabezpieczeń|otworz\s+ekran\s+zabezpieczen)",
+                    frozenset(("shift", "delete")): r"(?:shift\s*\+\s*delete|permanently\s+delete\s+(?:the\s+)?selected\s+item|trwale\s+usuń\s+zaznaczony\s+element|trwale\s+usun\s+zaznaczony\s+element)",
+                    frozenset(("win", "l")): r"(?:win\s*\+\s*l|lock\s+(?:windows|the\s+pc|the\s+computer)|zablokuj\s+(?:windows|komputer))",
+                    frozenset(("win", "r")): r"(?:win\s*\+\s*r|open\s+(?:the\s+)?run\s+dialog|otwórz\s+okno\s+uruchamiania|otworz\s+okno\s+uruchamiania)",
+                }
+                explicitly_named = bool(re.search(phrases[chord], request, re.IGNORECASE))
+                if not explicitly_named:
+                    return confirm.request(
+                        key="computer_control.dangerous_hotkey",
+                        title="Confirm potentially disruptive keyboard shortcut",
+                        detail=f"Shortcut: {'+'.join(keys)}\\nIt may close the active app, lock Windows, or clear browser data. Confirm only if the active window and effect are intended.",
+                        run=lambda: _run_confirmed_input(lambda: _hotkey(*keys), target_app),
+                    )
+                return _hotkey(*keys)
             return _hotkey(*keys) if isinstance(keys, list) else outcome.failed(
                 "computer_control", "hotkey must be supplied as a plus-separated string"
             )
@@ -771,12 +1037,19 @@ def computer_control(
         if action == "press":
             key = str(params.get("key", "enter") or "enter").strip().lower()
             if key == "delete":
-                return confirm.request(
-                    key="computer_control.delete_key",
-                    title="Confirm Delete key",
-                    detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
-                    run=lambda: _run_confirmed_input(lambda: _press(key), target_app),
-                )
+                from core.autonomy_policy import scope_request
+                explicit_keypress = bool(re.search(
+                    r"\b(?:press|hit|tap)\s+(?:the\s+)?delete(?:\s+key)?\b|"
+                    r"\bnaciśnij\s+(?:klawisz\s+)?delete\b",
+                    scope_request(session_memory), re.IGNORECASE,
+                ))
+                if not explicit_keypress:
+                    return confirm.request(
+                        key="computer_control.delete_key",
+                        title="Confirm Delete key",
+                        detail="The Delete key may remove the currently selected item. Confirm only after checking the active window and selection.",
+                        run=lambda: _run_confirmed_input(lambda: _press(key), target_app),
+                    )
             return _press(key)
 
         if action == "scroll":
@@ -795,12 +1068,12 @@ def computer_control(
             return _screenshot(params.get("path"))
 
         if action == "screen_find":
-            coords = _screen_find(params.get("description", ""))
+            coords = _screen_find(params.get("description", ""), target_app)
             return f"{coords[0]},{coords[1]}" if coords else "NOT_FOUND"
 
         if action == "screen_click":
-            desc   = params.get("description", "")
-            coords = _screen_find(desc)
+            desc = params.get("description", "")
+            coords = _screen_find(desc, target_app)
             if coords:
                 time.sleep(0.2)
                 # Screenshot analysis may take seconds. Recheck the exact foreground
@@ -813,6 +1086,35 @@ def computer_control(
                 return f"Clicked '{desc}' at {coords}"
             return f"Element not found on screen: '{desc}'"
 
+        if action == "screen_click_verified":
+            from core.autonomy_policy import requires_ui_confirmation, scope_request
+            desc = str(params.get("description") or "").strip()
+            expected = str(params.get("expected_result") or "").strip()
+            target = str(target_app or "").strip()
+            window_handle = params.get("target_window_handle")
+            process_id = params.get("target_process_id")
+            if requires_ui_confirmation(
+                " ".join((desc, expected)),
+                user_request=scope_request(session_memory),
+            ):
+                return confirm.request(
+                    key="computer_control.screen_click_verified",
+                    title="Confirm visual computer action",
+                    detail=(
+                        f"Application: {target[:100]}\n"
+                        f"Visual target: {desc[:200]}\n"
+                        f"Expected visible result: {expected[:160]}\n\n"
+                        "MARK will locate the target from a screen capture, click once, "
+                        "and verify the exact result in the same application."
+                    )[:1600],
+                    run=lambda: _screen_click_verified_execute(
+                        desc, expected, target, window_handle, process_id,
+                    ),
+                )
+            return _screen_click_verified_execute(
+                desc, expected, target, window_handle, process_id,
+            )
+
         if action == "wait":
             secs = float(params.get("seconds", 1.0))
             secs = min(secs, 30.0)
@@ -820,12 +1122,17 @@ def computer_control(
             return f"Waited {secs}s"
 
         if action == "clear_field":
-            return confirm.request(
-                key="computer_control.clear_field",
-                title="Confirm clearing active text",
-                detail="This selects all text in the active application and deletes it. Confirm only if the intended field or document is active.",
-                run=lambda: _run_confirmed_input(_clear_field, target_app),
-            )
+            from core.autonomy_policy import explicitly_requested_target_action, scope_request
+            if not explicitly_requested_target_action(
+                scope_request(session_memory), "clear active field " + str(target_app or "")
+            ):
+                return confirm.request(
+                    key="computer_control.clear_field",
+                    title="Confirm clearing active text",
+                    detail="This selects all text in the active application and deletes it. Confirm only if the intended field or document is active.",
+                    run=lambda: _run_confirmed_input(_clear_field, target_app),
+                )
+            return _clear_field()
 
         if action == "focus_window":
             return _focus_window(params.get("title", ""))
@@ -863,6 +1170,12 @@ TOOL = {
     "name": "computer_control",
     "description": (
         "Direct computer control: type, click, hotkeys, scroll, move mouse. "
+        "For visual controls in apps without usable accessibility labels, use screen_click_verified: "
+        "name the visual target, exact new accessible label expected after it opens, and target_app. "
+        "It sends only a crop of the pinned target window to configured Gemini for visual grounding, clicks once, and reports "
+        "success only when that exact label appears in the same pinned window. Legacy screen_click only "
+        "sends a click and is unverified. Legacy screen_find/screen_click send a full-screen image to Gemini. "
+        "Prefer screen_click_verified, which sends only the cropped target window and checks the exact postcondition. "
         "On Windows, before typing or clicking, call action='foreground_app' and pass its exact "
         "executable name as target_app; the active window is checked before input. "
         "This foreground-identity guard is Windows-only. On macOS/Linux, do not call "
@@ -888,7 +1201,7 @@ TOOL = {
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "foreground_app | type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | random_data | user_data"
+                "description": "foreground_app | type | smart_type | click | double_click | right_click | hotkey | press | scroll | move | copy | paste | screenshot | wait | clear_field | focus_window | close_app | screen_find | screen_click | screen_click_verified | random_data | user_data"
             },
             "app_name": {
                 "type": "STRING",
@@ -949,6 +1262,18 @@ TOOL = {
             "description": {
                 "type": "STRING",
                 "description": "Element description for screen_find/screen_click"
+            },
+            "expected_result": {
+                "type": "STRING",
+                "description": "For screen_click_verified: exact accessible label that must appear in the target app before success is reported."
+            },
+            "target_window_handle": {
+                "type": "INTEGER",
+                "description": "Internal exact HWND binding supplied by the Mission Control planner; do not invent it."
+            },
+            "target_process_id": {
+                "type": "INTEGER",
+                "description": "Internal process ID bound to target_window_handle by the Mission Control planner; do not invent it."
             },
             "type": {
                 "type": "STRING",
