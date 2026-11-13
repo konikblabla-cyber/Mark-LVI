@@ -6898,9 +6898,19 @@ class MainWindow(QMainWindow):
         # Already downloaded → just flip enabled/disabled through JarvisLive.
         if self.on_wake_toggle:
             try:
-                self.on_wake_toggle(not st["enabled"])
-            except Exception:
-                pass
+                result = self.on_wake_toggle(not st["enabled"])
+                if result == "unavailable":
+                    self._log_sig.emit(
+                        "SYS: LOCAL PRIVACY could not start. Check the wake detector error above."
+                    )
+                elif result == "need_download":
+                    self._log_sig.emit(
+                        "SYS: LOCAL PRIVACY models are missing. Click again to install them."
+                    )
+            except Exception as exc:
+                self._log_sig.emit(
+                    f"SYS: Could not change listening mode: {type(exc).__name__}."
+                )
         self._refresh_wake_btns()
 
     def _on_wake_install_done(self, ok: bool, msg: str):
