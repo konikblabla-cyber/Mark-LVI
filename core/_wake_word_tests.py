@@ -6,6 +6,36 @@ from unittest.mock import patch
 from core import wake_word
 
 
+class WakeAudioBufferTests(unittest.TestCase):
+    def test_two_640_sample_mic_blocks_make_one_1280_sample_window(self):
+        import numpy as np
+        buffer = wake_word.WakeAudioBuffer(1280)
+        first = np.arange(640, dtype=np.int16)
+        second = np.arange(640, 1280, dtype=np.int16)
+        self.assertEqual(buffer.push(first), [])
+        windows = buffer.push(second)
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0].size, 1280)
+        np.testing.assert_array_equal(windows[0], np.arange(1280, dtype=np.int16))
+
+    def test_arbitrary_chunks_preserve_remainder_and_emit_exact_windows(self):
+        import numpy as np
+        buffer = wake_word.WakeAudioBuffer(1280)
+        self.assertEqual(buffer.push(np.ones(500, dtype=np.int16)), [])
+        windows = buffer.push(np.ones(900, dtype=np.int16))
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0].size, 1280)
+        self.assertEqual(buffer.push(np.ones(300, dtype=np.int16)), [])
+        self.assertEqual(buffer.push(np.ones(980, dtype=np.int16))[0].size, 1280)
+
+    def test_reset_discards_partial_audio_after_detection(self):
+        import numpy as np
+        buffer = wake_word.WakeAudioBuffer(1280)
+        buffer.push(np.ones(640, dtype=np.int16))
+        buffer.reset()
+        self.assertEqual(buffer.push(np.ones(640, dtype=np.int16)), [])
+
+
 class WakeWordInstallerTests(unittest.TestCase):
     def test_detector_callback_is_dispatched_to_the_application_loop(self):
         called = []
