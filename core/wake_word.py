@@ -141,6 +141,31 @@ def install_and_download(logger: Callable[[str], None] = print,
         return False, f"setup error: {e}"
 
 
+class WakeAudioBuffer:
+    """Assemble arbitrary microphone chunks into exact model-sized PCM windows."""
+
+    def __init__(self, window_samples: int = 1280):
+        if window_samples <= 0:
+            raise ValueError("window_samples must be positive")
+        self.window_samples = int(window_samples)
+        self._pending = None
+
+    def push(self, frame):
+        import numpy as np
+        samples = np.asarray(frame, dtype=np.int16).reshape(-1)
+        if samples.size == 0:
+            return []
+        combined = samples.copy() if self._pending is None else np.concatenate((self._pending, samples))
+        complete = (combined.size // self.window_samples) * self.window_samples
+        windows = [combined[offset:offset + self.window_samples].copy()
+                   for offset in range(0, complete, self.window_samples)]
+        self._pending = combined[complete:].copy()
+        return windows
+
+    def reset(self) -> None:
+        self._pending = None
+
+
 class WakeWordDetector:
     """
     Runs the wake model in a dedicated thread. The mic thread calls feed() with
@@ -215,34 +240,25 @@ class WakeWordDetector:
     def _loop(self) -> None:
         import numpy as np
 
-        # The microphone callback supplies 40 ms blocks (640 samples at 16 kHz),
-        # while openWakeWord's default mel/embedding frontend expects 80 ms
-        # windows (1280 samples). Passing each mic block straight to predict()
-        # can leave the frontend without a complete window, so combine blocks
-        # here on the worker thread; never add work to PortAudio's callback.
-        window_samples = 1280
-        pending = np.empty(0, dtype=np.int16)
+        # sounddevice supplies 640-sample (40 ms) blocks. openWakeWord's
+        # frontend consumes 1280-sample (80 ms) windows; assemble them here,
+        # off the real-time microphone callback thread.
+        audio_buffer = WakeAudioBuffer(window_samples=1280)
         while self._running:
             try:
                 frame = self._queue.get()
                 if frame is None or not self._running:
                     break
-                frame = np.asarray(frame, dtype=np.int16).reshape(-1)
-                if frame.size == 0:
-                    continue
-                pending = np.concatenate((pending, frame))
-                while pending.size >= window_samples and self._running:
-                    window = pending[:window_samples]
-                    pending = pending[window_samples:]
+                for window in audio_buffer.push(frame):
+                    if not self._running:
+                        break
                     scores = self._model.predict(window)
-                    score = 0.0
-                    if isinstance(scores, dict) and scores:
-                        # Any configured phrase may address MARK.
-                        score = max(float(v) for v in scores.values())
+                    score = max(
+                        (float(value) for value in scores.values()),
+                        default=0.0,
+                    ) if isinstance(scores, dict) else 0.0
                     if score >= self._threshold:
-                        # Drop buffered/queued audio from the same utterance so
-                        # one phrase cannot trigger multiple addressed turns.
-                        pending = np.empty(0, dtype=np.int16)
+                        audio_buffer.reset()
                         self._drain()
                         try:
                             self._on_detect()
