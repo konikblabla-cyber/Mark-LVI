@@ -214,23 +214,41 @@ class WakeWordDetector:
 
     def _loop(self) -> None:
         import numpy as np
+
+        # The microphone callback supplies 40 ms blocks (640 samples at 16 kHz),
+        # while openWakeWord's default mel/embedding frontend expects 80 ms
+        # windows (1280 samples). Passing each mic block straight to predict()
+        # can leave the frontend without a complete window, so combine blocks
+        # here on the worker thread; never add work to PortAudio's callback.
+        window_samples = 1280
+        pending = np.empty(0, dtype=np.int16)
         while self._running:
             try:
                 frame = self._queue.get()
                 if frame is None or not self._running:
                     break
-                scores = self._model.predict(np.asarray(frame, dtype=np.int16))
-                score = 0.0
-                if isinstance(scores, dict) and scores:
-                    # Any configured phrase may address MARK.
-                    score = max(float(v) for v in scores.values())
-                if score >= self._threshold:
-                    # drain any backlog so we don't double-fire on the same utterance
-                    self._drain()
-                    try:
-                        self._on_detect()
-                    except Exception as e:
-                        self._logger(f"Wake word: on_detect error — {e}")
+                frame = np.asarray(frame, dtype=np.int16).reshape(-1)
+                if frame.size == 0:
+                    continue
+                pending = np.concatenate((pending, frame))
+                while pending.size >= window_samples and self._running:
+                    window = pending[:window_samples]
+                    pending = pending[window_samples:]
+                    scores = self._model.predict(window)
+                    score = 0.0
+                    if isinstance(scores, dict) and scores:
+                        # Any configured phrase may address MARK.
+                        score = max(float(v) for v in scores.values())
+                    if score >= self._threshold:
+                        # Drop buffered/queued audio from the same utterance so
+                        # one phrase cannot trigger multiple addressed turns.
+                        pending = np.empty(0, dtype=np.int16)
+                        self._drain()
+                        try:
+                            self._on_detect()
+                        except Exception as e:
+                            self._logger(f"Wake word: on_detect error — {e}")
+                        break
             except Exception as e:
                 self._logger(f"Wake word: inference error — {e}")
 
